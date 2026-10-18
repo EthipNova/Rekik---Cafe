@@ -28,6 +28,7 @@ import { useCart } from "@/lib/cart";
 import { formatETB, getProduct } from "@/lib/menu-data";
 import { methodLabels, saveOrder, type OrderMethod } from "@/lib/orders";
 import { createOrder as apiCreateOrder, fetchCustomerProfile, fetchSettings } from "@/services/api";
+import { fetchAvailableWaiters } from "@/lib/waiter";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -61,7 +62,7 @@ export const Route = createFileRoute("/checkout")({
   component: Checkout,
 });
 
-const steps = ["Ordering method", "Customer information", "Order summary", "Payment"] as const;
+const defaultSteps = ["Ordering method", "Customer information", "Order summary", "Payment"] as const;
 
 type FormField = "name" | "phone" | "table" | "address";
 type FormErrors = Partial<Record<FormField, string>>;
@@ -84,11 +85,22 @@ function Checkout() {
   const [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [authenticatedCustomerName, setAuthenticatedCustomerName] = useState<string | null>(null);
+  const [availableWaiters, setAvailableWaiters] = useState<
+    { userId: string; fullName: string; phone: string | null }[]
+  >([]);
+  const [selectedWaiterId, setSelectedWaiterId] = useState<string>("");
+  const [customerNotes, setCustomerNotes] = useState<string>("");
 
   useEffect(() => {
     fetchSettings()
       .then((s) => {
         if (s) setSettings(s);
+      })
+      .catch(() => {});
+
+    fetchAvailableWaiters()
+      .then((w) => {
+        if (Array.isArray(w)) setAvailableWaiters(w);
       })
       .catch(() => {});
   }, []);
@@ -266,6 +278,11 @@ function Checkout() {
     );
   }
 
+  const activeSteps =
+    method === "dine-in"
+      ? ["Ordering method", "Customer & Table", "Review & Submit"]
+      : defaultSteps;
+
   const handleFieldChange = (field: FormField, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) {
@@ -279,8 +296,10 @@ function Checkout() {
 
   const handleMethodSelect = (newMethod: OrderMethod) => {
     setMethod(newMethod);
-    // Clear any obsolete field errors when method changes
     setErrors({});
+    if (newMethod === "dine-in" && step > 2) {
+      setStep(2);
+    }
   };
 
   const validateCurrentStep = (): boolean => {
@@ -363,7 +382,53 @@ function Checkout() {
 
   const next = () => {
     if (validateCurrentStep()) {
-      setStep((s) => Math.min(steps.length - 1, s + 1));
+      setStep((s) => Math.min(activeSteps.length - 1, s + 1));
+    }
+  };
+
+  const submitDineInOrder = async () => {
+    if (submitting) return;
+    if (!form.table.trim()) {
+      toast.error("Please enter your table number.");
+      setStep(1);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const resolvedLines = lines.map((l) => {
+        const p = getProduct(l.productId);
+        return {
+          productId: l.productId,
+          name: p?.name || "Menu Item",
+          quantity: l.quantity,
+          price: p?.price !== undefined ? p.price : 0,
+        };
+      });
+
+      const orderData = {
+        lines: resolvedLines,
+        method: "dine-in" as const,
+        paymentMethod: "Pending Waiter Approval",
+        paymentStatus: "pending" as const,
+        customer: {
+          name: form.name.trim() || "Dine-in guest",
+          phone: form.phone.trim(),
+          table: form.table.trim(),
+        },
+        waiterId: selectedWaiterId || undefined,
+        customerNotes: customerNotes.trim() || undefined,
+      };
+
+      const order = await apiCreateOrder(orderData);
+      saveOrder(order);
+      clear();
+      toast.success("Order submitted! Waiting for waiter approval.");
+      void navigate({ to: "/order/$id", params: { id: order.id } });
+    } catch (e: unknown) {
+      console.error("Dine-in checkout submission error:", e);
+      const errMsg = e instanceof Error ? e.message : "Failed to place order. Please try again.";
+      toast.error(`Order submission failed: ${errMsg}`);
+      setSubmitting(false);
     }
   };
 
@@ -413,6 +478,8 @@ function Checkout() {
             ? { latitude: deliveryLocation.latitude, longitude: deliveryLocation.longitude }
             : {}),
         },
+        waiterId: selectedWaiterId || undefined,
+        customerNotes: customerNotes.trim() || undefined,
       };
 
       const order = await apiCreateOrder(orderData);
@@ -440,7 +507,7 @@ function Checkout() {
       <h1 className="text-4xl font-semibold">Checkout</h1>
 
       <ol className="mt-8 flex flex-wrap gap-2" aria-label="Checkout progress">
-        {steps.map((label, i) => (
+        {activeSteps.map((label, i) => (
           <li
             key={label}
             aria-current={i === step ? "step" : undefined}
@@ -642,6 +709,40 @@ function Checkout() {
                     />
                   </div>
                 </div>
+
+                {availableWaiters.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-border/50">
+                    <Label htmlFor="waiter" className="text-sm font-medium">
+                      Select Server / Waiter <span className="text-xs text-muted-foreground">(optional)</span>
+                    </Label>
+                    <select
+                      id="waiter"
+                      value={selectedWaiterId}
+                      onChange={(e) => setSelectedWaiterId(e.target.value)}
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="">Any available staff (auto-assign)</option>
+                      {availableWaiters.map((w) => (
+                        <option key={w.userId} value={w.userId}>
+                          {w.fullName} {w.phone ? `(${w.phone})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="customer-notes" className="text-sm font-medium">
+                    Special Instructions / Notes <span className="text-xs text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Input
+                    id="customer-notes"
+                    value={customerNotes}
+                    onChange={(e) => setCustomerNotes(e.target.value)}
+                    placeholder="e.g. Extra napkins, no ice, food allergy"
+                    className="text-xs"
+                  />
+                </div>
               </div>
             )}
 
@@ -813,10 +914,19 @@ function Checkout() {
                   <dd className="inline">{methodLabels[method]}</dd>
                 </div>
                 {method === "dine-in" && (
-                  <div>
-                    <dt className="inline font-medium text-foreground">Table: </dt>
-                    <dd className="inline">#{form.table || "Not specified"}</dd>
-                  </div>
+                  <>
+                    <div>
+                      <dt className="inline font-medium text-foreground">Table: </dt>
+                      <dd className="inline font-semibold">#{form.table || "Not specified"}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline font-medium text-foreground">Assigned Server: </dt>
+                      <dd className="inline font-semibold text-primary">
+                        {availableWaiters.find((w) => w.userId === selectedWaiterId)?.fullName ||
+                          "Any available server (auto-assign)"}
+                      </dd>
+                    </div>
+                  </>
                 )}
                 {form.name && (
                   <div>
@@ -854,6 +964,25 @@ function Checkout() {
                 )}
               </dl>
             </div>
+
+            {method === "dine-in" && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
+                <div className="flex items-center gap-2 font-semibold text-foreground">
+                  <Clock className="size-4 text-amber-500 shrink-0" />
+                  <span>Waiter Approval Required Before Payment</span>
+                </div>
+                <p>
+                  For dine-in service at Table #{form.table || "—"}, your order will be submitted
+                  directly to{" "}
+                  <strong>
+                    {availableWaiters.find((w) => w.userId === selectedWaiterId)?.fullName ||
+                      "an available server"}
+                  </strong>{" "}
+                  for confirmation. You will be redirected to the live order tracking page to await
+                  waiter approval before proceeding to payment.
+                </p>
+              </div>
+            )}
 
             {/* Calculations breakdown */}
             <dl className="space-y-2 border-t border-border pt-4 text-sm">
@@ -1121,7 +1250,12 @@ function Checkout() {
             Back
           </Button>
 
-          {step < steps.length - 1 ? (
+          {method === "dine-in" && step === 2 ? (
+            <Button onClick={submitDineInOrder} disabled={submitting}>
+              <Utensils className="size-4" />
+              {submitting ? "Submitting to Server…" : "Submit Order for Server Approval"}
+            </Button>
+          ) : step < activeSteps.length - 1 ? (
             <Button
               onClick={next}
               disabled={

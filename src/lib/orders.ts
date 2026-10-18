@@ -28,6 +28,20 @@ export type Order = {
   delivery: number;
   distanceKm?: number | null;
   total: number;
+  waiterId?: string | null;
+  waiterName?: string | null;
+  waiterDecision?: "pending" | "approved" | "rejected";
+  waiterRejectionReason?: string | null;
+  paymentProof?: {
+    id: string;
+    paymentId?: string;
+    screenshotPath: string;
+    submittedAmount: number;
+    transactionReference?: string | null;
+    status: "pending" | "approved" | "rejected";
+    rejectionReason?: string | null;
+    submittedAt: string;
+  } | null;
 };
 
 const STORAGE_KEY = "neba.orders.v1";
