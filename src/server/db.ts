@@ -250,8 +250,16 @@ function normalizeOrder(raw: any): Order {
     id: raw.id,
     number: raw.order_number,
     createdAt: raw.created_at,
-    method: raw.method || "dine-in",
-    status: raw.status || "received",
+    method:
+      raw.method === "dine_in"
+        ? "dine-in"
+        : raw.method === "pickup"
+          ? "takeaway"
+          : raw.method || "dine-in",
+    status:
+      raw.status === "pending"
+        ? "received"
+        : raw.status || "received",
     paymentStatus:
       paymentStatus === "paid" || paymentStatus === "pending" || paymentStatus === "failed"
         ? paymentStatus
@@ -280,6 +288,22 @@ function normalizeOrder(raw: any): Order {
         ? Number(raw.delivery_distance_km)
         : null,
     total: Number(raw.total_amount) || 0,
+    waiterId: raw.waiter_id || null,
+    waiterName: raw.staff_profiles?.full_name || null,
+    waiterDecision: raw.waiter_decision || "pending",
+    waiterRejectionReason: raw.waiter_rejection_reason || null,
+    paymentProof: Array.isArray(raw.payment_proofs) && raw.payment_proofs[0]
+      ? {
+          id: raw.payment_proofs[0].id,
+          paymentId: raw.payment_proofs[0].payment_id,
+          screenshotPath: raw.payment_proofs[0].screenshot_path,
+          submittedAmount: Number(raw.payment_proofs[0].submitted_amount) || 0,
+          transactionReference: raw.payment_proofs[0].transaction_reference || null,
+          status: raw.payment_proofs[0].status || "pending",
+          rejectionReason: raw.payment_proofs[0].rejection_reason || null,
+          submittedAt: raw.payment_proofs[0].submitted_at || new Date().toISOString(),
+        }
+      : null,
   };
 }
 
@@ -549,9 +573,6 @@ export async function getOrders(
         status,
         table_number,
         delivery_address,
-        delivery_latitude,
-        delivery_longitude,
-        delivery_distance_km,
         subtotal,
         discount_amount,
         delivery_fee,
@@ -643,9 +664,6 @@ export async function getOrdersForCustomerUser(userId: string, client?: any): Pr
         status,
         table_number,
         delivery_address,
-        delivery_latitude,
-        delivery_longitude,
-        delivery_distance_km,
         subtotal,
         discount_amount,
         delivery_fee,
@@ -804,15 +822,20 @@ export async function getOrderById(id: string, client?: any): Promise<Order | un
         status,
         table_number,
         delivery_address,
-        delivery_latitude,
-        delivery_longitude,
-        delivery_distance_km,
         subtotal,
         discount_amount,
         delivery_fee,
         total_amount,
+        waiter_id,
+        waiter_decision,
+        waiter_rejection_reason,
         created_at,
         updated_at,
+        staff_profiles (
+          user_id,
+          full_name,
+          phone
+        ),
         order_items (
           id,
           order_id,
@@ -834,6 +857,17 @@ export async function getOrderById(id: string, client?: any): Promise<Order | un
           method,
           status,
           amount
+        ),
+        payment_proofs (
+          id,
+          payment_id,
+          order_id,
+          screenshot_path,
+          submitted_amount,
+          transaction_reference,
+          status,
+          rejection_reason,
+          submitted_at
         )
       `,
       )
@@ -862,6 +896,8 @@ export async function createOrder(
     discount?: number | undefined;
     authUserId?: string | undefined;
     authUserEmail?: string | undefined;
+    waiterId?: string | undefined;
+    customerNotes?: string | undefined;
   },
   client?: any,
 ): Promise<Order> {
@@ -972,20 +1008,37 @@ export async function createOrder(
   }
 
   const total = Math.max(0, subtotal - discount + delivery);
-  const paymentStatus = input.paymentStatus || "paid";
-  const paymentMethod = input.paymentMethod || "Mobile Payment";
+  const isDineInOrWaiter = input.method === "dine-in" || Boolean(input.waiterId);
+  const paymentStatus = isDineInOrWaiter ? "pending" : (input.paymentStatus || "pending");
+  const paymentMethod = isDineInOrWaiter && !input.paymentMethod ? "Pending Waiter Approval" : (input.paymentMethod || "Mobile Payment");
 
-  // Atomically obtain canonical order number from PostgreSQL sequence via RPC.
-  // The sequence is the single source of truth; no timestamp/random fallback.
-  const { data: orderNumber, error: rpcErr } = await (dbClient.rpc as any)("next_order_number");
-  if (rpcErr || !orderNumber) {
-    console.error("[db] Failed to generate order number from sequence:", rpcErr);
-    throw new Error(
-      `Failed to generate order number: ${rpcErr?.message || "Sequence unavailable"}`,
-    );
+  // Atomically obtain canonical order number from PostgreSQL sequence via RPC or query latest order number.
+  let orderNumber: string | null = null;
+  try {
+    const { data: rpcNum } = await (dbClient.rpc as any)("next_order_number");
+    if (rpcNum) orderNumber = String(rpcNum);
+  } catch {
+    /* RPC unavailable, fall back to querying database */
   }
 
-  const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  if (!orderNumber) {
+    const { data: allNums } = await (dbClient.from("orders" as any) as any)
+      .select("order_number");
+
+    let maxNum = 1000;
+    if (Array.isArray(allNums)) {
+      for (const row of allNums) {
+        const m = String(row.order_number || "").match(/(\d+)$/);
+        if (m && m[1]) {
+          const val = parseInt(m[1], 10);
+          if (val > maxNum) maxNum = val;
+        }
+      }
+    }
+    orderNumber = `RK-${maxNum + 1}`;
+  }
+
+  const orderId = crypto.randomUUID();
   const nowIso = new Date().toISOString();
 
   const customerPhone = input.customer?.phone?.trim() || "";
@@ -1103,19 +1156,47 @@ export async function createOrder(
   }
 
   // ── Step D: Insert the order row (FATAL if this fails) ─────────────────────
+  const dbMethod =
+    input.method === "dine-in" ? "dine_in" : input.method === "takeaway" ? "pickup" : "delivery";
+
+  // Validate server-authoritatively that input.waiterId exists in staff_profiles
+  let validatedWaiterId: string | null = null;
+  if (input.waiterId) {
+    try {
+      const { data: staffMember } = await (dbClient.from("staff_profiles" as any) as any)
+        .select("user_id, is_active, role")
+        .eq("user_id", input.waiterId)
+        .maybeSingle();
+
+      if (
+        staffMember &&
+        staffMember.is_active &&
+        (staffMember.role === "waiter" || staffMember.role === "admin")
+      ) {
+        validatedWaiterId = staffMember.user_id;
+      } else {
+        console.warn(`[db] Waiter ID ${input.waiterId} is not an active waiter or admin. Ignoring.`);
+      }
+    } catch (wErr) {
+      console.warn("[db] Error verifying waiter ID:", wErr);
+    }
+  }
+
   const orderRecord = {
     id: orderId,
     order_number: orderNumber,
+    order_reference: `REF-${orderNumber}`,
     customer_id: customerId,
     customer_name: customerName,
     customer_phone: customerPhone,
-    method: input.method,
-    status: "received",
+    waiter_id: validatedWaiterId,
+    waiter_assigned_at: validatedWaiterId ? nowIso : null,
+    waiter_decision: "pending",
+    customer_notes: input.customerNotes || null,
+    method: dbMethod,
+    status: "pending",
     table_number: input.customer?.table || null,
     delivery_address: input.customer?.address || null,
-    delivery_latitude: deliveryLatitude,
-    delivery_longitude: deliveryLongitude,
-    delivery_distance_km: deliveryDistanceKm,
     subtotal,
     discount_amount: discount,
     delivery_fee: delivery,
@@ -1131,13 +1212,34 @@ export async function createOrder(
     throw new Error(`Failed to create order: ${ordErr.message || String(ordErr)}`);
   }
 
+  // Notify assigned waiter
+  if (validatedWaiterId) {
+    try {
+      await (dbClient.from("notifications" as any) as any).insert({
+        id: crypto.randomUUID(),
+        recipient_user_id: validatedWaiterId,
+        order_id: orderId,
+        title: "New Order Assigned",
+        message: `Order #${orderNumber} (${customerName}) has been assigned to you.`,
+        notification_type: "order_assigned",
+        is_read: false,
+        created_at: nowIso,
+      });
+    } catch (notifErr) {
+      console.warn("[db] Failed to notify assigned waiter:", notifErr);
+    }
+  }
+
   // ── Step E: Insert order items (FATAL if this fails) ───────────────────────
   if (items.length > 0) {
+    const isUuid = (val?: string | null) =>
+      Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
     const supabaseProductIds = new Set(allProducts.map((p) => p.id));
 
     const itemRecords = items.map((it) => ({
+      id: crypto.randomUUID(),
       order_id: orderId,
-      product_id: supabaseProductIds.has(it.productId) ? it.productId : null,
+      product_id: isUuid(it.productId) && supabaseProductIds.has(it.productId) ? it.productId : null,
       name: it.name,
       quantity: it.quantity,
       unit_price: it.price,
@@ -1154,6 +1256,7 @@ export async function createOrder(
 
   // ── Step F: Insert payment record (FATAL if this fails) ────────────────────
   const { error: payErr } = await (dbClient.from("payments" as any) as any).insert({
+    id: crypto.randomUUID(),
     order_id: orderId,
     method: paymentMethod,
     status: paymentStatus,
@@ -1283,9 +1386,6 @@ export async function getCustomers(client: any = supabase): Promise<RawCustomerR
           status,
           table_number,
           delivery_address,
-          delivery_latitude,
-          delivery_longitude,
-          delivery_distance_km,
           subtotal,
           discount_amount,
           delivery_fee,
@@ -1495,6 +1595,194 @@ export async function updateOrderPayment(
   }
 
   return localUpdated;
+}
+
+/**
+ * Creates and records a payment proof submission for an approved order.
+ * Strictly verifies that waiter_decision === 'approved'.
+ */
+export async function createPaymentProof(
+  orderIdOrNumber: string,
+  input: {
+    screenshotPath: string;
+    submittedAmount?: number;
+    transactionReference?: string | null;
+    paymentMethod?: string;
+  },
+  client?: any,
+): Promise<Order> {
+  const dbClient = client || supabase;
+  const nowIso = new Date().toISOString();
+
+  // 1. Fetch current order
+  const { data: order, error: ordErr } = await (dbClient.from("orders" as any) as any)
+    .select("id, status, waiter_decision, total_amount, customer_id, order_number")
+    .or(`id.eq.${orderIdOrNumber},order_number.eq.${orderIdOrNumber}`)
+    .maybeSingle();
+
+  if (ordErr || !order) {
+    throw new Error(`Order not found (${orderIdOrNumber})`);
+  }
+
+  // 2. Validate waiter decision
+  if (order.waiter_decision !== "approved") {
+    throw new Error(
+      "Payment proof can only be submitted after your order has been verified and approved by your server.",
+    );
+  }
+
+  // 3. Resolve or insert the payment row
+  let paymentId: string | null = null;
+  const { data: payments } = await (dbClient.from("payments" as any) as any)
+    .select("id, amount, status")
+    .eq("order_id", order.id)
+    .order("created_at", { ascending: false });
+
+  if (payments && payments.length > 0) {
+    paymentId = payments[0].id;
+    await (dbClient.from("payments" as any) as any)
+      .update({
+        method: input.paymentMethod || "Mobile Payment",
+        transaction_reference: input.transactionReference || null,
+        status: "pending",
+        updated_at: nowIso,
+      })
+      .eq("id", paymentId);
+  } else {
+    const newPayId = crypto.randomUUID();
+    const { error: insPayErr } = await (dbClient.from("payments" as any) as any).insert({
+      id: newPayId,
+      order_id: order.id,
+      method: input.paymentMethod || "Mobile Payment",
+      status: "pending",
+      amount: input.submittedAmount || Number(order.total_amount) || 0,
+      transaction_reference: input.transactionReference || null,
+      created_at: nowIso,
+      updated_at: nowIso,
+    });
+    if (!insPayErr) {
+      paymentId = newPayId;
+    }
+  }
+
+  if (!paymentId) {
+    throw new Error("Failed to link payment record for proof submission.");
+  }
+
+  // 4. Insert into payment_proofs
+  const proofId = crypto.randomUUID();
+  const { error: proofErr } = await (dbClient.from("payment_proofs" as any) as any).insert({
+    id: proofId,
+    payment_id: paymentId,
+    order_id: order.id,
+    screenshot_path: input.screenshotPath,
+    submitted_amount: input.submittedAmount || Number(order.total_amount) || 0,
+    transaction_reference: input.transactionReference || null,
+    status: "pending",
+    submitted_at: nowIso,
+  });
+
+  if (proofErr) {
+    console.error("[db] payment_proofs insert error:", proofErr.message);
+    throw new Error(`Failed to record payment proof: ${proofErr.message}`);
+  }
+
+  // 5. Insert audit entry in order_status_logs
+  await (dbClient.from("order_status_logs" as any) as any).insert({
+    id: crypto.randomUUID(),
+    order_id: order.id,
+    from_status: order.status,
+    to_status: order.status,
+    notes: `Customer submitted payment screenshot (Ref: ${input.transactionReference || "None"}). Pending cashier review.`,
+    created_at: nowIso,
+  });
+
+  // 6. Update orders.updated_at
+  await (dbClient.from("orders" as any) as any)
+    .update({ updated_at: nowIso })
+    .eq("id", order.id);
+
+  const refreshed = await getOrderById(order.id, dbClient);
+  if (!refreshed) throw new Error("Failed to load updated order");
+  return refreshed;
+}
+
+/**
+ * Controlled test procedure for simulating cashier decision during Phase 3 verification.
+ */
+export async function testCashierReview(
+  orderIdOrNumber: string,
+  input: {
+    decision: "approved" | "rejected";
+    rejectionReason?: string;
+  },
+  client?: any,
+): Promise<Order> {
+  const dbClient = client || supabase;
+  const nowIso = new Date().toISOString();
+
+  const { data: order } = await (dbClient.from("orders" as any) as any)
+    .select("id, status, order_number")
+    .or(`id.eq.${orderIdOrNumber},order_number.eq.${orderIdOrNumber}`)
+    .maybeSingle();
+
+  if (!order) throw new Error(`Order ${orderIdOrNumber} not found`);
+
+  const { data: proof } = await (dbClient.from("payment_proofs" as any) as any)
+    .select("id, payment_id, order_id, status")
+    .eq("order_id", order.id)
+    .order("submitted_at", { ascending: false })
+    .maybeSingle();
+
+  if (!proof) throw new Error(`No payment proof found for order ${order.order_number}`);
+
+  await (dbClient.from("payment_proofs" as any) as any)
+    .update({
+      status: input.decision,
+      rejection_reason:
+        input.decision === "rejected"
+          ? input.rejectionReason || "Payment receipt invalid or mismatch"
+          : null,
+      reviewed_at: nowIso,
+    })
+    .eq("id", proof.id);
+
+  if (input.decision === "approved") {
+    await (dbClient.from("payments" as any) as any)
+      .update({
+        status: "paid",
+        paid_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq("id", proof.payment_id);
+
+    await (dbClient.from("orders" as any) as any)
+      .update({
+        status: "confirmed",
+        updated_at: nowIso,
+      })
+      .eq("id", order.id);
+  } else {
+    await (dbClient.from("payments" as any) as any)
+      .update({
+        status: "failed",
+        updated_at: nowIso,
+      })
+      .eq("id", proof.payment_id);
+  }
+
+  await (dbClient.from("order_status_logs" as any) as any).insert({
+    id: crypto.randomUUID(),
+    order_id: order.id,
+    from_status: order.status,
+    to_status: input.decision === "approved" ? "confirmed" : order.status,
+    notes: `Cashier verification outcome: ${input.decision}. ${input.rejectionReason ? `Reason: ${input.rejectionReason}` : ""}`.trim(),
+    created_at: nowIso,
+  });
+
+  const refreshed = await getOrderById(order.id, dbClient);
+  if (!refreshed) throw new Error("Failed to load refreshed order");
+  return refreshed;
 }
 
 /* ==========================================================================
