@@ -29,10 +29,10 @@ import { fetchAboutContent, updateAboutContent } from "@/services/api";
 export const Route = createFileRoute("/admin/content")({
   head: () => ({
     meta: [
-      { title: "Website Content — NEBA Café" },
+      { title: "Website Content — Rekik Café" },
       {
         name: "description",
-        content: "Manage the homepage hero and About page story and values for NEBA Café.",
+        content: "Manage the homepage hero and About page story and values for Rekik Café.",
       },
       { name: "robots", content: "noindex" },
     ],
@@ -447,7 +447,7 @@ function AdminContentPage() {
             )}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage the content shown on the NEBA Café website.
+            Manage the content shown on the Rekik Café website.
           </p>
         </div>
 
@@ -538,7 +538,7 @@ function AdminContentPage() {
               category="about"
               value={form.about_hero_image}
               onChange={(url) => handleFieldChange("about_hero_image", url)}
-              recommendedText="Recommended: an inviting photograph representing NEBA Café's space or team."
+              recommendedText="Recommended: an inviting photograph representing Rekik Café's space or team."
               disabled={isSaving}
               onUploadingChange={handleUploadingChange}
             />
@@ -567,7 +567,7 @@ function AdminContentPage() {
                 id="content-about-desc"
                 required
                 rows={5}
-                placeholder="Introductory story about NEBA Café..."
+                placeholder="Introductory story about Rekik Café..."
                 value={form.about_description}
                 onChange={(e) => handleFieldChange("about_description", e.target.value)}
               />

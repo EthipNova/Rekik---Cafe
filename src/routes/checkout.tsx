@@ -48,14 +48,14 @@ export const Route = createFileRoute("/checkout")({
   },
   head: () => ({
     meta: [
-      { title: "Checkout — NEBA Café" },
+      { title: "Checkout — Rekik Café" },
       {
         name: "description",
-        content: "Complete your NEBA Café order: method, details and payment.",
+        content: "Complete your Rekik Café order: method, details and payment.",
       },
       { name: "robots", content: "noindex" },
-      { property: "og:title", content: "Checkout — NEBA Café" },
-      { property: "og:description", content: "Complete your NEBA Café order." },
+      { property: "og:title", content: "Checkout — Rekik Café" },
+      { property: "og:description", content: "Complete your Rekik Café order." },
     ],
   }),
   component: Checkout,
@@ -1006,7 +1006,7 @@ function Checkout() {
                   id: "telebirr" as const,
                   label: "Telebirr Mobile Payment",
                   desc: "Instant payment via Telebirr app or USSD *127#",
-                  detail: "NEBA Merchant Till / Phone: 0911 234 567",
+                  detail: "Rekik Merchant Till / Phone: 0911 234 567",
                   icon: Smartphone,
                   tag: "Instant settlement",
                 },

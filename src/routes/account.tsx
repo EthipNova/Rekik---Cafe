@@ -51,13 +51,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/account")({
   head: () => ({
     meta: [
-      { title: "Customer Dashboard & Orders — NEBA Café" },
+      { title: "Customer Dashboard & Orders — Rekik Café" },
       {
         name: "description",
         content:
-          "Track live orders, view your complete order history, and manage your NEBA Café account.",
+          "Track live orders, view your complete order history, and manage your Rekik Café account.",
       },
-      { property: "og:title", content: "Customer Dashboard — NEBA Café" },
+      { property: "og:title", content: "Customer Dashboard — Rekik Café" },
       { property: "og:description", content: "Real-time order tracking and customer history." },
     ],
   }),
@@ -291,7 +291,7 @@ function AccountPage() {
 
       if (data.session) {
         setSession(data.session);
-        toast.success("Welcome to NEBA Café! Your account is created.");
+        toast.success("Welcome to Rekik Café! Your account is created.");
         void loadProfileAndOrders(data.session.access_token);
       } else if (data.user) {
         toast.info(
@@ -1023,7 +1023,7 @@ function AccountPage() {
               Order History
             </h2>
             <p className="text-xs text-muted-foreground">
-              Complete log of all orders placed with NEBA Café.
+              Complete log of all orders placed with Rekik Café.
             </p>
           </div>
 

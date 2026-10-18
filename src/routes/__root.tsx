@@ -78,11 +78,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "NEBA Café — Order Online" },
+      { title: "Rekik Café — Order Online" },
       {
         name: "description",
         content:
-          "NEBA Café digital ordering: browse the menu, order, pay and track your food. Powered by ORNIX-TECH.",
+          "Rekik Café digital ordering: browse the menu, order, pay and track your food. Powered by ORNIX-TECH.",
       },
       { name: "author", content: "ORNIX-TECH" },
       { property: "og:type", content: "website" },

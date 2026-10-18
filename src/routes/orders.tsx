@@ -17,13 +17,13 @@ import { OrderTimeline } from "@/components/site/OrderTimeline";
 export const Route = createFileRoute("/orders")({
   head: () => ({
     meta: [
-      { title: "My Orders — NEBA Café" },
+      { title: "My Orders — Rekik Café" },
       {
         name: "description",
-        content: "View your NEBA Café order history and track current orders in real-time.",
+        content: "View your Rekik Café order history and track current orders in real-time.",
       },
-      { property: "og:title", content: "My Orders — NEBA Café" },
-      { property: "og:description", content: "Your NEBA Café order history." },
+      { property: "og:title", content: "My Orders — Rekik Café" },
+      { property: "og:description", content: "Your Rekik Café order history." },
     ],
   }),
   component: OrdersPage,
@@ -173,7 +173,7 @@ function OrdersPage() {
             <div className="space-y-1 max-w-md mx-auto">
               <h2 className="text-xl font-display font-bold">Sign in to view your order history</h2>
               <p className="text-sm text-muted-foreground">
-                To protect your privacy and view all orders placed with your NEBA Café account,
+                To protect your privacy and view all orders placed with your Rekik Café account,
                 please sign in.
               </p>
             </div>

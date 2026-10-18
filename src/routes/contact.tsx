@@ -22,14 +22,14 @@ export const Route = createFileRoute("/contact")({
   },
   head: () => ({
     meta: [
-      { title: "Contact NEBA Café" },
+      { title: "Contact Rekik Café" },
       {
         name: "description",
         content:
-          "Get in touch with NEBA Café — location, phone, email, opening hours and enquiries.",
+          "Get in touch with Rekik Café — location, phone, email, opening hours and enquiries.",
       },
-      { property: "og:title", content: "Contact NEBA Café" },
-      { property: "og:description", content: "Location, hours and how to reach NEBA Café." },
+      { property: "og:title", content: "Contact Rekik Café" },
+      { property: "og:description", content: "Location, hours and how to reach Rekik Café." },
     ],
   }),
   component: ContactPage,
@@ -88,7 +88,7 @@ function ContactPage() {
       });
 
       setSent(true);
-      toast.success("Message sent successfully. Thank you for contacting NEBA Café.");
+      toast.success("Message sent successfully. Thank you for contacting Rekik Café.");
       setName("");
       setEmail("");
       setMessage("");
@@ -185,7 +185,7 @@ function ContactPage() {
 
                 <div className="space-y-1">
                   <h3 className="font-display text-lg font-semibold text-foreground">
-                    Visit NEBA Café
+                    Visit Rekik Café
                   </h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">
                     {settings.address || DEFAULT_SETTINGS.address}
@@ -199,7 +199,7 @@ function ContactPage() {
                     href="https://maps.app.goo.gl/JSWYJbLG9sL3gfK5A"
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label="View NEBA Café on Google Maps"
+                    aria-label="View Rekik Café on Google Maps"
                   >
                     <Navigation className="size-4" aria-hidden />
                     View on Google Maps
@@ -209,7 +209,7 @@ function ContactPage() {
               </div>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground">Social media: @nebacafe</p>
+          <p className="text-sm text-muted-foreground">Social media: @rekikcafe</p>
         </div>
 
         <form className="surface-card space-y-4 p-6" onSubmit={handleSubmit} noValidate>
@@ -300,7 +300,7 @@ function ContactPage() {
 
           {sent && (
             <p role="status" className="text-sm font-medium text-success">
-              Message sent successfully. Thank you for contacting NEBA Café.
+              Message sent successfully. Thank you for contacting Rekik Café.
             </p>
           )}
         </form>

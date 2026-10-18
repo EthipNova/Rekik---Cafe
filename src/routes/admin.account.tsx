@@ -35,11 +35,11 @@ import {
 export const Route = createFileRoute("/admin/account")({
   head: () => ({
     meta: [
-      { title: "Admin Account & Profile — NEBA Café" },
+      { title: "Admin Account & Profile — Rekik Café" },
       {
         name: "description",
         content:
-          "Manage your NEBA Café administrator credentials, profile details, and account security.",
+          "Manage your Rekik Café administrator credentials, profile details, and account security.",
       },
       { name: "robots", content: "noindex" },
     ],
@@ -275,7 +275,7 @@ function AdminAccountPage() {
             <User className="size-5 text-primary" /> Profile Information
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Your display name, contact phone number, and avatar in the NEBA console.
+            Your display name, contact phone number, and avatar in the Rekik console.
           </p>
         </div>
 

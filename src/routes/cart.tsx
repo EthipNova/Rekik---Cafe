@@ -8,10 +8,10 @@ import { formatETB, getProduct } from "@/lib/menu-data";
 export const Route = createFileRoute("/cart")({
   head: () => ({
     meta: [
-      { title: "Your Cart — NEBA Café" },
-      { name: "description", content: "Review your NEBA Café order before checkout." },
-      { property: "og:title", content: "Your Cart — NEBA Café" },
-      { property: "og:description", content: "Review your NEBA Café order before checkout." },
+      { title: "Your Cart — Rekik Café" },
+      { name: "description", content: "Review your Rekik Café order before checkout." },
+      { property: "og:title", content: "Your Cart — Rekik Café" },
+      { property: "og:description", content: "Review your Rekik Café order before checkout." },
     ],
   }),
   component: CartPage,

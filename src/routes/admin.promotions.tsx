@@ -78,7 +78,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/admin/promotions")({
   head: () => ({
     meta: [
-      { title: "Promotions Management — NEBA Café" },
+      { title: "Promotions Management — Rekik Café" },
       { name: "description", content: "Create and manage café promotional offers and discounts." },
       { name: "robots", content: "noindex" },
     ],
@@ -1232,7 +1232,7 @@ function AdminPromotions() {
                       <div className="rounded-xl border border-border bg-card/60 p-4 text-xs text-muted-foreground">
                         <p className="font-medium text-foreground">All Products</p>
                         <p className="mt-0.5">
-                          This offer applies to all eligible products across the entire NEBA Café
+                          This offer applies to all eligible products across the entire Rekik Café
                           menu.
                         </p>
                       </div>

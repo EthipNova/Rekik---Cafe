@@ -22,16 +22,16 @@ export const Route = createFileRoute("/menu/$category")({
     if (category && category.active === false) {
       return {
         meta: [
-          { title: "Menu — NEBA Café" },
-          { name: "description", content: "Browse the full NEBA Café menu." },
+          { title: "Menu — Rekik Café" },
+          { name: "description", content: "Browse the full Rekik Café menu." },
         ],
       };
     }
 
-    const title = category ? `${category.name} — NEBA Café Menu` : "Menu — NEBA Café";
+    const title = category ? `${category.name} — Rekik Café Menu` : "Menu — Rekik Café";
     const description = category
-      ? `${category.name}: ${category.tagline}. Order online from NEBA Café.`
-      : "Browse the NEBA Café menu.";
+      ? `${category.name}: ${category.tagline}. Order online from Rekik Café.`
+      : "Browse the Rekik Café menu.";
     return {
       meta: [
         { title },

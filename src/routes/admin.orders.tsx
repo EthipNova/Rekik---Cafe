@@ -68,11 +68,11 @@ import { fetchOrders, updateOrderStatus as apiUpdateOrderStatus } from "@/servic
 export const Route = createFileRoute("/admin/orders")({
   head: () => ({
     meta: [
-      { title: "Live Orders & Kitchen Tracking — NEBA Café Admin" },
+      { title: "Live Orders & Kitchen Tracking — Rekik Café Admin" },
       {
         name: "description",
         content:
-          "Real-time order management, kitchen tracking, and delivery fulfillment for NEBA Café.",
+          "Real-time order management, kitchen tracking, and delivery fulfillment for Rekik Café.",
       },
       { name: "robots", content: "noindex" },
     ],

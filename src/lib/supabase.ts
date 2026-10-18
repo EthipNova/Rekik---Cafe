@@ -63,7 +63,7 @@ const supabaseKey =
 
 if (!supabaseUrl || !supabaseKey) {
   console.warn(
-    "NEBA Café: Supabase credentials not found in environment. Ensure SUPABASE_URL and SUPABASE_KEY are set.",
+    "Rekik Café: Supabase credentials not found in environment. Ensure SUPABASE_URL and SUPABASE_KEY are set.",
   );
 }
 

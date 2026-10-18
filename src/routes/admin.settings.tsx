@@ -65,7 +65,7 @@ import {
 export const Route = createFileRoute("/admin/settings")({
   head: () => ({
     meta: [
-      { title: "Settings — NEBA Café" },
+      { title: "Settings — Rekik Café" },
       {
         name: "description",
         content:
@@ -398,7 +398,7 @@ function AdminSettings() {
                     id="setting-cafe-name"
                     value={form.cafeName}
                     onChange={(e) => handleFieldChange("cafeName", e.target.value)}
-                    placeholder="e.g. NEBA Café"
+                    placeholder="e.g. Rekik Café"
                     className="pl-9 h-9 text-sm"
                     disabled={isSaving}
                     required
@@ -439,7 +439,7 @@ function AdminSettings() {
                     type="email"
                     value={form.email}
                     onChange={(e) => handleFieldChange("email", e.target.value)}
-                    placeholder="e.g. hello@nebacafe.com"
+                    placeholder="e.g. hello@rekikcafe.com"
                     className="pl-9 h-9 text-sm"
                     disabled={isSaving}
                     required
@@ -532,9 +532,9 @@ function AdminSettings() {
                         <Check className="size-4 text-primary" aria-hidden />
                       )}
                     </div>
-                    <span className="font-medium text-sm mt-3 text-foreground">NEBA Light</span>
+                    <span className="font-medium text-sm mt-3 text-foreground">Rekik Light</span>
                     <span className="text-xs text-muted-foreground mt-1">
-                      Clean white and charcoal daylight palette with NEBA red accents.
+                      Clean white and charcoal daylight palette with Rekik red accents.
                     </span>
                   </button>
 
@@ -556,7 +556,7 @@ function AdminSettings() {
                     </div>
                     <span className="font-medium text-sm mt-3 text-foreground">Charcoal Dark</span>
                     <span className="text-xs text-muted-foreground mt-1">
-                      Deep charcoal background with bold NEBA red accents.
+                      Deep charcoal background with bold Rekik red accents.
                     </span>
                   </button>
 
@@ -825,7 +825,7 @@ function AdminSettings() {
                   <div className="flex items-center gap-2">
                     <MapPin className="size-4 text-primary" aria-hidden />
                     <h3 className="font-display text-sm font-semibold text-foreground">
-                      NEBA Café GPS Coordinates (Origin)
+                      Rekik Café GPS Coordinates (Origin)
                     </h3>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -947,7 +947,7 @@ function AdminSettings() {
               <div className="flex items-center justify-between rounded-lg border border-border/60 bg-card/40 p-3">
                 <span className="text-xs text-muted-foreground">Application</span>
                 <span className="font-medium text-foreground text-xs">
-                  NEBA Café Ordering System
+                  Rekik Café Ordering System
                 </span>
               </div>
 

@@ -62,7 +62,7 @@ import {
 export const Route = createFileRoute("/admin/contact-messages")({
   head: () => ({
     meta: [
-      { title: "Contact Messages — NEBA Café Admin" },
+      { title: "Contact Messages — Rekik Café Admin" },
       {
         name: "description",
         content: "Messages submitted through the public website",

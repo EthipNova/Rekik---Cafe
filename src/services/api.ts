@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * ============================================================================
- * NEBA Café — Frontend Data-Fetching Service Layer (src/services/api.ts)
+ * Rekik Café — Frontend Data-Fetching Service Layer (src/services/api.ts)
  * ============================================================================
- * Provides typed helper functions to interact with NEBA Café API endpoints
+ * Provides typed helper functions to interact with Rekik Café API endpoints
  * and live Supabase database tables with automatic cart product registry sync.
  */
 

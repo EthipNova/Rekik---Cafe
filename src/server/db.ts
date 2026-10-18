@@ -908,7 +908,7 @@ export async function createOrder(
 
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  // Authoritative discount: NEBA Café promotions are item-level menu discounts.
+  // Authoritative discount: Rekik Café promotions are item-level menu discounts.
   // There is no server-authoritative coupon/discount code mechanism for orders.
   // The authoritative discount is strictly 0. Ignore any client-supplied input.discount.
   const discount = 0;

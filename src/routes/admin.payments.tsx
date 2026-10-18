@@ -47,7 +47,7 @@ import { calculatePaymentMetrics, fetchAdminPayments, type PaymentRecord } from 
 export const Route = createFileRoute("/admin/payments")({
   head: () => ({
     meta: [
-      { title: "Payments Management — NEBA Café" },
+      { title: "Payments Management — Rekik Café" },
       { name: "description", content: "View and manage customer payment records and revenue." },
       { name: "robots", content: "noindex" },
     ],

@@ -12,13 +12,13 @@ export const Route = createFileRoute("/menu/")({
   },
   head: () => ({
     meta: [
-      { title: "Menu — NEBA Café" },
+      { title: "Menu — Rekik Café" },
       {
         name: "description",
         content:
-          "Browse the full NEBA Café menu: burgers, pizza, chips & sides and soft drinks with live availability and prices in ETB.",
+          "Browse the full Rekik Café menu: burgers, pizza, chips & sides and soft drinks with live availability and prices in ETB.",
       },
-      { property: "og:title", content: "Menu — NEBA Café" },
+      { property: "og:title", content: "Menu — Rekik Café" },
       {
         property: "og:description",
         content: "Burgers, pizza, sides and drinks, freshly prepared.",

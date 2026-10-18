@@ -32,6 +32,18 @@ import type { AboutContent } from "@/lib/content";
 import type { Order, OrderStatus } from "@/lib/orders";
 import type { Promotion } from "@/lib/promotions";
 import { createScopedClient, supabase, type UserRole } from "@/lib/supabase";
+import {
+  resolveCashierMe,
+  authenticateCashier,
+  getPendingPaymentReviews,
+  getPaymentReviewHistory,
+  getCashierOverviewMetrics,
+  getProofSignedUrl,
+  approvePaymentProof,
+  rejectPaymentProof,
+  getCashierNotifications,
+  markNotificationAsRead,
+} from "./cashier";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -821,6 +833,188 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return json({ success: true, deletedId: messageId });
       }
 
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       CASHIER PORTAL API ROUTES
+       ---------------------------------------------------------------------- */
+
+    // 1. GET /api/cashier/me
+    if (pathname === "/api/cashier/me") {
+      if (method === "GET") {
+        const result = await resolveCashierMe(request);
+        if (!result.success) {
+          if (result.status === "unauthenticated") {
+            return unauthorized(result.message);
+          }
+          return forbidden(result.message);
+        }
+        return json(result);
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    // 2. GET /api/cashier/pending
+    if (pathname === "/api/cashier/pending") {
+      if (method === "GET") {
+        try {
+          await authenticateCashier(request);
+          const pending = await getPendingPaymentReviews();
+          return json(pending);
+        } catch (err: any) {
+          const msg = err?.message || "Unauthorized";
+          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
+          if (msg.includes("FORBIDDEN")) return forbidden(msg);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    // 3. GET /api/cashier/history
+    if (pathname === "/api/cashier/history") {
+      if (method === "GET") {
+        try {
+          await authenticateCashier(request);
+          const history = await getPaymentReviewHistory();
+          return json(history);
+        } catch (err: any) {
+          const msg = err?.message || "Unauthorized";
+          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
+          if (msg.includes("FORBIDDEN")) return forbidden(msg);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    // 4. GET /api/cashier/metrics
+    if (pathname === "/api/cashier/metrics") {
+      if (method === "GET") {
+        try {
+          await authenticateCashier(request);
+          const metrics = await getCashierOverviewMetrics();
+          return json(metrics);
+        } catch (err: any) {
+          const msg = err?.message || "Unauthorized";
+          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
+          if (msg.includes("FORBIDDEN")) return forbidden(msg);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    // 5. POST /api/cashier/proof-url
+    if (pathname === "/api/cashier/proof-url") {
+      if (method === "POST") {
+        try {
+          await authenticateCashier(request);
+          const body = await request.json().catch(() => ({}));
+          const target = body.proofId || body.path || body.screenshotPath;
+          if (!target) {
+            return badRequest("proofId or screenshot path is required");
+          }
+          const signedUrl = await getProofSignedUrl(target);
+          return json({ signedUrl });
+        } catch (err: any) {
+          const msg = err?.message || "Unauthorized";
+          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
+          if (msg.includes("FORBIDDEN")) return forbidden(msg);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    // 6. POST /api/cashier/reviews/approve
+    if (pathname === "/api/cashier/reviews/approve") {
+      if (method === "POST") {
+        try {
+          const { profile } = await authenticateCashier(request);
+          const body = await request.json().catch(() => ({}));
+          const proofId = body.proofId || body.proof_id;
+          if (!proofId) {
+            return badRequest("Field 'proofId' is required.");
+          }
+          const result = await approvePaymentProof(proofId, profile.user_id, body.notes);
+          return json(result);
+        } catch (err: any) {
+          const msg = err?.message || "Error approving payment";
+          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
+          if (msg.includes("FORBIDDEN")) return forbidden(msg);
+          if (msg.includes("already been reviewed") || msg.includes("not found")) {
+            return json({ error: "Conflict", message: msg }, 409);
+          }
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    // 7. POST /api/cashier/reviews/reject
+    if (pathname === "/api/cashier/reviews/reject") {
+      if (method === "POST") {
+        try {
+          const { profile } = await authenticateCashier(request);
+          const body = await request.json().catch(() => ({}));
+          const proofId = body.proofId || body.proof_id;
+          const reason = body.reason?.trim();
+          if (!proofId) {
+            return badRequest("Field 'proofId' is required.");
+          }
+          if (!reason) {
+            return badRequest("A rejection reason is required.");
+          }
+          const result = await rejectPaymentProof(proofId, profile.user_id, reason);
+          return json(result);
+        } catch (err: any) {
+          const msg = err?.message || "Error rejecting payment";
+          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
+          if (msg.includes("FORBIDDEN")) return forbidden(msg);
+          if (msg.includes("already been reviewed") || msg.includes("not found")) {
+            return json({ error: "Conflict", message: msg }, 409);
+          }
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    // 8. GET /api/cashier/notifications
+    if (pathname === "/api/cashier/notifications") {
+      if (method === "GET") {
+        try {
+          const { profile } = await authenticateCashier(request);
+          const notifications = await getCashierNotifications(profile.user_id);
+          return json(notifications);
+        } catch (err: any) {
+          const msg = err?.message || "Unauthorized";
+          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
+          if (msg.includes("FORBIDDEN")) return forbidden(msg);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    // 9. PATCH /api/cashier/notifications/:id/read
+    const notifMatch = pathname.match(/^\/api\/cashier\/notifications\/([^/]+)\/read$/);
+    if (notifMatch) {
+      if (method === "PATCH" || method === "POST") {
+        try {
+          const { profile } = await authenticateCashier(request);
+          const notifId = decodeURIComponent(notifMatch[1]!);
+          await markNotificationAsRead(notifId, profile.user_id);
+          return json({ success: true, notificationId: notifId });
+        } catch (err: any) {
+          const msg = err?.message || "Unauthorized";
+          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
+          if (msg.includes("FORBIDDEN")) return forbidden(msg);
+          return serverError(err);
+        }
+      }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
