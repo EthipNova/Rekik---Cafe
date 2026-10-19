@@ -231,6 +231,20 @@ export function PaymentProofModal({
                     </span>
                   </div>
                 )}
+                {pendingItem?.waiter_decision && (
+                  <div className="flex justify-between items-center pt-1.5 border-t border-[#EAE3D9]/70">
+                    <span className="text-[#70645C] font-medium">Waiter Decision:</span>
+                    <span
+                      className={`font-semibold capitalize px-2 py-0.5 rounded text-[10px] ${
+                        pendingItem.waiter_decision === "approved"
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                          : "bg-red-100 text-red-800 border border-red-200"
+                      }`}
+                    >
+                      {pendingItem.waiter_decision === "approved" ? "✓ Approved by Waiter" : "✕ Rejected by Waiter"}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Ordered Products Table */}

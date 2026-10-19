@@ -160,6 +160,10 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
         customer_id,
         customer_name,
         customer_phone,
+        waiter_id,
+        waiter_decision,
+        waiter_decided_at,
+        waiter_rejection_reason,
         method,
         status,
         table_number,
@@ -241,6 +245,10 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
       proof_submitted_amount: Number(raw.submitted_amount) || 0,
       proof_status: raw.status || "pending",
       proof_submitted_at: raw.submitted_at,
+      waiter_id: order?.waiter_id ?? null,
+      waiter_decision: order?.waiter_decision ?? null,
+      waiter_decided_at: order?.waiter_decided_at ?? null,
+      waiter_rejection_reason: order?.waiter_rejection_reason ?? null,
       items: formattedItems,
     };
   });
@@ -463,6 +471,8 @@ export async function approvePaymentProof(
         customer_id,
         customer_name,
         waiter_id,
+        waiter_decision,
+        waiter_rejection_reason,
         status
       )
     `)
@@ -479,6 +489,13 @@ export async function approvePaymentProof(
 
   const order = Array.isArray(proof.orders) ? proof.orders[0] : proof.orders;
   const payment = Array.isArray(proof.payments) ? proof.payments[0] : proof.payments;
+
+  // Safeguard: Protection against cashiers changing waiter decisions
+  if (order?.waiter_decision === "rejected" || order?.status === "rejected") {
+    throw new Error(
+      `Cannot approve payment: Order has already been rejected by the assigned server/waiter${order.waiter_rejection_reason ? ` ("${order.waiter_rejection_reason}")` : ""}. Cashiers cannot override waiter rejection decisions.`,
+    );
+  }
 
   const reviewId = crypto.randomUUID();
 
@@ -655,6 +672,8 @@ export async function rejectPaymentProof(
         customer_id,
         customer_name,
         waiter_id,
+        waiter_decision,
+        waiter_rejection_reason,
         status
       )
     `)
