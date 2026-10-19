@@ -456,7 +456,7 @@ export async function getWaiterOrders(
     } else if (filters.status === "approved") {
       query = query.eq("waiter_decision", "approved");
     } else if (filters.status === "rejected") {
-      query = query.or("status.eq.rejected,status.eq.cancelled,waiter_decision.eq.rejected");
+      query = query.eq("waiter_decision", "rejected");
     } else if (filters.status === "active") {
       query = query.in("status", ["confirmed", "preparing", "ready"]);
     } else if (filters.status === "completed") {
@@ -542,7 +542,7 @@ export async function approveWaiterOrder(
   // Allowed statuses: 'confirmed' or 'pending'.
   const nextStatus = "confirmed";
 
-  // 3. Atomically update the orders record
+  // 3. Atomically update the orders record ensuring order is still pending decision
   const updatePayload: Record<string, unknown> = {
     waiter_decision: "approved",
     waiter_decided_at: nowIso,
@@ -556,12 +556,18 @@ export async function approveWaiterOrder(
     updatePayload["waiter_assigned_at"] = nowIso;
   }
 
-  const { error: updateErr } = await (supabase.from("orders" as any) as any)
+  const { data: updatedRows, error: updateErr } = await (supabase.from("orders" as any) as any)
     .update(updatePayload)
-    .eq("id", orderId);
+    .eq("id", orderId)
+    .eq("waiter_decision", "pending")
+    .select("id");
 
   if (updateErr) {
     throw new Error(`Failed to update order approval: ${updateErr.message}`);
+  }
+
+  if (!updatedRows || updatedRows.length === 0) {
+    throw new Error("This order has already been decided or updated by another session.");
   }
 
   // 4. Insert into order_approvals
@@ -645,13 +651,17 @@ export async function rejectWaiterOrder(
     throw new Error("You are not authorized to decide on an order assigned to another waiter.");
   }
 
+  if (currentOrder.waiter_decision === "approved") {
+    throw new Error("Cannot reject an order that has already been approved.");
+  }
+
   if (currentOrder.waiter_decision === "rejected" || currentOrder.status === "rejected" || currentOrder.status === "cancelled") {
     throw new Error("This order has already been cancelled or rejected.");
   }
 
   const nowIso = new Date().toISOString();
 
-  // 3. Update orders record to rejected / cancelled
+  // 3. Atomically update orders record to rejected ensuring order is still pending decision
   const updatePayload: Record<string, unknown> = {
     waiter_decision: "rejected",
     waiter_rejection_reason: cleanReason,
@@ -665,12 +675,18 @@ export async function rejectWaiterOrder(
     updatePayload["waiter_assigned_at"] = nowIso;
   }
 
-  const { error: updateErr } = await (supabase.from("orders" as any) as any)
+  const { data: updatedRows, error: updateErr } = await (supabase.from("orders" as any) as any)
     .update(updatePayload)
-    .eq("id", orderId);
+    .eq("id", orderId)
+    .eq("waiter_decision", "pending")
+    .select("id");
 
   if (updateErr) {
     throw new Error(`Failed to update order rejection: ${updateErr.message}`);
+  }
+
+  if (!updatedRows || updatedRows.length === 0) {
+    throw new Error("This order has already been decided or updated by another session.");
   }
 
   // 4. Insert into order_approvals
@@ -835,4 +851,170 @@ export async function getAvailableWaiters(): Promise<
     fullName: w.full_name,
     phone: w.phone,
   }));
+}
+
+export interface WaiterPaymentProofInput {
+  screenshotPath: string;
+  submittedAmount: number;
+  paymentMethod: string;
+  transactionReference?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Authoritatively submits payment evidence captured/collected by a waiter.
+ * Enforces waiter assignment authorization, atomic duplicate guards,
+ * creates/updates payments and payment_proofs, logs audit trail,
+ * and notifies the customer that payment is pending cashier verification.
+ */
+export async function submitWaiterPaymentProof(
+  staff: AuthenticatedStaff,
+  orderIdOrNumber: string,
+  input: WaiterPaymentProofInput,
+): Promise<WaiterOrder> {
+  // 1. Fetch current order
+  const { data: order, error: orderErr } = await (supabase.from("orders" as any) as any)
+    .select("id, order_number, waiter_id, waiter_decision, status, total_amount, customer_id, customer_name")
+    .or(`id.eq.${orderIdOrNumber},order_number.eq.${orderIdOrNumber}`)
+    .maybeSingle();
+
+  if (orderErr || !order) {
+    throw new Error(`Order ${orderIdOrNumber} not found.`);
+  }
+
+  // 2. Authorization check: Waiter must be assigned to this order or be an admin
+  const isSuperAdmin = staff.role === "admin";
+  if (!isSuperAdmin && order.waiter_id && order.waiter_id !== staff.userId) {
+    throw new Error("You are not authorized to submit payment for an order assigned to another waiter.");
+  }
+
+  // 3. Status check: Waiter must have accepted/approved the order first
+  if (order.waiter_decision !== "approved") {
+    throw new Error(
+      `Order #${order.order_number} must be accepted/approved by the waiter before submitting payment.`,
+    );
+  }
+
+  // 4. Check if order is already settled
+  const { data: existingPaidPayment } = await (supabase.from("payments" as any) as any)
+    .select("id, status")
+    .eq("order_id", order.id)
+    .eq("status", "paid")
+    .maybeSingle();
+
+  if (existingPaidPayment) {
+    throw new Error(`Order #${order.order_number} is already marked as paid.`);
+  }
+
+  // 5. Concurrency / Duplicate submission guard: check if there is an existing pending proof
+  const { data: existingPendingProof } = await (supabase.from("payment_proofs" as any) as any)
+    .select("id, status, submitted_at")
+    .eq("order_id", order.id)
+    .eq("status", "pending")
+    .maybeSingle();
+
+  if (existingPendingProof) {
+    throw new Error(
+      `A payment proof for Order #${order.order_number} has already been submitted and is pending cashier verification.`,
+    );
+  }
+
+  const nowIso = new Date().toISOString();
+  const submittedAmount =
+    Number(input.submittedAmount) > 0
+      ? Number(input.submittedAmount)
+      : Number(order.total_amount) || 0;
+
+  const cleanTxRef =
+    typeof input.transactionReference === "string" && input.transactionReference.trim()
+      ? input.transactionReference.trim()
+      : null;
+
+  // 6. Find or create payment row
+  const { data: existingPayment } = await (supabase.from("payments" as any) as any)
+    .select("id, status")
+    .eq("order_id", order.id)
+    .order("created_at", { ascending: false })
+    .maybeSingle();
+
+  let paymentId = existingPayment?.id;
+  if (paymentId) {
+    await (supabase.from("payments" as any) as any)
+      .update({
+        method: input.paymentMethod || "Mobile Payment",
+        transaction_reference: cleanTxRef,
+        status: "pending",
+        amount: submittedAmount,
+        updated_at: nowIso,
+      })
+      .eq("id", paymentId);
+  } else {
+    const newPayId = crypto.randomUUID();
+    const { error: insPayErr } = await (supabase.from("payments" as any) as any).insert({
+      id: newPayId,
+      order_id: order.id,
+      method: input.paymentMethod || "Mobile Payment",
+      status: "pending",
+      amount: submittedAmount,
+      transaction_reference: cleanTxRef,
+      created_at: nowIso,
+      updated_at: nowIso,
+    });
+    if (insPayErr) {
+      throw new Error(`Failed to create payment record: ${insPayErr.message}`);
+    }
+    paymentId = newPayId;
+  }
+
+  // 7. Insert payment proof record
+  const proofId = crypto.randomUUID();
+  const { error: proofErr } = await (supabase.from("payment_proofs" as any) as any).insert({
+    id: proofId,
+    payment_id: paymentId,
+    order_id: order.id,
+    screenshot_path: input.screenshotPath,
+    submitted_amount: submittedAmount,
+    transaction_reference: cleanTxRef,
+    status: "pending",
+    submitted_at: nowIso,
+  });
+
+  if (proofErr) {
+    throw new Error(`Failed to record payment proof: ${proofErr.message}`);
+  }
+
+  // 8. Log audit trail in order_status_logs
+  const auditNotes = `Payment evidence submitted by server ${staff.fullName} (Method: ${input.paymentMethod}, Amount: ${submittedAmount} ETB, Ref: ${cleanTxRef || "Not provided"}). Awaiting cashier review.`;
+  await (supabase.from("order_status_logs" as any) as any).insert({
+    id: crypto.randomUUID(),
+    order_id: order.id,
+    from_status: order.status,
+    to_status: order.status,
+    changed_by: staff.userId,
+    notes: auditNotes,
+    created_at: nowIso,
+  });
+
+  // 9. Send notification to customer if customer_id exists
+  if (order.customer_id) {
+    try {
+      await (supabase.from("notifications" as any) as any).insert({
+        id: crypto.randomUUID(),
+        recipient_user_id: order.customer_id,
+        order_id: order.id,
+        payment_proof_id: proofId,
+        title: "Payment Submitted for Verification",
+        message: `Your server ${staff.fullName} has submitted payment evidence (${input.paymentMethod}). Pending cashier review.`,
+        notification_type: "payment_submitted",
+        is_read: false,
+        created_at: nowIso,
+      });
+    } catch (notifErr) {
+      console.warn("[server/waiter] Error inserting customer notification:", notifErr);
+    }
+  }
+
+  // 10. Return refreshed order
+  const updatedOrders = await getWaiterOrders(staff, { search: order.order_number });
+  return updatedOrders[0] || (order as any);
 }

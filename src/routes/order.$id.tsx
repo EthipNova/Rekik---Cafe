@@ -759,12 +759,16 @@ function OrderPage() {
                       <span className="text-muted-foreground">Payment Method:</span>
                       <span className="font-medium text-foreground">{order.paymentMethod || "Mobile Transfer"}</span>
                     </div>
-                    {order.paymentProof?.transactionReference && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">Transaction Ref:</span>
-                        <span className="font-mono font-semibold text-foreground">{order.paymentProof.transactionReference}</span>
-                      </div>
-                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Transaction Ref:</span>
+                      <span className="font-mono font-semibold text-foreground">
+                        {order.paymentProof?.transactionReference || (
+                          <span className="text-muted-foreground italic font-sans font-normal text-xs">
+                            Not provided
+                          </span>
+                        )}
+                      </span>
+                    </div>
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Review Status:</span>
                       <Badge

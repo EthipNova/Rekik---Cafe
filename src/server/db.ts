@@ -1120,7 +1120,7 @@ export async function createOrder(
     try {
       const newCustId = crypto.randomUUID();
       const guestPhone = normPhone || `09${Date.now().toString().slice(-8)}`;
-      const { error: custErr } = await (dbClient.from("customers" as any) as any).insert({
+      const { error: custErr } = await (supabase.from("customers" as any) as any).insert({
         id: newCustId,
         name: customerName,
         phone: guestPhone,
@@ -1159,11 +1159,11 @@ export async function createOrder(
   const dbMethod =
     input.method === "dine-in" ? "dine_in" : input.method === "takeaway" ? "pickup" : "delivery";
 
-  // Validate server-authoritatively that input.waiterId exists in staff_profiles
+  // Validate server-authoritatively that input.waiterId exists in staff_profiles using serverSupabase
   let validatedWaiterId: string | null = null;
   if (input.waiterId) {
     try {
-      const { data: staffMember } = await (dbClient.from("staff_profiles" as any) as any)
+      const { data: staffMember } = await (supabase.from("staff_profiles" as any) as any)
         .select("user_id, is_active, role")
         .eq("user_id", input.waiterId)
         .maybeSingle();
@@ -1205,7 +1205,7 @@ export async function createOrder(
     updated_at: nowIso,
   };
 
-  const { error: ordErr } = await (dbClient.from("orders" as any) as any).insert(orderRecord);
+  const { error: ordErr } = await (supabase.from("orders" as any) as any).insert(orderRecord);
 
   if (ordErr) {
     console.error(`[db] Supabase order insert error (code ${ordErr.code}):`, ordErr.message);
@@ -1215,19 +1215,35 @@ export async function createOrder(
   // Notify assigned waiter
   if (validatedWaiterId) {
     try {
-      await (dbClient.from("notifications" as any) as any).insert({
+      await (supabase.from("notifications" as any) as any).insert({
         id: crypto.randomUUID(),
         recipient_user_id: validatedWaiterId,
         order_id: orderId,
         title: "New Order Assigned",
         message: `Order #${orderNumber} (${customerName}) has been assigned to you.`,
-        notification_type: "order_assigned",
+        notification_type: "order_submitted",
         is_read: false,
         created_at: nowIso,
       });
     } catch (notifErr) {
       console.warn("[db] Failed to notify assigned waiter:", notifErr);
     }
+  }
+
+  // Audit entry in order_status_logs
+  try {
+    await (supabase.from("order_status_logs" as any) as any).insert({
+      id: crypto.randomUUID(),
+      order_id: orderId,
+      from_status: null,
+      to_status: "pending",
+      notes: validatedWaiterId
+        ? `Order placed and assigned to server.`
+        : `Order placed. Awaiting server review.`,
+      created_at: nowIso,
+    });
+  } catch (logErr) {
+    console.warn("[db] Failed to insert initial order_status_logs:", logErr);
   }
 
   // ── Step E: Insert order items (FATAL if this fails) ───────────────────────
@@ -1245,7 +1261,7 @@ export async function createOrder(
       unit_price: it.price,
       line_total: it.price * it.quantity,
     }));
-    const { error: itemsErr } = await (dbClient.from("order_items" as any) as any).insert(
+    const { error: itemsErr } = await (supabase.from("order_items" as any) as any).insert(
       itemRecords,
     );
     if (itemsErr) {
@@ -1255,7 +1271,7 @@ export async function createOrder(
   }
 
   // ── Step F: Insert payment record (FATAL if this fails) ────────────────────
-  const { error: payErr } = await (dbClient.from("payments" as any) as any).insert({
+  const { error: payErr } = await (supabase.from("payments" as any) as any).insert({
     id: crypto.randomUUID(),
     order_id: orderId,
     method: paymentMethod,

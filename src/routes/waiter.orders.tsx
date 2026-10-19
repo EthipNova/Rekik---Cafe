@@ -2,9 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   AlertCircle,
   Calendar,
+  Camera,
   CheckCircle2,
   Clock,
   Eye,
+  FileImage,
   Filter,
   Phone,
   Receipt,
@@ -13,6 +15,7 @@ import {
   ShoppingBag,
   User,
   UtensilsCrossed,
+  Upload,
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -39,6 +42,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatETB } from "@/lib/menu-data";
+import { WaiterPaymentDialog } from "@/components/waiter/WaiterPaymentDialog";
 import {
   approveWaiterOrder,
   fetchWaiterOrders,
@@ -70,6 +74,9 @@ export function WaiterOrdersPage() {
 
   // Detail Sheet
   const [selectedOrder, setSelectedOrder] = useState<WaiterOrder | null>(null);
+
+  // Payment Submission Dialog
+  const [paymentOrder, setPaymentOrder] = useState<WaiterOrder | null>(null);
 
   // Approval / Rejection dialogs
   const [actionOrder, setActionOrder] = useState<WaiterOrder | null>(null);
@@ -131,6 +138,8 @@ export function WaiterOrdersPage() {
         );
         toast.success(`Order #${actionOrder.orderNumber} approved successfully`);
         if (selectedOrder?.id === actionOrder.id) setSelectedOrder(approved);
+        // Step 5: Immediately reveal the Payment Evidence upload step for the approved order
+        setPaymentOrder(approved);
       } else {
         if (!rejectionReason.trim()) {
           toast.error("Rejection reason is mandatory.");
@@ -413,6 +422,19 @@ export function WaiterOrdersPage() {
                         </Button>
                       </>
                     )}
+                    {!isPendingDecision &&
+                      order.waiterDecision === "approved" &&
+                      order.payments?.[0]?.status !== "paid" &&
+                      (!order.payments?.[0]?.proof || order.payments?.[0]?.proof.status === "rejected") && (
+                        <Button
+                          size="sm"
+                          className="h-8 px-2.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90 font-medium gap-1"
+                          onClick={() => setPaymentOrder(order)}
+                        >
+                          <Camera className="size-3" />
+                          <span>{order.payments?.[0]?.proof?.status === "rejected" ? "Re-upload Proof" : "Evidence"}</span>
+                        </Button>
+                      )}
                   </div>
                 </div>
               </div>
@@ -474,6 +496,80 @@ export function WaiterOrdersPage() {
                     >
                       <XCircle className="size-3.5 mr-1.5" /> Reject Order
                     </Button>
+                  </div>
+                )}
+
+                {/* Clearly Identifiable Payment Evidence Section */}
+                {selectedOrder.waiterDecision === "approved" && (
+                  <div className="rounded-lg border border-border/80 bg-muted/20 p-3 space-y-2 mt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-foreground flex items-center gap-1.5">
+                        <Receipt className="size-3.5 text-primary" /> Payment Evidence
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className={
+                          selectedOrder.payments?.[0]?.status === "paid"
+                            ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]"
+                            : selectedOrder.payments?.[0]?.proof?.status === "pending"
+                              ? "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30 text-[10px]"
+                              : selectedOrder.payments?.[0]?.proof?.status === "rejected"
+                                ? "bg-destructive/10 text-destructive border-destructive/30 text-[10px]"
+                                : "bg-amber-500/10 text-amber-600 border-amber-500/30 text-[10px]"
+                        }
+                      >
+                        {selectedOrder.payments?.[0]?.status === "paid"
+                          ? "Cashier Verified"
+                          : selectedOrder.payments?.[0]?.proof?.status === "pending"
+                            ? "Pending Cashier Review"
+                            : selectedOrder.payments?.[0]?.proof?.status === "rejected"
+                              ? "Cashier Rejected"
+                              : "Awaiting Evidence"}
+                      </Badge>
+                    </div>
+
+                    {selectedOrder.payments?.[0]?.status === "paid" ? (
+                      <div className="rounded-md bg-emerald-500/10 border border-emerald-500/30 p-2 text-xs text-emerald-600 dark:text-emerald-400 flex items-center justify-between">
+                        <span className="font-semibold flex items-center gap-1.5">
+                          <CheckCircle2 className="size-3.5" /> Payment Settled & Verified
+                        </span>
+                        <span className="font-bold">{formatETB(selectedOrder.totalAmount)}</span>
+                      </div>
+                    ) : selectedOrder.payments?.[0]?.proof?.status === "pending" ? (
+                      <div className="rounded-md bg-purple-500/10 border border-purple-500/30 p-2 text-xs text-purple-700 dark:text-purple-300 space-y-1">
+                        <span className="flex items-center gap-1.5 font-medium">
+                          <Clock className="size-3.5 animate-spin" /> Payment Evidence Sent to Cashier
+                        </span>
+                        <p className="text-[11px] text-muted-foreground">
+                          Awaiting cashier verification. Status will update automatically.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {selectedOrder.payments?.[0]?.proof?.status === "rejected" &&
+                          selectedOrder.payments[0].proof.rejectionReason && (
+                            <div className="rounded bg-destructive/10 border border-destructive/20 p-2 text-[11px] text-destructive">
+                              <span className="font-semibold">Rejection reason:</span>{" "}
+                              {selectedOrder.payments[0].proof.rejectionReason}
+                            </div>
+                          )}
+                        <Button
+                          size="sm"
+                          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground text-xs h-8.5 font-semibold gap-1.5"
+                          onClick={() => {
+                            setPaymentOrder(selectedOrder);
+                          }}
+                        >
+                          <Camera className="size-3.5" />
+                          <Upload className="size-3.5" />
+                          <span>
+                            {selectedOrder.payments?.[0]?.proof?.status === "rejected"
+                              ? "Re-upload Payment Evidence"
+                              : "Upload Payment Evidence (Take Photo / Gallery)"}
+                          </span>
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -698,6 +794,14 @@ export function WaiterOrdersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Waiter Payment Evidence Dialog */}
+      <WaiterPaymentDialog
+        order={paymentOrder}
+        open={Boolean(paymentOrder)}
+        onOpenChange={(open) => !open && setPaymentOrder(null)}
+        onSuccess={() => void loadOrders()}
+      />
     </div>
   );
 }

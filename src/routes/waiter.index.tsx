@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatETB } from "@/lib/menu-data";
+import { WaiterPaymentDialog } from "@/components/waiter/WaiterPaymentDialog";
 import {
   approveWaiterOrder,
   fetchWaiterMetrics,
@@ -59,6 +60,7 @@ export function WaiterOverview() {
 
   // Modal actions
   const [activeOrder, setActiveOrder] = useState<WaiterOrder | null>(null);
+  const [paymentOrder, setPaymentOrder] = useState<WaiterOrder | null>(null);
   const [actionType, setActionType] = useState<"approve" | "reject" | null>(null);
   const [approvalNotes, setApprovalNotes] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
@@ -108,8 +110,10 @@ export function WaiterOverview() {
 
     try {
       if (actionType === "approve") {
-        await approveWaiterOrder(activeOrder.id, approvalNotes.trim() || undefined);
+        const approved = await approveWaiterOrder(activeOrder.id, approvalNotes.trim() || undefined);
         toast.success(`Order #${activeOrder.orderNumber} approved!`);
+        // Immediately reveal the Payment Evidence upload step for the approved order
+        setPaymentOrder(approved);
       } else {
         if (!rejectionReason.trim()) {
           toast.error("Please provide a rejection reason.");
@@ -570,6 +574,14 @@ export function WaiterOverview() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Waiter Payment Evidence Dialog */}
+      <WaiterPaymentDialog
+        order={paymentOrder}
+        open={Boolean(paymentOrder)}
+        onOpenChange={(open) => !open && setPaymentOrder(null)}
+        onSuccess={() => void loadData()}
+      />
     </div>
   );
 }

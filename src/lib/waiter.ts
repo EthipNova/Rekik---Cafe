@@ -184,6 +184,32 @@ export async function rejectWaiterOrder(
   });
 }
 
+export interface WaiterSubmitPaymentPayload {
+  submittedAmount: number;
+  paymentMethod: string;
+  transactionReference?: string | undefined;
+  notes?: string | undefined;
+  imageBase64?: string | undefined;
+  screenshotPath?: string | undefined;
+  mimeType?: string | undefined;
+}
+
+/**
+ * Submits payment evidence collected by the waiter for cashier verification.
+ */
+export async function submitWaiterPaymentProof(
+  orderId: string,
+  payload: WaiterSubmitPaymentPayload,
+): Promise<WaiterOrder> {
+  return waiterRequest<WaiterOrder>(
+    `/api/waiter/orders/${encodeURIComponent(orderId)}/payment-proof`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 /**
  * Fetches orders with payment tracking status.
  */

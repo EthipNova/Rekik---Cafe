@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Upload,
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -26,6 +27,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatETB } from "@/lib/menu-data";
+import { supabase } from "@/lib/supabase";
+import { WaiterPaymentDialog } from "@/components/waiter/WaiterPaymentDialog";
 import {
   fetchWaiterPayments,
   formatTimeAgo,
@@ -50,6 +53,7 @@ export function WaiterPaymentsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<WaiterOrder | null>(null);
+  const [submitOrder, setSubmitOrder] = useState<WaiterOrder | null>(null);
 
   const loadPayments = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -248,14 +252,28 @@ export function WaiterPaymentsPage() {
                         )}
                       </td>
                       <td className="p-3 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => setSelectedPaymentOrder(order)}
-                        >
-                          <Eye className="size-3.5 mr-1" /> View
-                        </Button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {order.waiterDecision === "approved" &&
+                            payment?.status !== "paid" &&
+                            (!proof || proof.status === "rejected") && (
+                              <Button
+                                size="sm"
+                                className="h-7 px-2.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90 font-semibold"
+                                onClick={() => setSubmitOrder(order)}
+                              >
+                                <Upload className="size-3 mr-1" />
+                                {proof?.status === "rejected" ? "Re-submit" : "Submit"}
+                              </Button>
+                            )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setSelectedPaymentOrder(order)}
+                          >
+                            <Eye className="size-3.5 mr-1" /> View
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -324,14 +342,16 @@ export function WaiterPaymentsPage() {
                         {formatETB(selectedPaymentOrder.payments[0].proof.submittedAmount)}
                       </span>
                     </div>
-                    {selectedPaymentOrder.payments[0].proof.transactionReference && (
-                      <div className="flex justify-between">
-                        <span>Transaction Ref:</span>
-                        <span className="font-mono text-foreground">
-                          {selectedPaymentOrder.payments[0].proof.transactionReference}
-                        </span>
-                      </div>
-                    )}
+                    <div className="flex justify-between">
+                      <span>Transaction Ref:</span>
+                      <span className="font-mono text-foreground">
+                        {selectedPaymentOrder.payments[0].proof.transactionReference || (
+                          <span className="text-muted-foreground italic font-sans font-normal">
+                            Not provided
+                          </span>
+                        )}
+                      </span>
+                    </div>
                     <div className="flex justify-between">
                       <span>Submitted At:</span>
                       <span>
@@ -346,6 +366,62 @@ export function WaiterPaymentsPage() {
                       {selectedPaymentOrder.payments[0].proof.rejectionReason}
                     </div>
                   )}
+
+                  {selectedPaymentOrder.payments[0].proof.screenshotPath && (
+                    <div className="pt-2 border-t border-border/40">
+                      <span className="text-muted-foreground block text-[11px] mb-1.5 font-medium">
+                        Payment Evidence Receipt:
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <a
+                          href={
+                            selectedPaymentOrder.payments[0].proof.screenshotPath.startsWith("http")
+                              ? selectedPaymentOrder.payments[0].proof.screenshotPath
+                              : supabase.storage
+                                  .from("payment-proofs")
+                                  .getPublicUrl(selectedPaymentOrder.payments[0].proof.screenshotPath).data.publicUrl
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group relative size-16 rounded-md overflow-hidden border border-border shrink-0 hover:ring-2 hover:ring-primary transition-all"
+                        >
+                          <img
+                            src={
+                              selectedPaymentOrder.payments[0].proof.screenshotPath.startsWith("http")
+                                ? selectedPaymentOrder.payments[0].proof.screenshotPath
+                                : supabase.storage
+                                    .from("payment-proofs")
+                                    .getPublicUrl(selectedPaymentOrder.payments[0].proof.screenshotPath).data.publicUrl
+                            }
+                            alt="Receipt thumbnail"
+                            className="size-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                            <Eye className="size-4" />
+                          </div>
+                        </a>
+                        <div className="text-[11px] space-y-1">
+                          <a
+                            href={
+                              selectedPaymentOrder.payments[0].proof.screenshotPath.startsWith("http")
+                                ? selectedPaymentOrder.payments[0].proof.screenshotPath
+                                : supabase.storage
+                                    .from("payment-proofs")
+                                    .getPublicUrl(selectedPaymentOrder.payments[0].proof.screenshotPath).data.publicUrl
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-primary hover:underline font-semibold"
+                          >
+                            <ExternalLink className="size-3" /> View Full Image
+                          </a>
+                          <p className="text-muted-foreground text-[10px]">
+                            {selectedPaymentOrder.payments[0].proof.screenshotPath.split("/").pop()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-border p-4 text-center text-muted-foreground space-y-1">
@@ -356,10 +432,38 @@ export function WaiterPaymentsPage() {
                   </p>
                 </div>
               )}
+
+              {selectedPaymentOrder.waiterDecision === "approved" &&
+                selectedPaymentOrder.payments?.[0]?.status !== "paid" &&
+                (!selectedPaymentOrder.payments?.[0]?.proof ||
+                  selectedPaymentOrder.payments?.[0]?.proof.status === "rejected") && (
+                  <Button
+                    size="sm"
+                    className="w-full mt-2 h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-semibold gap-1.5"
+                    onClick={() => {
+                      const o = selectedPaymentOrder;
+                      setSelectedPaymentOrder(null);
+                      setSubmitOrder(o);
+                    }}
+                  >
+                    <Upload className="size-3.5" />
+                    {selectedPaymentOrder.payments?.[0]?.proof?.status === "rejected"
+                      ? "Re-submit Payment Evidence"
+                      : "Submit Payment Evidence"}
+                  </Button>
+                )}
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Waiter Payment Submission Dialog */}
+      <WaiterPaymentDialog
+        order={submitOrder}
+        open={Boolean(submitOrder)}
+        onOpenChange={(open) => !open && setSubmitOrder(null)}
+        onSuccess={() => void loadPayments()}
+      />
     </div>
   );
 }

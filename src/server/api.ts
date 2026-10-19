@@ -47,6 +47,7 @@ import {
   getWaiterNotifications,
   markWaiterNotificationRead,
   getAvailableWaiters,
+  submitWaiterPaymentProof,
 } from "./waiter";
 
 const CORS_HEADERS: Record<string, string> = {
@@ -1039,6 +1040,87 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return json(rejected);
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : "Failed to reject order";
+          return badRequest(msg);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterPaymentProofMatch = pathname.match(/^\/api\/waiter\/orders\/([^/]+)\/payment-proof$/);
+    if (waiterPaymentProofMatch) {
+      const orderId = decodeURIComponent(waiterPaymentProofMatch[1]!);
+      if (method === "POST") {
+        const staffUser = await resolveStaffUser(request);
+        if (!staffUser) {
+          return unauthorized("Valid waiter or admin credentials required");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid payment proof payload");
+        }
+
+        const submittedAmount = Number(body.submittedAmount);
+        if (isNaN(submittedAmount) || submittedAmount <= 0) {
+          return badRequest("A valid positive payment amount is required.");
+        }
+
+        const paymentMethod = typeof body.paymentMethod === "string" ? body.paymentMethod.trim() : "";
+        if (!paymentMethod) {
+          return badRequest("A supported payment method is required.");
+        }
+
+        let screenshotPath = body.screenshotPath;
+        if (body.imageBase64 && typeof body.imageBase64 === "string") {
+          try {
+            const rawBase64 = body.imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+            const buffer = Buffer.from(rawBase64, "base64");
+            if (buffer.length > 5 * 1024 * 1024) {
+              return badRequest("Payment receipt file size exceeds the 5MB maximum limit.");
+            }
+            const ext = body.mimeType?.includes("png")
+              ? "png"
+              : body.mimeType?.includes("webp")
+                ? "webp"
+                : "jpg";
+            const storagePath = `proofs/${orderId}_waiter_${Date.now()}.${ext}`;
+            const { error: uploadErr } = await serverSupabase.storage
+              .from("payment-proofs")
+              .upload(storagePath, buffer, {
+                contentType: body.mimeType || "image/jpeg",
+                upsert: true,
+              });
+            if (uploadErr) {
+              console.warn("[api] Storage upload warning:", uploadErr.message);
+              return badRequest(`Storage upload failed: ${uploadErr.message}`);
+            }
+            screenshotPath = storagePath;
+          } catch (upEx) {
+            console.warn("[api] Image decode exception:", upEx);
+            return badRequest("Failed to process payment evidence image file.");
+          }
+        }
+
+        if (!screenshotPath) {
+          return badRequest("Payment evidence photo/screenshot is strictly required.");
+        }
+
+        const cleanTxRef =
+          typeof body.transactionReference === "string" && body.transactionReference.trim()
+            ? body.transactionReference.trim()
+            : null;
+
+        try {
+          const updatedOrder = await submitWaiterPaymentProof(staffUser, orderId, {
+            screenshotPath,
+            submittedAmount,
+            paymentMethod,
+            transactionReference: cleanTxRef,
+            notes: body.notes || null,
+          });
+          return json(updatedOrder);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "Failed to record payment proof";
           return badRequest(msg);
         }
       }
