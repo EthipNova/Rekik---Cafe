@@ -1,0 +1,313 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * REKIK COFFEE design system — Coffee Brown, Dark Espresso, Warm White, Golden Yellow, Light Cream.
+ * Elegant, premium Ethiopian coffee-house aesthetic.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --font-display: "Playfair Display", "Noto Serif Ethiopic", Georgia, serif;
+  --font-sans: "Inter", "Noto Sans Ethiopic", system-ui, -apple-system, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-espresso: var(--espresso);
+  --color-espresso-foreground: var(--espresso-foreground);
+  --color-cream: var(--cream);
+  --color-cream-foreground: var(--cream-foreground);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.875rem;
+
+  /* Warm White: #FFFDF7 — primary page backgrounds and content areas */
+  --background: #FFFDF7;
+  /* Dark Espresso: #24140D — high-contrast primary text */
+  --foreground: #24140D;
+
+  /* Card Surfaces: Pure Warm White with subtle cream border */
+  --card: #FFFFFF;
+  --card-foreground: #24140D;
+  --popover: #FFFFFF;
+  --popover-foreground: #24140D;
+
+  /* Coffee Brown: #4B2918 — primary brand color for headings, buttons, navigation */
+  --primary: #4B2918;
+  --primary-foreground: #FFFDF7;
+
+  /* Light Cream: #F4EBDD — secondary backgrounds, cards, and section separation */
+  --secondary: #F4EBDD;
+  --secondary-foreground: #4B2918;
+  --cream: #F4EBDD;
+  --cream-foreground: #24140D;
+
+  /* Muted: Soft cream-gray */
+  --muted: #F4EBDD;
+  --muted-foreground: #6F5E53;
+
+  /* Golden Yellow: #D4A447 — accent color for highlights, icons, borders, details */
+  --accent: #FBF4E8;
+  --accent-foreground: #4B2918;
+  --gold: #D4A447;
+  --gold-foreground: #24140D;
+
+  /* Dark Espresso: #24140D — dark backgrounds, footer, and premium sections */
+  --espresso: #24140D;
+  --espresso-foreground: #FFFDF7;
+
+  /* Semantic Colors */
+  --destructive: #A3281E;
+  --destructive-foreground: #FFFDF7;
+  --success: #2A6E3B;
+  --success-foreground: #FFFDF7;
+  --warning: #D4A447;
+  --warning-foreground: #24140D;
+
+  /* Borders & Focus: Warm Cream border with Golden Yellow focus ring */
+  --border: #E8DCCF;
+  --input: #E8DCCF;
+  --ring: #D4A447;
+
+  --chart-1: #4B2918;
+  --chart-2: #D4A447;
+  --chart-3: #7C4A2D;
+  --chart-4: #24140D;
+  --chart-5: #A88654;
+
+  /* Admin Sidebar: Dark Espresso with Golden Yellow and Warm White */
+  --sidebar: #24140D;
+  --sidebar-foreground: #F4EBDD;
+  --sidebar-primary: #D4A447;
+  --sidebar-primary-foreground: #24140D;
+  --sidebar-accent: #372016;
+  --sidebar-accent-foreground: #FFFDF7;
+  --sidebar-border: rgba(212, 164, 71, 0.2);
+  --sidebar-ring: #D4A447;
+
+  --gradient-hero: linear-gradient(
+    160deg,
+    rgba(36, 20, 13, 0.94) 0%,
+    rgba(75, 41, 24, 0.85) 50%,
+    rgba(36, 20, 13, 0.92) 100%
+  );
+  --gradient-gold: linear-gradient(135deg, #D4A447 0%, #B88930 100%);
+  --shadow-soft: 0 1px 3px rgba(75, 41, 24, 0.05), 0 10px 24px -12px rgba(75, 41, 24, 0.12);
+  --shadow-lift: 0 4px 12px rgba(75, 41, 24, 0.08), 0 20px 40px -16px rgba(75, 41, 24, 0.2);
+  --transition-smooth: 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dark {
+  --background: #190D08;
+  --foreground: #FFFDF7;
+  --card: #24140D;
+  --card-foreground: #FFFDF7;
+  --popover: #24140D;
+  --popover-foreground: #FFFDF7;
+  --primary: #D4A447;
+  --primary-foreground: #24140D;
+  --secondary: #351F14;
+  --secondary-foreground: #F4EBDD;
+  --muted: #351F14;
+  --muted-foreground: #BAA699;
+  --accent: #3E2418;
+  --accent-foreground: #D4A447;
+  --border: rgba(212, 164, 71, 0.2);
+  --input: rgba(212, 164, 71, 0.24);
+  --cream: #2C1A11;
+  --cream-foreground: #FFFDF7;
+  --espresso: #140A06;
+  --espresso-foreground: #FFFDF7;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.015em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
+
+@utility surface-card {
+  background-color: var(--color-card);
+  border: 1px solid #E8DCCF;
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 1px 2px rgba(75, 41, 24, 0.03),
+    var(--shadow-soft);
+}
+
+@utility hover-lift {
+  transition:
+    transform var(--transition-smooth),
+    box-shadow var(--transition-smooth);
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow:
+      var(--shadow-lift),
+      0 12px 28px -20px rgba(75, 41, 24, 0.35);
+  }
+}
+
+@utility text-gradient-gold {
+  background: var(--gradient-gold);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility overlay-hero {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(36, 20, 13, 0.88) 0%,
+      rgba(75, 41, 24, 0.76) 45%,
+      rgba(36, 20, 13, 0.90) 100%
+    ),
+    var(--gradient-hero);
+
+  @media (min-width: 640px) {
+    background:
+      radial-gradient(circle at 76% 52%, rgba(212, 164, 71, 0.22), transparent 32%),
+      linear-gradient(
+        90deg,
+        rgba(36, 20, 13, 0.94) 0%,
+        rgba(75, 41, 24, 0.78) 45%,
+        rgba(36, 20, 13, 0.45) 100%
+      ),
+      var(--gradient-hero);
+  }
+}
+
+@utility rise-in {
+  animation: rise-in 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@utility hero-food-visual {
+  animation: hero-food-settle 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  filter: saturate(1.08) contrast(1.04);
+  transform-origin: 72% center;
+}
+
+@utility hero-copy {
+  text-shadow: 0 2px 24px oklch(0 0 0 / 0.28);
+}
+
+@keyframes hero-food-settle {
+  from {
+    filter: saturate(1.13) contrast(1.08) brightness(0.88);
+    transform: scale(1.045);
+  }
+  to {
+    filter: saturate(1.08) contrast(1.04);
+    transform: scale(1);
+  }
+}
+
+@media (hover: hover) {
+  [data-slot="button"] {
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 180ms ease;
+  }
+
+  [data-slot="button"]:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+
+  [data-slot="button"]:not(:disabled):active {
+    transform: translateY(0) scale(0.98);
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in {
+    animation: none !important;
+  }
+
+  .hero-food-visual {
+    animation: none !important;
+  }
+}

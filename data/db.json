@@ -1,0 +1,576 @@
+{
+  "categories": [
+    {
+      "id": "cat-1",
+      "slug": "burgers",
+      "name": "Burgers",
+      "tagline": "Classic favorites",
+      "active": true
+    },
+    {
+      "id": "cat-2",
+      "slug": "pizza",
+      "name": "Pizza",
+      "tagline": "Freshly prepared",
+      "active": true
+    },
+    {
+      "id": "cat-3",
+      "slug": "sides",
+      "name": "Chips & Sides",
+      "tagline": "Perfect additions",
+      "active": true
+    },
+    {
+      "id": "cat-4",
+      "slug": "drinks",
+      "name": "Soft Drinks",
+      "tagline": "Refresh yourself",
+      "active": true
+    },
+    {
+      "id": "cat-5",
+      "slug": "coffee",
+      "name": "Coffee & Tea",
+      "tagline": "Artisanal roasts & blends",
+      "active": true
+    },
+    {
+      "id": "cat-6",
+      "slug": "pastries",
+      "name": "Pastries",
+      "tagline": "Freshly baked daily",
+      "active": true
+    },
+    {
+      "id": "cat-7",
+      "slug": "other",
+      "name": "Other",
+      "tagline": "Seasonal picks",
+      "active": true
+    }
+  ],
+  "products": [
+    {
+      "id": "p-mtzkb8y0",
+      "name": "Neba Jambo Burger",
+      "slug": "neba-jambo-burger",
+      "categorySlug": "burgers",
+      "description": "sidkjgvhuarpi",
+      "ingredients": [],
+      "price": 750,
+      "image": "/images/classic-burger.jpg",
+      "available": true,
+      "featured": false
+    },
+    {
+      "id": "p-1",
+      "name": "Classic Burger",
+      "slug": "classic-burger",
+      "categorySlug": "burgers",
+      "description": "Fresh beef patty, vegetables and special sauce.",
+      "ingredients": ["Beef patty", "Lettuce", "Tomato", "Special sauce", "Sesame bun"],
+      "price": 250,
+      "image": "/images/classic-burger.jpg",
+      "available": true,
+      "featured": true
+    },
+    {
+      "id": "p-2",
+      "name": "Cheese Burger",
+      "slug": "cheese-burger",
+      "categorySlug": "burgers",
+      "description": "Double beef patty layered with melted cheddar cheese.",
+      "ingredients": ["Beef patty", "Cheddar cheese", "Pickles", "House sauce"],
+      "price": 300,
+      "image": "/images/cheese-burger.jpg",
+      "available": true,
+      "featured": true
+    },
+    {
+      "id": "p-3",
+      "name": "Chicken Burger",
+      "slug": "chicken-burger",
+      "categorySlug": "burgers",
+      "description": "Crispy chicken fillet with fresh slaw and mild mayo.",
+      "ingredients": ["Chicken fillet", "Cabbage slaw", "Mayo", "Brioche bun"],
+      "price": 280,
+      "image": "/images/chicken-burger.jpg",
+      "available": false,
+      "featured": true
+    },
+    {
+      "id": "p-4",
+      "name": "Margherita Pizza",
+      "slug": "margherita-pizza",
+      "categorySlug": "pizza",
+      "description": "Stone-baked dough, tomato sauce, mozzarella and basil.",
+      "ingredients": ["Pizza dough", "Tomato sauce", "Mozzarella", "Fresh basil"],
+      "price": 420,
+      "image": "/images/margherita.jpg",
+      "available": true,
+      "featured": true
+    },
+    {
+      "id": "p-5",
+      "name": "Chicken Pizza",
+      "slug": "chicken-pizza",
+      "categorySlug": "pizza",
+      "description": "Grilled chicken, sweet peppers and mozzarella.",
+      "ingredients": ["Pizza dough", "Grilled chicken", "Peppers", "Mozzarella"],
+      "price": 480,
+      "image": "/images/chicken-pizza.jpg",
+      "available": true,
+      "featured": true
+    },
+    {
+      "id": "p-6",
+      "name": "French Fries",
+      "slug": "french-fries",
+      "categorySlug": "sides",
+      "description": "Golden, crispy and lightly salted.",
+      "ingredients": ["Potato", "Sunflower oil", "Sea salt"],
+      "price": 100,
+      "image": "/images/fries.jpg",
+      "available": false,
+      "featured": true
+    },
+    {
+      "id": "p-7",
+      "name": "Coca-Cola",
+      "slug": "coca-cola",
+      "categorySlug": "drinks",
+      "description": "Chilled 300ml bottle.",
+      "ingredients": [],
+      "price": 50,
+      "image": "/images/cola.jpg",
+      "available": true,
+      "featured": false
+    },
+    {
+      "id": "p-8",
+      "name": "Sprite",
+      "slug": "sprite",
+      "categorySlug": "drinks",
+      "description": "Chilled 300ml bottle.",
+      "ingredients": [],
+      "price": 50,
+      "image": "/images/sprite.jpg",
+      "available": true,
+      "featured": false
+    },
+    {
+      "id": "p-9",
+      "name": "Water",
+      "slug": "water",
+      "categorySlug": "drinks",
+      "description": "Still mineral water, 500ml.",
+      "ingredients": [],
+      "price": 30,
+      "image": "/images/water.jpg",
+      "available": true,
+      "featured": false
+    },
+    {
+      "id": "p-10",
+      "name": "Ethiopian Yirgacheffe Pour-Over",
+      "slug": "ethiopian-yirgacheffe",
+      "categorySlug": "coffee",
+      "description": "Single-origin pour-over with fragrant floral jasmine notes and vibrant citrus acidity.",
+      "ingredients": ["Yirgacheffe Coffee Beans", "Filtered Water"],
+      "price": 95,
+      "image": "/images/hero.jpg",
+      "available": true,
+      "featured": true
+    },
+    {
+      "id": "p-11",
+      "name": "Cardamom Cinnamon Swirl",
+      "slug": "cardamom-cinnamon-swirl",
+      "categorySlug": "pastries",
+      "description": "Artisan baked pastry layered with warm cardamom, Ceylon cinnamon and raw cane glaze.",
+      "ingredients": ["Flour", "Butter", "Cardamom", "Cinnamon", "Cane Sugar"],
+      "price": 120,
+      "image": "/images/about.jpg",
+      "available": true,
+      "featured": false
+    }
+  ],
+  "promotions": [
+    {
+      "id": "promo_mtzm5zed",
+      "name": "Pizza Special",
+      "description": "fxkghnm",
+      "discountType": "percentage",
+      "discountValue": 10,
+      "applicableProductIds": ["p-4", "p-5"],
+      "startDate": "2026-09-13",
+      "endDate": "2026-09-20",
+      "status": "active",
+      "createdAt": "2026-09-13T09:30:44.729Z"
+    },
+    {
+      "id": "promo-1",
+      "name": "Today's Special: Cheese Burger + French Fries",
+      "description": "Our double cheddar burger paired with golden fries, for a limited time.",
+      "discountType": "percentage",
+      "discountValue": 15,
+      "applicableProductIds": ["p-2", "p-6"],
+      "applicableCategorySlug": "burgers",
+      "startDate": "2026-01-01",
+      "endDate": "2026-12-31",
+      "status": "active",
+      "minOrderAmount": 300,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "settings": {
+    "cafeName": "NEBA Café",
+    "phone": "+251 91 123 4567",
+    "email": "hello@nebacafe.com",
+    "address": "Piassa, Next to Kibru Hospital, Hawassa, Ethiopia.",
+    "openingHours": "Mon - Sun: 8:00 AM - 11:00 PM",
+    "theme": "light",
+    "showToasts": true
+  },
+  "orders": [
+    {
+      "id": "ord_mu2lr371_2yop",
+      "number": "#1050",
+      "createdAt": "2026-09-15T11:42:28.333Z",
+      "method": "dine-in",
+      "status": "received",
+      "paymentStatus": "paid",
+      "paymentMethod": "Telebirr Mobile",
+      "customer": {
+        "name": "Herani Wudma",
+        "phone": "+251900467999",
+        "table": "Table 12"
+      },
+      "items": [
+        {
+          "productId": "PROD-BURGER-001",
+          "name": "Classic Burger",
+          "quantity": 1,
+          "price": 250
+        }
+      ],
+      "subtotal": 250,
+      "discount": 0,
+      "delivery": 0,
+      "total": 250
+    },
+    {
+      "id": "ord_mu2k4dil_52dg",
+      "number": "#1042",
+      "createdAt": "2026-09-15T10:56:49.005Z",
+      "method": "delivery",
+      "status": "received",
+      "paymentStatus": "paid",
+      "paymentMethod": "CBE Birr",
+      "customer": {
+        "name": "Herani Wudma",
+        "phone": "+251900467999",
+        "address": "A.A"
+      },
+      "items": [
+        {
+          "productId": "PROD-73EBDAA3-4AE6",
+          "name": "Neba  Double Jambo Burger",
+          "quantity": 1,
+          "price": 450
+        }
+      ],
+      "subtotal": 450,
+      "discount": 0,
+      "delivery": 90,
+      "total": 540
+    },
+    {
+      "id": "ord_mu2ftsgq_j9ad",
+      "number": "#1068",
+      "createdAt": "2026-09-15T08:56:36.698Z",
+      "method": "delivery",
+      "status": "confirmed",
+      "paymentStatus": "paid",
+      "paymentMethod": "Mobile Payment",
+      "customer": {
+        "name": "Herani Wudma",
+        "phone": "+251900467999",
+        "address": "A.A"
+      },
+      "items": [
+        {
+          "productId": "PROD-PIZZA-001",
+          "name": "Special Pizza",
+          "quantity": 1,
+          "price": 450
+        }
+      ],
+      "subtotal": 450,
+      "discount": 0,
+      "delivery": 90,
+      "total": 540
+    },
+    {
+      "id": "ord_mu0xzgsv_ypy5",
+      "number": "#1076",
+      "createdAt": "2026-09-14T07:49:22.255Z",
+      "method": "takeaway",
+      "status": "completed",
+      "paymentStatus": "paid",
+      "paymentMethod": "Mobile Payment",
+      "customer": {
+        "name": "Henok Lema",
+        "phone": "0901342209"
+      },
+      "items": [
+        {
+          "productId": "PROD-3C5CBF5C-3103",
+          "name": "bql",
+          "quantity": 2,
+          "price": 350
+        }
+      ],
+      "subtotal": 700,
+      "discount": 0,
+      "delivery": 0,
+      "total": 700
+    },
+    {
+      "id": "ord_mu03ub8b_bv9o",
+      "number": "#1030",
+      "createdAt": "2026-09-13T17:45:33.275Z",
+      "method": "delivery",
+      "status": "completed",
+      "paymentStatus": "paid",
+      "paymentMethod": "Other Supported Method",
+      "customer": {
+        "name": "Herani Wudma",
+        "phone": "0900467999",
+        "address": "Hawassa Techno Campus"
+      },
+      "items": [
+        {
+          "productId": "PROD-73EBDAA3-4AE6",
+          "name": "Neba  Double Jambo Burger",
+          "quantity": 1,
+          "price": 450
+        },
+        {
+          "productId": "PROD-8E3F3559-2A1D",
+          "name": "sdf",
+          "quantity": 1,
+          "price": 234
+        }
+      ],
+      "subtotal": 684,
+      "discount": 0,
+      "delivery": 90,
+      "total": 774
+    },
+    {
+      "id": "ord_mu02xyrt_o083",
+      "number": "#1046",
+      "createdAt": "2026-09-13T17:20:24.137Z",
+      "method": "delivery",
+      "status": "confirmed",
+      "paymentStatus": "paid",
+      "paymentMethod": "Other Supported Method",
+      "customer": {
+        "name": "Herani Wudma",
+        "phone": "0900467999",
+        "address": "Hawassa Techno Campus"
+      },
+      "items": [
+        {
+          "productId": "PROD-73EBDAA3-4AE6",
+          "name": "Neba  Double Jambo Burger",
+          "quantity": 1,
+          "price": 450
+        },
+        {
+          "productId": "PROD-8E3F3559-2A1D",
+          "name": "sdf",
+          "quantity": 1,
+          "price": 234
+        }
+      ],
+      "subtotal": 684,
+      "discount": 0,
+      "delivery": 90,
+      "total": 774
+    },
+    {
+      "id": "ord_mu02ev4h_5c15",
+      "number": "#1029",
+      "createdAt": "2026-09-13T17:05:32.945Z",
+      "method": "dine-in",
+      "status": "preparing",
+      "paymentStatus": "paid",
+      "paymentMethod": "Mobile Payment",
+      "customer": {
+        "name": "Abebe Bikila",
+        "phone": "+251911000000",
+        "table": "4"
+      },
+      "items": [
+        {
+          "productId": "PROD-BURGER-001",
+          "name": "Classic Burger",
+          "quantity": 2,
+          "price": 250
+        }
+      ],
+      "subtotal": 500,
+      "discount": 0,
+      "delivery": 0,
+      "total": 500
+    },
+    {
+      "id": "ord_mtzlqz3y_2jzm",
+      "number": "#1066",
+      "createdAt": "2026-09-13T09:19:04.510Z",
+      "method": "delivery",
+      "status": "completed",
+      "paymentStatus": "paid",
+      "paymentMethod": "Mobile Payment",
+      "customer": {
+        "name": "Herani Wudma",
+        "phone": "0900467999",
+        "address": "Hawassa Techno Campus"
+      },
+      "items": [
+        {
+          "productId": "p-2",
+          "name": "Cheese Burger",
+          "quantity": 1,
+          "price": 300
+        },
+        {
+          "productId": "p-1",
+          "name": "Classic Burger",
+          "quantity": 1,
+          "price": 250
+        }
+      ],
+      "subtotal": 550,
+      "discount": 0,
+      "delivery": 80,
+      "total": 630
+    },
+    {
+      "id": "ord_mtzkzcik_okqp",
+      "number": "#1066",
+      "createdAt": "2026-09-13T08:57:35.517Z",
+      "method": "dine-in",
+      "status": "completed",
+      "paymentStatus": "paid",
+      "paymentMethod": "Mobile Payment",
+      "customer": {
+        "name": "Herani Wudma",
+        "phone": "0900467999",
+        "table": "Table 12"
+      },
+      "items": [
+        {
+          "productId": "p-mtzkb8y0",
+          "name": "Neba Jambo Burger",
+          "quantity": 1,
+          "price": 750
+        },
+        {
+          "productId": "p-4",
+          "name": "Margherita Pizza",
+          "quantity": 1,
+          "price": 420
+        },
+        {
+          "productId": "p-2",
+          "name": "Cheese Burger",
+          "quantity": 1,
+          "price": 300
+        }
+      ],
+      "subtotal": 1470,
+      "discount": 0,
+      "delivery": 0,
+      "total": 1470
+    },
+    {
+      "id": "ord_mtzk4800_3h35",
+      "number": "#1050",
+      "createdAt": "2026-09-13T08:33:23.328Z",
+      "method": "dine-in",
+      "status": "ready",
+      "paymentStatus": "paid",
+      "paymentMethod": "Mobile Payment",
+      "customer": {
+        "name": "Abebe B.",
+        "phone": "+251911000000",
+        "table": "5"
+      },
+      "items": [
+        {
+          "productId": "p-1",
+          "name": "Classic Burger",
+          "quantity": 2,
+          "price": 250
+        }
+      ],
+      "subtotal": 500,
+      "discount": 0,
+      "delivery": 0,
+      "total": 500
+    },
+    {
+      "id": "ord_mtzj48na_687a",
+      "number": "#1011",
+      "createdAt": "2026-09-13T08:05:24.550Z",
+      "method": "dine-in",
+      "status": "preparing",
+      "paymentStatus": "paid",
+      "paymentMethod": "Mobile Payment",
+      "customer": {
+        "table": "4",
+        "name": "Abebe Kebede",
+        "phone": "+251 91 234 5678"
+      },
+      "items": [
+        {
+          "productId": "p-1",
+          "name": "Classic Burger",
+          "quantity": 2,
+          "price": 250
+        },
+        {
+          "productId": "p-6",
+          "name": "French Fries",
+          "quantity": 1,
+          "price": 100
+        }
+      ],
+      "subtotal": 600,
+      "discount": 0,
+      "delivery": 0,
+      "total": 600
+    }
+  ],
+  "about_content": {
+    "id": 1,
+    "homepage_hero_image": "/images/rekik-hero.jpg",
+    "about_hero_image": "/images/rekik-story.jpg",
+    "about_title": "Ethiopia's Finest Harvest, Artfully Roasted",
+    "about_description": "At Rekik Coffee, we honour generations of Ethiopian coffee heritage. From the misty highlands of Yirgacheffe, Sidama, and Guji to your cup, we roast specialty-grade single-origin beans with passion, authenticity, and warm Ethiopian hospitality.",
+    "story_title": "Rooted in Tradition. Crafted for the Modern Palate.",
+    "story_content": "Rekik Coffee was founded on a deep reverence for the birthplace of coffee. In Ethiopia, coffee is not just a morning ritual—it is community, conversation, and a celebration of life through the timeless Buna ceremony.\n\nWe unite this rich heritage with precision artisanal roasting. Every batch is hand-selected and crafted to bring out complex floral aromas, bright citrus notes, and silky chocolate finishes.",
+    "story_image": "/images/rekik-story.jpg",
+    "value_1_title": "Single-Origin Purity",
+    "value_1_description": "Ethically sourced from high-altitude Ethiopian farms renowned for unparalleled cup quality.",
+    "value_2_title": "Artisanal Roasting",
+    "value_2_description": "Small-batch roasted to unlock the vibrant floral, fruity, and sweet nuances of authentic heirloom beans.",
+    "value_3_title": "Warm Buna Hospitality",
+    "value_3_description": "Experience genuine Ethiopian warmth, whether you are enjoying a slow pour-over in our café or ordering ahead online.",
+    "updated_at": "2026-10-18T00:00:00.000Z"
+  }
+}
