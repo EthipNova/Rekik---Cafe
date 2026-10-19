@@ -7,6 +7,8 @@ import {
   Clock,
   CreditCard,
   ExternalLink,
+  Eye,
+  Image as ImageIcon,
   MapPin,
   Phone,
   Receipt,
@@ -15,7 +17,9 @@ import {
   Smartphone,
   Store,
   Truck,
+  Upload,
   Utensils,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -27,7 +31,7 @@ import { EmptyState, Section } from "@/components/site/Section";
 import { OrderTimeline } from "@/components/site/OrderTimeline";
 import { formatETB, getProduct } from "@/lib/menu-data";
 import { findOrder, methodLabels, statusLabels, type Order } from "@/lib/orders";
-import { fetchOrderById, updateOrderPayment } from "@/services/api";
+import { fetchOrderById, submitPaymentProof, updateOrderPayment } from "@/services/api";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +74,9 @@ function OrderPage() {
   const [paymentMethod, setPaymentMethod] = useState<"telebirr" | "cbe" | "cash">("telebirr");
   const [txRef, setTxRef] = useState("");
   const [paying, setPaying] = useState(false);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [submittingProof, setSubmittingProof] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +106,20 @@ function OrderPage() {
       .on("postgres_changes" as any, { event: "*", schema: "public", table: "payments" }, () => {
         void load();
       })
+      .on(
+        "postgres_changes" as any,
+        { event: "*", schema: "public", table: "payment_proofs" },
+        () => {
+          void load();
+        },
+      )
+      .on(
+        "postgres_changes" as any,
+        { event: "*", schema: "public", table: "order_approvals" },
+        () => {
+          void load();
+        },
+      )
       .subscribe();
 
     // Multi-tab storage sync
@@ -109,10 +130,10 @@ function OrderPage() {
     };
     window.addEventListener("storage", handleStorage);
 
-    // Active polling interval every 8s
+    // Active polling interval every 5s for snappy live status feedback
     const pollInterval = setInterval(() => {
       void load();
-    }, 8000);
+    }, 5000);
 
     return () => {
       cancelled = true;
@@ -122,28 +143,84 @@ function OrderPage() {
     };
   }, [id]);
 
-  const handleCompletePayment = async () => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file (PNG, JPG, WebP).");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File size exceeds 5MB limit. Please upload a smaller screenshot.");
+      return;
+    }
+    setProofFile(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProofPreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleClearFile = () => {
+    setProofFile(null);
+    setProofPreview(null);
+  };
+
+  const handleSubmitProof = async () => {
     if (!state.order) return;
-    setPaying(true);
+    if (!proofPreview || !proofFile) {
+      toast.error("Please select a payment screenshot image to upload.");
+      return;
+    }
+    setSubmittingProof(true);
     try {
+      const base64Data: string = proofPreview.includes(",")
+        ? (proofPreview.split(",")[1] ?? "")
+        : proofPreview;
+
       const methodName =
         paymentMethod === "telebirr"
-          ? "Telebirr Mobile"
+          ? "Telebirr Mobile Payment"
           : paymentMethod === "cbe"
-            ? "CBE Birr"
-            : "Cash / In-Person";
+            ? "CBE Birr / Mobile Banking"
+            : "Mobile Transfer";
 
-      const updated = await updateOrderPayment(state.order.id, {
-        paymentStatus: "paid",
-        paymentMethod: methodName,
+      const updated = await submitPaymentProof(state.order.id, {
+        imageBase64: base64Data,
+        mimeType: proofFile.type,
         transactionReference: txRef.trim() || undefined,
+        paymentMethod: methodName,
       });
 
       setState((prev) => ({ ...prev, order: updated }));
-      toast.success("Payment confirmed! Kitchen notified.");
+      toast.success("Payment screenshot uploaded! Awaiting cashier review.");
+      setProofFile(null);
+      setProofPreview(null);
+      setTxRef("");
+    } catch (err: unknown) {
+      console.error("Payment proof submission error:", err);
+      const msg = err instanceof Error ? err.message : "Failed to upload payment proof.";
+      toast.error(msg);
+    } finally {
+      setSubmittingProof(false);
+    }
+  };
+
+  const handleConfirmCashAtTable = async () => {
+    if (!state.order) return;
+    setPaying(true);
+    try {
+      const updated = await updateOrderPayment(state.order.id, {
+        paymentStatus: "pending",
+        paymentMethod: "Cash at Table",
+        transactionReference: "Cash Settlement with Server",
+      });
+      setState((prev) => ({ ...prev, order: updated }));
+      toast.success("Cash payment recorded! Your server will collect at your table.");
     } catch (err) {
       console.error(err);
-      toast.error("Failed to confirm payment. Please try again.");
+      toast.error("Failed to update payment method.");
     } finally {
       setPaying(false);
     }
@@ -184,6 +261,11 @@ function OrderPage() {
   const isDineIn = order.method === "dine-in";
   const isTakeaway = order.method === "takeaway";
 
+  const isWaitingForWaiter = isDineIn && order.waiterDecision === "pending";
+  const isRejectedByWaiter = order.waiterDecision === "rejected";
+  const isUnderCashierReview = order.paymentProof?.status === "pending";
+  const isPaid = order.paymentStatus === "paid";
+
   const MethodIcon = isDelivery ? Truck : isTakeaway ? Store : Utensils;
   const totalItemsCount = order.items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -194,12 +276,16 @@ function OrderPage() {
         <div
           className={cn(
             "mx-auto flex size-16 sm:size-20 items-center justify-center rounded-full ring-8",
-            order.paymentStatus === "paid"
-              ? "bg-success/15 text-success ring-success/5"
-              : "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/5",
+            isRejectedByWaiter
+              ? "bg-destructive/15 text-destructive ring-destructive/5"
+              : isPaid
+                ? "bg-success/15 text-success ring-success/5"
+                : "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/5",
           )}
         >
-          {order.paymentStatus === "paid" ? (
+          {isRejectedByWaiter ? (
+            <AlertCircle className="size-10 sm:size-12" aria-hidden />
+          ) : isPaid ? (
             <CheckCircle2 className="size-10 sm:size-12" aria-hidden />
           ) : (
             <Clock className="size-10 sm:size-12 animate-pulse" aria-hidden />
@@ -208,27 +294,55 @@ function OrderPage() {
 
         <div className="mt-5">
           <Badge
-            variant={order.paymentStatus === "paid" ? "secondary" : "outline"}
+            variant={isPaid ? "secondary" : "outline"}
             className={cn(
               "rounded-full px-3 py-1 text-xs uppercase tracking-wider font-semibold",
-              order.paymentStatus === "paid"
-                ? "bg-success/15 text-success border-success/30"
-                : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+              isRejectedByWaiter
+                ? "bg-destructive/15 text-destructive border-destructive/30"
+                : isWaitingForWaiter
+                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                  : isUnderCashierReview
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                    : isPaid
+                      ? "bg-success/15 text-success border-success/30"
+                      : "bg-primary/10 text-primary border-primary/30",
             )}
           >
-            {order.paymentStatus === "paid"
-              ? "Order Placed & Paid"
-              : "Order Received — Payment Pending"}
+            {isRejectedByWaiter
+              ? "Order Rejected by Server"
+              : isWaitingForWaiter
+                ? "Waiting for waiter approval"
+                : isUnderCashierReview
+                  ? "Payment submitted — awaiting cashier review"
+                  : isPaid
+                    ? "Order Placed & Paid"
+                    : isDineIn
+                      ? "Server Approved — Settle Payment"
+                      : "Order Received — Payment Pending"}
           </Badge>
           <h1 className="mt-3 font-display text-3xl sm:text-4xl md:text-5xl font-semibold">
-            {order.paymentStatus === "paid"
-              ? "Thank you for your order!"
-              : "Order Received — Settle Payment"}
+            {isRejectedByWaiter
+              ? "Order Rejected by Server"
+              : isWaitingForWaiter
+                ? "Waiting for waiter approval"
+                : isUnderCashierReview
+                  ? "Payment submitted — awaiting cashier review"
+                  : isPaid
+                    ? "Thank you for your order!"
+                    : isDineIn
+                      ? "Order Approved — Complete Payment"
+                      : "Order Received — Settle Payment"}
           </h1>
           <p className="mt-3 max-w-xl mx-auto text-sm sm:text-base text-muted-foreground">
-            {order.paymentStatus === "paid"
-              ? "Your order has been recorded in the café database and is actively being processed by the kitchen."
-              : "Your order details have been saved to the persistent database. Please authorize your payment below to finalize fulfillment."}
+            {isRejectedByWaiter
+              ? `Your assigned server was unable to accept this order at Table #${order.customer.table || "—"}. Please browse our menu to place a new order.`
+              : isWaitingForWaiter
+                ? `Your order at Table #${order.customer.table || "—"} has been assigned to server ${order.waiterName || "assigned staff"}. Please wait for your server to confirm your items before proceeding to payment.`
+                : isUnderCashierReview
+                  ? "Your payment screenshot has been submitted and is currently in the cashier review queue. You will be notified once verified."
+                  : isPaid
+                    ? "Your order has been recorded in the café database and is actively being processed by the kitchen."
+                    : "Your order details have been saved to the persistent database. Please authorize your payment below to finalize fulfillment."}
           </p>
         </div>
 
@@ -261,7 +375,11 @@ function OrderPage() {
             </span>
             <span className="inline-flex items-center gap-1.5 text-sm sm:text-base font-medium text-primary">
               <span className="size-2 rounded-full bg-primary animate-pulse" aria-hidden />
-              {statusLabels[order.status]}
+              {isWaitingForWaiter
+                ? "Awaiting Waiter Review"
+                : isUnderCashierReview
+                  ? "Under Cashier Review"
+                  : statusLabels[order.status]}
             </span>
           </div>
 
@@ -272,9 +390,7 @@ function OrderPage() {
             <span
               className={cn(
                 "font-display text-lg sm:text-xl font-bold",
-                order.paymentStatus === "paid"
-                  ? "text-success"
-                  : "text-amber-600 dark:text-amber-400",
+                isPaid ? "text-success" : "text-amber-600 dark:text-amber-400",
               )}
             >
               {formatETB(order.total)}
@@ -340,17 +456,50 @@ function OrderPage() {
               </div>
 
               {isDineIn && (
-                <div className="flex items-start gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                    <Utensils className="size-5" aria-hidden />
-                  </span>
-                  <div>
-                    <dt className="text-xs text-muted-foreground font-medium">Table assignment</dt>
-                    <dd className="font-display text-base font-semibold text-foreground">
-                      Table #{order.customer.table || "Not specified"}
-                    </dd>
+                <>
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
+                      <Utensils className="size-5" aria-hidden />
+                    </span>
+                    <div>
+                      <dt className="text-xs text-muted-foreground font-medium">Table assignment</dt>
+                      <dd className="font-display text-base font-semibold text-foreground">
+                        Table #{order.customer.table || "Not specified"}
+                      </dd>
+                    </div>
                   </div>
-                </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
+                      <Receipt className="size-5" aria-hidden />
+                    </span>
+                    <div>
+                      <dt className="text-xs text-muted-foreground font-medium">Assigned Server</dt>
+                      <dd className="font-medium text-foreground">
+                        {order.waiterName || "Pending Server Assignment"}
+                      </dd>
+                      <span className="mt-1 inline-flex">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] px-2 py-0.5 font-semibold uppercase",
+                            order.waiterDecision === "approved"
+                              ? "bg-success/10 text-success border-success/30"
+                              : order.waiterDecision === "rejected"
+                                ? "bg-destructive/10 text-destructive border-destructive/30"
+                                : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30",
+                          )}
+                        >
+                          {order.waiterDecision === "approved"
+                            ? "Approved by Server"
+                            : order.waiterDecision === "rejected"
+                              ? "Rejected by Server"
+                              : "Pending Server Review"}
+                        </Badge>
+                      </span>
+                    </div>
+                  </div>
+                </>
               )}
 
               {order.customer.name && order.customer.name !== "Dine-in guest" && (
@@ -527,20 +676,186 @@ function OrderPage() {
               </Badge>
             </div>
 
-            {/* If Payment is Pending: Show interactive settlement panel */}
-            {order.paymentStatus !== "paid" ? (
+            {/* CASE 1: Rejected by Waiter */}
+            {isRejectedByWaiter ? (
               <div className="mt-4 space-y-4">
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
-                  <AlertCircle className="size-4 shrink-0 mt-0.5 text-amber-600" />
-                  <div>
-                    <p className="font-semibold">Action required: Complete your payment</p>
-                    <p className="mt-0.5 text-muted-foreground">
-                      Your order is pending settlement of{" "}
-                      <strong className="text-foreground">{formatETB(order.total)}</strong>. Select
-                      a method below to finalize.
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive flex items-start gap-3">
+                  <AlertCircle className="size-5 shrink-0 mt-0.5 text-destructive" />
+                  <div className="space-y-1.5 flex-1">
+                    <p className="font-semibold text-sm">Order Rejected by Assigned Server</p>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Your server was unable to accept this order at Table #{order.customer.table || "—"}. Payment is disabled.
                     </p>
+                    {order.waiterRejectionReason && (
+                      <div className="mt-2 rounded-md bg-background/80 p-2.5 border border-destructive/20 text-xs">
+                        <span className="font-semibold text-destructive block">Reason provided:</span>
+                        <p className="text-foreground italic mt-0.5">"{order.waiterRejectionReason}"</p>
+                      </div>
+                    )}
                   </div>
                 </div>
+                <Button asChild variant="outline" className="w-full">
+                  <Link to="/menu">Browse Menu & Start New Order</Link>
+                </Button>
+              </div>
+            ) : isWaitingForWaiter ? (
+              /* CASE 2: Dine-In Waiting for Waiter Approval */
+              <div className="mt-4 space-y-4">
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-3">
+                  <div className="flex items-center gap-2.5 text-amber-800 dark:text-amber-300 font-semibold text-sm">
+                    <Clock className="size-5 animate-pulse text-amber-600" />
+                    <span>Waiting for waiter approval</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Your order has been routed to{" "}
+                    <strong className="text-foreground">{order.waiterName || "your assigned server"}</strong> for confirmation. Payment options will unlock here automatically as soon as your server approves.
+                  </p>
+                  <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Table:</span>
+                      <span className="font-semibold text-foreground">Table #{order.customer.table || "—"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Assigned Server:</span>
+                      <span className="font-semibold text-primary">{order.waiterName || "Pending floor assignment"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Server Decision:</span>
+                      <Badge
+                        variant="outline"
+                        className="bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 text-[10px] font-semibold uppercase tracking-wider"
+                      >
+                        Pending Review
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Payment Status:</span>
+                      <span className="font-mono text-muted-foreground text-[11px]">Locked until waiter approval</span>
+                    </div>
+                  </div>
+                  <div className="rounded-md bg-muted/40 p-2.5 text-[11px] text-muted-foreground flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                    <span>Live realtime connection active — this page updates instantly.</span>
+                  </div>
+                </div>
+              </div>
+            ) : isUnderCashierReview ? (
+              /* CASE 3: Screenshot Submitted, Awaiting Cashier Review */
+              <div className="mt-4 space-y-4">
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-semibold text-sm">
+                    <Clock className="size-5 animate-pulse text-amber-600" />
+                    <span>Payment submitted — awaiting cashier review</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Your payment transfer proof has been recorded and queued. Our cashier is reviewing the transaction details.
+                  </p>
+                  <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Amount:</span>
+                      <span className="font-bold text-foreground">{formatETB(order.total)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Payment Method:</span>
+                      <span className="font-medium text-foreground">{order.paymentMethod || "Mobile Transfer"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Transaction Ref:</span>
+                      <span className="font-mono font-semibold text-foreground">
+                        {order.paymentProof?.transactionReference || (
+                          <span className="text-muted-foreground italic font-sans font-normal text-xs">
+                            Not provided
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Review Status:</span>
+                      <Badge
+                        variant="outline"
+                        className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 text-[10px] uppercase font-semibold"
+                      >
+                        Pending Cashier Review
+                      </Badge>
+                    </div>
+                    {order.paymentProof?.screenshotPath && (
+                      <div className="pt-2 border-t border-border/40">
+                        <span className="text-muted-foreground block text-[11px] mb-1">Submitted Proof:</span>
+                        <a
+                          href={
+                            order.paymentProof.screenshotPath.startsWith("http")
+                              ? order.paymentProof.screenshotPath
+                              : supabase.storage
+                                  .from("payment-proofs")
+                                  .getPublicUrl(order.paymentProof.screenshotPath).data.publicUrl
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline font-semibold"
+                        >
+                          <Eye className="size-3.5" />
+                          <span>View Uploaded Screenshot</span>
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-md bg-muted/40 p-2.5 text-[11px] text-muted-foreground flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                    <span>Listening for cashier verification. Once verified, status will update to Paid automatically.</span>
+                  </div>
+                </div>
+              </div>
+            ) : isPaid ? (
+              /* CASE 4: Payment Paid & Verified */
+              <dl className="mt-4 space-y-2.5 text-xs sm:text-sm">
+                <div className="flex items-center justify-between">
+                  <dt className="text-muted-foreground">Payment method</dt>
+                  <dd className="font-medium text-foreground">
+                    {order.paymentMethod || "Mobile Payment"}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-muted-foreground">Amount settled</dt>
+                  <dd className="font-bold text-success">{formatETB(order.total)}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-muted-foreground">Payment status</dt>
+                  <dd>
+                    <Badge
+                      variant="default"
+                      className="bg-success text-success-foreground hover:bg-success text-xs"
+                    >
+                      Paid & Verified
+                    </Badge>
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              /* CASE 5: Waiter has approved — Customer selects payment method and submits proof */
+              <div className="mt-4 space-y-4">
+                {isDineIn && (
+                  <div className="rounded-lg border border-success/30 bg-success/10 p-3 text-xs text-success-800 dark:text-success-200 flex items-start gap-2">
+                    <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-success" />
+                    <div>
+                      <p className="font-semibold">Order Approved by {order.waiterName || "Server"}</p>
+                      <p className="text-muted-foreground">
+                        Your server has confirmed your order at Table #{order.customer.table || "—"}. Please select your payment method below.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {order.paymentProof?.status === "rejected" && (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
+                    <AlertCircle className="size-4 shrink-0 mt-0.5 text-destructive" />
+                    <div>
+                      <p className="font-semibold">Previous Payment Proof Rejected</p>
+                      <p className="text-muted-foreground">
+                        {order.paymentProof.rejectionReason || "The uploaded screenshot could not be verified by the cashier."} Please re-upload a valid payment screenshot.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Method selector */}
                 <div className="space-y-2">
@@ -563,8 +878,14 @@ function OrderPage() {
                       },
                       {
                         id: "cash" as const,
-                        name: "In-Person (Cash / Card at Table / Delivery)",
-                        info: "Settle in cash with server or delivery courier",
+                        name: isDineIn
+                          ? "Pay at Table with Server (Cash / Card)"
+                          : isDelivery
+                            ? "Cash on Delivery"
+                            : "Pay at Pickup Counter",
+                        info: isDineIn
+                          ? "Server will settle payment at Table #" + (order.customer.table || "")
+                          : "Pay in person upon receipt",
                         icon: Banknote,
                       },
                     ].map((opt) => (
@@ -599,56 +920,99 @@ function OrderPage() {
                   </div>
                 </div>
 
-                {paymentMethod !== "cash" && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="order-txref" className="text-xs font-medium text-foreground">
-                      Transaction Confirmation Reference{" "}
-                      <span className="text-muted-foreground">(optional)</span>
-                    </Label>
-                    <Input
-                      id="order-txref"
-                      value={txRef}
-                      onChange={(e) => setTxRef(e.target.value)}
-                      placeholder="e.g. TXN-9281034"
-                      className="h-8 text-xs font-mono"
-                    />
+                {paymentMethod !== "cash" ? (
+                  <div className="space-y-3 pt-2 border-t border-border/50">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="order-txref" className="text-xs font-medium text-foreground">
+                        Transaction Reference Number <span className="text-muted-foreground">(optional)</span>
+                      </Label>
+                      <Input
+                        id="order-txref"
+                        value={txRef}
+                        onChange={(e) => setTxRef(e.target.value)}
+                        placeholder="e.g. TXN-9281034"
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-medium text-foreground">
+                        Payment Proof Screenshot <span className="text-destructive">*</span>
+                      </Label>
+
+                      {proofPreview ? (
+                        <div className="relative rounded-lg border border-border bg-secondary/30 p-2">
+                          <img
+                            src={proofPreview}
+                            alt="Payment Proof Preview"
+                            className="max-h-40 mx-auto rounded object-contain"
+                          />
+                          <div className="mt-2 flex items-center justify-between text-xs px-1">
+                            <span className="truncate max-w-[200px] text-muted-foreground">
+                              {proofFile?.name}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleClearFile}
+                              className="h-6 px-2 text-destructive hover:text-destructive"
+                            >
+                              <X className="size-3.5 mr-1" />
+                              Remove
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border p-4 cursor-pointer hover:bg-secondary/40 transition-colors">
+                          <Upload className="size-6 text-muted-foreground mb-1" />
+                          <span className="text-xs font-semibold text-foreground">Upload screenshot</span>
+                          <span className="text-[10px] text-muted-foreground">PNG, JPG or WebP up to 5MB</span>
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={handleFileChange}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    <Button
+                      onClick={handleSubmitProof}
+                      disabled={submittingProof || !proofFile}
+                      className="w-full font-semibold"
+                    >
+                      <Upload className="size-4 mr-2" />
+                      {submittingProof
+                        ? "Uploading Proof…"
+                        : `Submit Payment Proof (${formatETB(order.total)})`}
+                    </Button>
+                    <p className="text-[11px] text-center text-muted-foreground">
+                      Proof is sent to cashier for review. Order will be marked paid upon cashier verification.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 pt-2 border-t border-border/50">
+                    <div className="rounded-lg bg-secondary/40 p-3 text-xs text-muted-foreground space-y-1">
+                      <p className="font-semibold text-foreground">In-Person Settlement</p>
+                      <p>
+                        {isDineIn
+                          ? `Your server (${order.waiterName || "assigned staff"}) will collect cash or card directly at Table #${order.customer.table || ""}.`
+                          : "Pay in person upon pickup or delivery."}
+                      </p>
+                    </div>
+                    <Button
+                      onClick={handleConfirmCashAtTable}
+                      disabled={paying}
+                      className="w-full font-semibold"
+                    >
+                      <Banknote className="size-4 mr-2" />
+                      {paying ? "Recording…" : `Confirm Cash Settlement (${formatETB(order.total)})`}
+                    </Button>
                   </div>
                 )}
-
-                <Button
-                  onClick={handleCompletePayment}
-                  disabled={paying}
-                  className="w-full font-semibold"
-                >
-                  <CreditCard className="size-4 mr-2" />
-                  {paying ? "Confirming Payment…" : `Confirm Payment (${formatETB(order.total)})`}
-                </Button>
               </div>
-            ) : (
-              /* If Payment is Paid: Show verified card */
-              <dl className="mt-4 space-y-2.5 text-xs sm:text-sm">
-                <div className="flex items-center justify-between">
-                  <dt className="text-muted-foreground">Payment method</dt>
-                  <dd className="font-medium text-foreground">
-                    {order.paymentMethod || "Mobile Payment"}
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between">
-                  <dt className="text-muted-foreground">Amount settled</dt>
-                  <dd className="font-bold text-success">{formatETB(order.total)}</dd>
-                </div>
-                <div className="flex items-center justify-between">
-                  <dt className="text-muted-foreground">Payment status</dt>
-                  <dd>
-                    <Badge
-                      variant="default"
-                      className="bg-success text-success-foreground hover:bg-success text-xs"
-                    >
-                      Paid & Verified
-                    </Badge>
-                  </dd>
-                </div>
-              </dl>
             )}
 
             <div className="mt-4 rounded-lg bg-muted/30 p-3 text-[11px] leading-relaxed text-muted-foreground flex items-center gap-2">

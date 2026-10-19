@@ -18,6 +18,7 @@ import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as PromotionsRouteImport } from './routes/promotions'
+import { Route as WaiterRouteImport } from './routes/waiter'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminAccountRouteImport } from './routes/admin.account'
 import { Route as AdminAvailabilityRouteImport } from './routes/admin.availability'
@@ -34,6 +35,12 @@ import { Route as MenuIndexRouteImport } from './routes/menu.index'
 import { Route as MenuCategoryRouteImport } from './routes/menu.$category'
 import { Route as OrderIdRouteImport } from './routes/order.$id'
 import { Route as ProductIdRouteImport } from './routes/product.$id'
+import { Route as WaiterIndexRouteImport } from './routes/waiter.index'
+import { Route as WaiterAccountRouteImport } from './routes/waiter.account'
+import { Route as WaiterHistoryRouteImport } from './routes/waiter.history'
+import { Route as WaiterNotificationsRouteImport } from './routes/waiter.notifications'
+import { Route as WaiterOrdersRouteImport } from './routes/waiter.orders'
+import { Route as WaiterPaymentsRouteImport } from './routes/waiter.payments'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -78,6 +85,11 @@ const OrdersRoute = OrdersRouteImport.update({
 const PromotionsRoute = PromotionsRouteImport.update({
   id: '/promotions',
   path: '/promotions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WaiterRoute = WaiterRouteImport.update({
+  id: '/waiter',
+  path: '/waiter',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -160,6 +172,36 @@ const ProductIdRoute = ProductIdRouteImport.update({
   path: '/product/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WaiterIndexRoute = WaiterIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => WaiterRoute,
+} as any)
+const WaiterAccountRoute = WaiterAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => WaiterRoute,
+} as any)
+const WaiterHistoryRoute = WaiterHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => WaiterRoute,
+} as any)
+const WaiterNotificationsRoute = WaiterNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => WaiterRoute,
+} as any)
+const WaiterOrdersRoute = WaiterOrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
+  getParentRoute: () => WaiterRoute,
+} as any)
+const WaiterPaymentsRoute = WaiterPaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
+  getParentRoute: () => WaiterRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -171,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/contact': typeof ContactRoute
   '/orders': typeof OrdersRoute
   '/promotions': typeof PromotionsRoute
+  '/waiter': typeof WaiterRouteWithChildren
   '/admin/account': typeof AdminAccountRoute
   '/admin/availability': typeof AdminAvailabilityRoute
   '/admin/categories': typeof AdminCategoriesRoute
@@ -185,8 +228,14 @@ export interface FileRoutesByFullPath {
   '/menu/$category': typeof MenuCategoryRoute
   '/order/$id': typeof OrderIdRoute
   '/product/$id': typeof ProductIdRoute
+  '/waiter/account': typeof WaiterAccountRoute
+  '/waiter/history': typeof WaiterHistoryRoute
+  '/waiter/notifications': typeof WaiterNotificationsRoute
+  '/waiter/orders': typeof WaiterOrdersRoute
+  '/waiter/payments': typeof WaiterPaymentsRoute
   '/admin/': typeof AdminIndexRoute
   '/menu/': typeof MenuIndexRoute
+  '/waiter/': typeof WaiterIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -211,8 +260,14 @@ export interface FileRoutesByTo {
   '/menu/$category': typeof MenuCategoryRoute
   '/order/$id': typeof OrderIdRoute
   '/product/$id': typeof ProductIdRoute
+  '/waiter/account': typeof WaiterAccountRoute
+  '/waiter/history': typeof WaiterHistoryRoute
+  '/waiter/notifications': typeof WaiterNotificationsRoute
+  '/waiter/orders': typeof WaiterOrdersRoute
+  '/waiter/payments': typeof WaiterPaymentsRoute
   '/admin': typeof AdminIndexRoute
   '/menu': typeof MenuIndexRoute
+  '/waiter': typeof WaiterIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -225,6 +280,7 @@ export interface FileRoutesById {
   '/contact': typeof ContactRoute
   '/orders': typeof OrdersRoute
   '/promotions': typeof PromotionsRoute
+  '/waiter': typeof WaiterRouteWithChildren
   '/admin/account': typeof AdminAccountRoute
   '/admin/availability': typeof AdminAvailabilityRoute
   '/admin/categories': typeof AdminCategoriesRoute
@@ -239,8 +295,14 @@ export interface FileRoutesById {
   '/menu/$category': typeof MenuCategoryRoute
   '/order/$id': typeof OrderIdRoute
   '/product/$id': typeof ProductIdRoute
+  '/waiter/account': typeof WaiterAccountRoute
+  '/waiter/history': typeof WaiterHistoryRoute
+  '/waiter/notifications': typeof WaiterNotificationsRoute
+  '/waiter/orders': typeof WaiterOrdersRoute
+  '/waiter/payments': typeof WaiterPaymentsRoute
   '/admin/': typeof AdminIndexRoute
   '/menu/': typeof MenuIndexRoute
+  '/waiter/': typeof WaiterIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -254,6 +316,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/orders'
     | '/promotions'
+    | '/waiter'
     | '/admin/account'
     | '/admin/availability'
     | '/admin/categories'
@@ -268,8 +331,14 @@ export interface FileRouteTypes {
     | '/menu/$category'
     | '/order/$id'
     | '/product/$id'
+    | '/waiter/account'
+    | '/waiter/history'
+    | '/waiter/notifications'
+    | '/waiter/orders'
+    | '/waiter/payments'
     | '/admin/'
     | '/menu/'
+    | '/waiter/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -294,8 +363,14 @@ export interface FileRouteTypes {
     | '/menu/$category'
     | '/order/$id'
     | '/product/$id'
+    | '/waiter/account'
+    | '/waiter/history'
+    | '/waiter/notifications'
+    | '/waiter/orders'
+    | '/waiter/payments'
     | '/admin'
     | '/menu'
+    | '/waiter'
   id:
     | '__root__'
     | '/'
@@ -307,6 +382,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/orders'
     | '/promotions'
+    | '/waiter'
     | '/admin/account'
     | '/admin/availability'
     | '/admin/categories'
@@ -321,8 +397,14 @@ export interface FileRouteTypes {
     | '/menu/$category'
     | '/order/$id'
     | '/product/$id'
+    | '/waiter/account'
+    | '/waiter/history'
+    | '/waiter/notifications'
+    | '/waiter/orders'
+    | '/waiter/payments'
     | '/admin/'
     | '/menu/'
+    | '/waiter/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -335,6 +417,7 @@ export interface RootRouteChildren {
   ContactRoute: typeof ContactRoute
   OrdersRoute: typeof OrdersRoute
   PromotionsRoute: typeof PromotionsRoute
+  WaiterRoute: typeof WaiterRouteWithChildren
   MenuCategoryRoute: typeof MenuCategoryRoute
   OrderIdRoute: typeof OrderIdRoute
   ProductIdRoute: typeof ProductIdRoute
@@ -404,6 +487,13 @@ declare module '@tanstack/react-router' {
       path: '/promotions'
       fullPath: '/promotions'
       preLoaderRoute: typeof PromotionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/waiter': {
+      id: '/waiter'
+      path: '/waiter'
+      fullPath: '/waiter'
+      preLoaderRoute: typeof WaiterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -518,6 +608,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProductIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/waiter/': {
+      id: '/waiter/'
+      path: '/'
+      fullPath: '/waiter/'
+      preLoaderRoute: typeof WaiterIndexRouteImport
+      parentRoute: typeof WaiterRoute
+    }
+    '/waiter/account': {
+      id: '/waiter/account'
+      path: '/account'
+      fullPath: '/waiter/account'
+      preLoaderRoute: typeof WaiterAccountRouteImport
+      parentRoute: typeof WaiterRoute
+    }
+    '/waiter/history': {
+      id: '/waiter/history'
+      path: '/history'
+      fullPath: '/waiter/history'
+      preLoaderRoute: typeof WaiterHistoryRouteImport
+      parentRoute: typeof WaiterRoute
+    }
+    '/waiter/notifications': {
+      id: '/waiter/notifications'
+      path: '/notifications'
+      fullPath: '/waiter/notifications'
+      preLoaderRoute: typeof WaiterNotificationsRouteImport
+      parentRoute: typeof WaiterRoute
+    }
+    '/waiter/orders': {
+      id: '/waiter/orders'
+      path: '/orders'
+      fullPath: '/waiter/orders'
+      preLoaderRoute: typeof WaiterOrdersRouteImport
+      parentRoute: typeof WaiterRoute
+    }
+    '/waiter/payments': {
+      id: '/waiter/payments'
+      path: '/payments'
+      fullPath: '/waiter/payments'
+      preLoaderRoute: typeof WaiterPaymentsRouteImport
+      parentRoute: typeof WaiterRoute
+    }
   }
 }
 
@@ -553,6 +685,27 @@ const AdminRouteChildren: AdminRouteChildren = {
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
+interface WaiterRouteChildren {
+  WaiterAccountRoute: typeof WaiterAccountRoute
+  WaiterHistoryRoute: typeof WaiterHistoryRoute
+  WaiterNotificationsRoute: typeof WaiterNotificationsRoute
+  WaiterOrdersRoute: typeof WaiterOrdersRoute
+  WaiterPaymentsRoute: typeof WaiterPaymentsRoute
+  WaiterIndexRoute: typeof WaiterIndexRoute
+}
+
+const WaiterRouteChildren: WaiterRouteChildren = {
+  WaiterAccountRoute: WaiterAccountRoute,
+  WaiterHistoryRoute: WaiterHistoryRoute,
+  WaiterNotificationsRoute: WaiterNotificationsRoute,
+  WaiterOrdersRoute: WaiterOrdersRoute,
+  WaiterPaymentsRoute: WaiterPaymentsRoute,
+  WaiterIndexRoute: WaiterIndexRoute,
+}
+
+const WaiterRouteWithChildren =
+  WaiterRoute._addFileChildren(WaiterRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
@@ -563,6 +716,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContactRoute: ContactRoute,
   OrdersRoute: OrdersRoute,
   PromotionsRoute: PromotionsRoute,
+  WaiterRoute: WaiterRouteWithChildren,
   MenuCategoryRoute: MenuCategoryRoute,
   OrderIdRoute: OrderIdRoute,
   ProductIdRoute: ProductIdRoute,

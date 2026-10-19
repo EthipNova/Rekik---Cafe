@@ -663,6 +663,22 @@ function normalizeServiceOrder(raw: any): Order {
         ? Number(raw.delivery_distance_km)
         : null,
     total: Number(raw.total_amount) || 0,
+    waiterId: raw.waiter_id || null,
+    waiterName: raw.staff_profiles?.full_name || null,
+    waiterDecision: raw.waiter_decision || "pending",
+    waiterRejectionReason: raw.waiter_rejection_reason || null,
+    paymentProof: Array.isArray(raw.payment_proofs) && raw.payment_proofs[0]
+      ? {
+          id: raw.payment_proofs[0].id,
+          paymentId: raw.payment_proofs[0].payment_id,
+          screenshotPath: raw.payment_proofs[0].screenshot_path,
+          submittedAmount: Number(raw.payment_proofs[0].submitted_amount) || 0,
+          transactionReference: raw.payment_proofs[0].transaction_reference || null,
+          status: raw.payment_proofs[0].status || "pending",
+          rejectionReason: raw.payment_proofs[0].rejection_reason || null,
+          submittedAt: raw.payment_proofs[0].submitted_at || new Date().toISOString(),
+        }
+      : null,
   };
 }
 
@@ -683,6 +699,8 @@ export interface CreateOrderPayload {
   paymentStatus?: "paid" | "pending" | "failed" | undefined;
   delivery?: number | undefined;
   discount?: number | undefined;
+  waiterId?: string | undefined;
+  customerNotes?: string | undefined;
 }
 
 /**
@@ -1109,4 +1127,43 @@ export async function deleteContactMessage(
       headers,
     },
   );
+}
+
+/**
+ * Submits a payment proof screenshot and transaction reference for cashier review.
+ */
+export async function submitPaymentProof(
+  orderId: string,
+  payload: {
+    screenshotPath?: string | undefined;
+    imageBase64?: string | undefined;
+    mimeType?: string | undefined;
+    submittedAmount?: number | undefined;
+    transactionReference?: string | undefined;
+    paymentMethod?: string | undefined;
+  },
+): Promise<Order> {
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const updated = await request<Order>(`/api/orders/${encodeURIComponent(orderId)}/payment-proof`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (updated) {
+    saveOrder(updated);
+    return updated;
+  }
+
+  throw new ApiError("Failed to submit payment proof", 500);
 }
