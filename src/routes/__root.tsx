@@ -123,18 +123,22 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isAdmin = pathname.startsWith("/admin");
+  const isPortal =
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/casher") ||
+    pathname.startsWith("/cashier") ||
+    pathname.startsWith("/waiter");
 
   return (
     <QueryClientProvider client={queryClient}>
       <CartProvider>
         <div className="flex min-h-screen flex-col">
-          {!isAdmin && <Navbar />}
+          {!isPortal && <Navbar />}
           <main className="flex-1">
             {/* Required: nested routes render here. */}
             <Outlet />
           </main>
-          {!isAdmin && <Footer />}
+          {!isPortal && <Footer />}
         </div>
         <Toaster position="top-center" />
       </CartProvider>

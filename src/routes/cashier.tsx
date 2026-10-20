@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Coffee, ShieldAlert } from "lucide-react";
+import { Coffee, ShieldAlert, Menu } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { applyTheme, readSettings } from "@/lib/settings";
 import type {
@@ -29,7 +29,10 @@ import { CashierOverview } from "@/components/cashier/CashierOverview";
 import { PendingReviewsList } from "@/components/cashier/PendingReviewsList";
 import { ReviewHistoryView } from "@/components/cashier/ReviewHistoryView";
 import { CashierNotificationsView } from "@/components/cashier/CashierNotificationsView";
-import { PaymentProofModal, type VerificationModalItem } from "@/components/cashier/PaymentProofModal";
+import {
+  PaymentProofModal,
+  type VerificationModalItem,
+} from "@/components/cashier/PaymentProofModal";
 import { ApproveDialog } from "@/components/cashier/ApproveDialog";
 import { RejectDialog } from "@/components/cashier/RejectDialog";
 
@@ -39,7 +42,8 @@ export const Route = createFileRoute("/cashier")({
       { title: "Cashier Dashboard — Rekik Café" },
       {
         name: "description",
-        content: "Secure payment proof review, verification, and order confirmation portal for Rekik Café cashiers.",
+        content:
+          "Secure payment proof review, verification, and order confirmation portal for Rekik Café cashiers.",
       },
       { name: "robots", content: "noindex" },
     ],
@@ -56,7 +60,7 @@ export function CashierRoutePage() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Dashboard Data State
-  const [activeTab, setActiveTab] = useState<string>("overview");
+  const [activeTab, setActiveTab] = useState<string>("pending");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -200,9 +204,7 @@ export function CashierRoutePage() {
   const handleMarkNotificationRead = async (id: string) => {
     try {
       await markCashierNotificationRead(id);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
-      );
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
     } catch {
       // ignore
     }
@@ -229,7 +231,9 @@ export function CashierRoutePage() {
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#1B110B] text-[#E8A87C] animate-pulse shadow-md">
             <Coffee className="h-7 w-7" />
           </div>
-          <span className="text-sm font-semibold text-[#2A1810]">Verifying Cashier Authorization...</span>
+          <span className="text-sm font-semibold text-[#2A1810]">
+            Verifying Cashier Authorization...
+          </span>
         </div>
       </div>
     );
@@ -254,122 +258,123 @@ export function CashierRoutePage() {
   const unreadNotifsCount = notifications.filter((n) => !n.is_read).length;
 
   return (
-    <div className="min-h-screen bg-[#FAF7F2] flex flex-col">
-      {/* Top Application Header */}
-      <CashierHeader
+    <div className="min-h-screen bg-[#F4EFE6] flex flex-col md:flex-row">
+      {/* Mobile Top Header (only visible on mobile screens) */}
+      <div className="md:hidden flex h-14 items-center justify-between border-b border-[#DFD6C8] bg-white px-4 sticky top-0 z-30">
+        <button
+          type="button"
+          onClick={() => setMobileNavOpen(true)}
+          className="p-2 text-[#70645C] hover:text-[#2A1810]"
+          aria-label="Open navigation"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="font-display font-bold text-sm text-[#2A1810]">Rekik Café Cashier</span>
+        <div className="w-8" />
+      </div>
+
+      {/* Navigation Sidebar */}
+      <CashierSidebar
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        pendingCount={pendingItems.length}
+        unreadNotificationsCount={unreadNotifsCount}
         profile={profile}
-        notifications={notifications}
-        refreshing={refreshing}
-        onRefresh={() => loadDashboardData(true)}
         onLogout={handleLogout}
-        onOpenMobileNav={() => setMobileNavOpen(true)}
-        onNotificationClick={() => setActiveTab("notifications")}
+        mobileOpen={mobileNavOpen}
+        onMobileClose={() => setMobileNavOpen(false)}
       />
 
-      {/* Main Container: Sidebar + Content */}
-      <div className="flex-1 flex">
-        {/* Navigation Sidebar */}
-        <CashierSidebar
-          activeTab={activeTab}
-          onSelectTab={setActiveTab}
-          pendingCount={pendingItems.length}
-          unreadNotificationsCount={unreadNotifsCount}
-          profile={profile}
-          onLogout={handleLogout}
-          mobileOpen={mobileNavOpen}
-          onMobileClose={() => setMobileNavOpen(false)}
-        />
+      {/* Dynamic Main Workspace Content */}
+      <main className="flex-1 p-5 sm:p-8 lg:p-10 max-w-6xl w-full">
+        {activeTab === "overview" && (
+          <CashierOverview
+            metrics={metrics}
+            pendingItems={pendingItems}
+            recentHistory={historyItems}
+            onSelectTab={setActiveTab}
+            onViewProof={(it) => setViewingProofItem(it)}
+          />
+        )}
 
-        {/* Dynamic Main Workspace Content */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
-          {activeTab === "overview" && (
-            <CashierOverview
-              metrics={metrics}
-              pendingItems={pendingItems}
-              recentHistory={historyItems}
-              onSelectTab={setActiveTab}
-              onViewProof={(it) => setViewingProofItem(it)}
-            />
-          )}
+        {activeTab === "pending" && (
+          <PendingReviewsList
+            items={pendingItems}
+            loading={loadingData}
+            onViewProof={(it) => setViewingProofItem(it)}
+            onApprove={(it) => setApprovingItem(it)}
+            onReject={(it) => setRejectingItem(it)}
+            onRefresh={() => loadDashboardData(true)}
+          />
+        )}
 
-          {activeTab === "pending" && (
-            <PendingReviewsList
-              items={pendingItems}
+        {activeTab === "verified" && (
+          <div className="space-y-4">
+            <div className="bg-white p-4 rounded-2xl border border-[#EAE3D9] shadow-sm">
+              <h3 className="text-base font-bold font-display text-[#2A1810]">
+                Verified & Approved Payments
+              </h3>
+              <p className="text-xs text-[#70645C] mt-0.5">
+                Orders whose payment proofs were successfully validated and confirmed
+              </p>
+            </div>
+            <ReviewHistoryView
+              history={historyItems.filter((h) => h.decision === "approved")}
               loading={loadingData}
-              onViewProof={(it) => setViewingProofItem(it)}
-              onApprove={(it) => setApprovingItem(it)}
-              onReject={(it) => setRejectingItem(it)}
+              onInspectItem={(item) => setViewingProofItem(item)}
               onRefresh={() => loadDashboardData(true)}
             />
-          )}
+          </div>
+        )}
 
-          {activeTab === "verified" && (
-            <div className="space-y-4">
-              <div className="bg-white p-4 rounded-2xl border border-[#EAE3D9] shadow-sm">
-                <h3 className="text-base font-bold font-display text-[#2A1810]">
-                  Verified & Approved Payments
-                </h3>
-                <p className="text-xs text-[#70645C] mt-0.5">
-                  Orders whose payment proofs were successfully validated and confirmed
-                </p>
-              </div>
-              <ReviewHistoryView
-                history={historyItems.filter((h) => h.decision === "approved")}
-                loading={loadingData}
-                onInspectItem={(item) => setViewingProofItem(item)}
-                onRefresh={() => loadDashboardData(true)}
-              />
+        {activeTab === "rejected" && (
+          <div className="space-y-4">
+            <div className="bg-white p-4 rounded-2xl border border-[#EAE3D9] shadow-sm">
+              <h3 className="text-base font-bold font-display text-[#2A1810]">
+                Rejected Payment Proofs
+              </h3>
+              <p className="text-xs text-[#70645C] mt-0.5">
+                Payment submissions declined due to amount mismatch, unreadable images, or invalid
+                references
+              </p>
             </div>
-          )}
-
-          {activeTab === "rejected" && (
-            <div className="space-y-4">
-              <div className="bg-white p-4 rounded-2xl border border-[#EAE3D9] shadow-sm">
-                <h3 className="text-base font-bold font-display text-[#2A1810]">
-                  Rejected Payment Proofs
-                </h3>
-                <p className="text-xs text-[#70645C] mt-0.5">
-                  Payment submissions declined due to amount mismatch, unreadable images, or invalid references
-                </p>
-              </div>
-              <ReviewHistoryView
-                history={historyItems.filter((h) => h.decision === "rejected")}
-                loading={loadingData}
-                onInspectItem={(item) => setViewingProofItem(item)}
-                onRefresh={() => loadDashboardData(true)}
-              />
-            </div>
-          )}
-
-          {activeTab === "history" && (
-            <div className="space-y-4">
-              <div className="bg-white p-4 rounded-2xl border border-[#EAE3D9] shadow-sm">
-                <h3 className="text-base font-bold font-display text-[#2A1810]">
-                  Complete Payment Review History
-                </h3>
-                <p className="text-xs text-[#70645C] mt-0.5">
-                  Comprehensive audit trail of all cashier approval and rejection decisions
-                </p>
-              </div>
-              <ReviewHistoryView
-                history={historyItems}
-                loading={loadingData}
-                onInspectItem={(item) => setViewingProofItem(item)}
-                onRefresh={() => loadDashboardData(true)}
-              />
-            </div>
-          )}
-
-          {activeTab === "notifications" && (
-            <CashierNotificationsView
-              notifications={notifications}
+            <ReviewHistoryView
+              history={historyItems.filter((h) => h.decision === "rejected")}
               loading={loadingData}
-              onMarkAsRead={handleMarkNotificationRead}
+              onInspectItem={(item) => setViewingProofItem(item)}
               onRefresh={() => loadDashboardData(true)}
             />
-          )}
-        </main>
-      </div>
+          </div>
+        )}
+
+        {activeTab === "history" && (
+          <div className="space-y-4">
+            <div className="bg-white p-4 rounded-2xl border border-[#EAE3D9] shadow-sm">
+              <h3 className="text-base font-bold font-display text-[#2A1810]">
+                Complete Payment Review History
+              </h3>
+              <p className="text-xs text-[#70645C] mt-0.5">
+                Comprehensive audit trail of all cashier approval and rejection decisions
+              </p>
+            </div>
+            <ReviewHistoryView
+              history={historyItems}
+              loading={loadingData}
+              onInspectItem={(item) => setViewingProofItem(item)}
+              onRefresh={() => loadDashboardData(true)}
+            />
+          </div>
+        )}
+
+        {activeTab === "notifications" && (
+          <CashierNotificationsView
+            notifications={notifications}
+            loading={loadingData}
+            onMarkAsRead={handleMarkNotificationRead}
+            onRefresh={() => loadDashboardData(true)}
+          />
+        )}
+      </main>
 
       {/* ── Modals & Dialogs ── */}
       {/* 1. Payment Proof Inspection Modal */}
