@@ -1,4 +1,5 @@
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { fetchCashierMe } from "@/services/cashier";
 import {
   AlertCircle,
   CreditCard,
@@ -131,6 +132,7 @@ async function verifyAdminUser(userId: string): Promise<VerifyAdminResult> {
 }
 
 function AdminLayout() {
+  const navigate = useNavigate();
   const [role, setRole] = useState<UserRole | null>(null);
   const [adminUser, setAdminUser] = useState<AdminUserData | null>(null);
   const [ready, setReady] = useState(false);
@@ -167,6 +169,16 @@ function AdminLayout() {
           setAdminUser(result.user);
           setErrorMsg(null);
         } else if (result.reason === "unauthorized") {
+          try {
+            const cashierCheck = await fetchCashierMe();
+            if (cashierCheck.success && cashierCheck.role === "cashier") {
+              void navigate({ to: "/casher", replace: true });
+              return;
+            }
+          } catch {
+            // Not a cashier
+          }
+
           await supabase.auth.signOut();
           setRole(null);
           setAdminUser(null);
@@ -197,7 +209,7 @@ function AdminLayout() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [navigate]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -234,6 +246,19 @@ function AdminLayout() {
           setErrorMsg(null);
           toast.success(`Signed in as ${result.user.role}`);
         } else if (result.reason === "unauthorized") {
+          try {
+            const cashierCheck = await fetchCashierMe();
+            if (cashierCheck.success && cashierCheck.role === "cashier") {
+              toast.success(
+                `Welcome back, ${cashierCheck.profile.full_name}! Redirecting to Cashier Dashboard...`,
+              );
+              void navigate({ to: "/casher" });
+              return;
+            }
+          } catch {
+            // Not a cashier
+          }
+
           await supabase.auth.signOut();
           setRole(null);
           setAdminUser(null);
@@ -411,7 +436,9 @@ function AdminLayout() {
         {/* Mobile Header */}
         <header className="sticky top-0 z-40 flex h-14 w-full items-center justify-between border-b border-sidebar-border bg-sidebar px-4 text-sidebar-foreground md:hidden">
           <Link to="/admin" className="flex items-center">
-            <span className="font-display text-lg font-semibold text-sidebar-foreground">REKIK</span>
+            <span className="font-display text-lg font-semibold text-sidebar-foreground">
+              REKIK
+            </span>
             <span className="ml-2 text-[10px] uppercase tracking-[0.2em] opacity-70">Console</span>
           </Link>
 

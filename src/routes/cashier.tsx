@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { Coffee, ShieldAlert, Menu } from "lucide-react";
@@ -37,6 +37,9 @@ import { ApproveDialog } from "@/components/cashier/ApproveDialog";
 import { RejectDialog } from "@/components/cashier/RejectDialog";
 
 export const Route = createFileRoute("/cashier")({
+  beforeLoad: () => {
+    throw redirect({ to: "/casher" });
+  },
   head: () => ({
     meta: [
       { title: "Cashier Dashboard — Rekik Café" },
@@ -127,6 +130,13 @@ export function CashierRoutePage() {
       subscription.unsubscribe();
     };
   }, [verifySession]);
+
+  // Ensure /cashier always canonicalizes to /casher
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.pathname === "/cashier") {
+      void navigate({ to: "/casher", replace: true });
+    }
+  }, [navigate]);
 
   // ── 2. Load Dashboard Data ────────────────────────────────────────────────
   const loadDashboardData = useCallback(async (isRefresh = false) => {
@@ -247,6 +257,7 @@ export function CashierRoutePage() {
           onSuccess={(p) => {
             setProfile(p);
             loadDashboardData();
+            void navigate({ to: "/casher" });
           }}
           onRedirectAdmin={() => navigate({ to: "/admin" })}
         />
