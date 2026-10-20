@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { fetchCashierMe } from "@/services/cashier";
 import {
   AlertCircle,
   Banknote,
@@ -71,6 +72,8 @@ function MethodIcon({ method }: { method: OrderMethod }) {
 }
 
 function AccountPage() {
+  const navigate = useNavigate();
+
   // Session & customer profile state
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -139,11 +142,20 @@ function AccountPage() {
     // Check existing active session
     supabase.auth
       .getSession()
-      .then(({ data: { session: currentSession } }) => {
+      .then(async ({ data: { session: currentSession } }) => {
         if (!mounted) return;
         setSession(currentSession);
         setAuthLoading(false);
         if (currentSession) {
+          try {
+            const cashierCheck = await fetchCashierMe();
+            if (cashierCheck.success && cashierCheck.role === "cashier") {
+              void navigate({ to: "/casher", replace: true });
+              return;
+            }
+          } catch {
+            // Standard customer
+          }
           void loadProfileAndOrders(currentSession.access_token);
         }
       })
@@ -160,6 +172,15 @@ function AccountPage() {
       setAuthLoading(false);
 
       if (nextSession) {
+        try {
+          const cashierCheck = await fetchCashierMe();
+          if (cashierCheck.success && cashierCheck.role === "cashier") {
+            void navigate({ to: "/casher", replace: true });
+            return;
+          }
+        } catch {
+          // Standard customer
+        }
         void loadProfileAndOrders(nextSession.access_token);
       } else {
         setOrders([]);
@@ -171,7 +192,7 @@ function AccountPage() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [navigate]);
 
   // Realtime subscription for customer's live orders & payment changes
   useEffect(() => {
@@ -229,6 +250,21 @@ function AccountPage() {
 
       if (data.session) {
         setSession(data.session);
+
+        // Check if the authenticated account is a cashier staff member
+        try {
+          const cashierCheck = await fetchCashierMe();
+          if (cashierCheck.success && cashierCheck.role === "cashier") {
+            toast.success(
+              `Welcome back, ${cashierCheck.profile.full_name}! Redirecting to Cashier Dashboard...`,
+            );
+            void navigate({ to: "/casher" });
+            return;
+          }
+        } catch {
+          // Standard customer account
+        }
+
         toast.success("Welcome back!");
         void loadProfileAndOrders(data.session.access_token);
       }
@@ -878,15 +914,33 @@ function AccountPage() {
                 <div className="space-y-2 pt-2 border-t border-border/60">
                   <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 font-medium">
                     <AlertCircle className="size-3.5" />
-                    <span>Payment pending settlement</span>
+                    <span>
+                      {(primaryActiveOrder as { transactionReference?: string | null })
+                        .transactionReference
+                        ? "Details collected — awaiting cashier verification"
+                        : "Payment awaiting settlement"}
+                    </span>
                   </div>
-                  <Button
-                    onClick={() => setPayingOrderId(primaryActiveOrder.id)}
-                    className="w-full text-xs font-semibold gap-1.5"
-                  >
-                    <CreditCard className="size-3.5" />
-                    <span>Pay {formatETB(primaryActiveOrder.total)} Now</span>
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      onClick={() => setPayingOrderId(primaryActiveOrder.id)}
+                      className="flex-1 text-xs font-semibold gap-1.5"
+                    >
+                      <CreditCard className="size-3.5" />
+                      <span>Pay {formatETB(primaryActiveOrder.total)} Now</span>
+                    </Button>
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="text-xs font-medium gap-1.5"
+                    >
+                      <Link to="/order/$id" params={{ id: primaryActiveOrder.id }}>
+                        <span>Instructions</span>
+                        <ExternalLink className="size-3" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 text-xs text-success font-medium pt-2 border-t border-border/60">
@@ -995,6 +1049,16 @@ function AccountPage() {
                     />
                   </div>
                 )}
+
+                <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-xs text-muted-foreground space-y-1">
+                  <p className="font-semibold text-foreground">Waiter & Cashier Settlement</p>
+                  <p className="text-[11px] leading-relaxed">
+                    Your assigned waiter (
+                    {(targetOrder as { waiterName?: string | null }).waiterName || "Floor Staff"})
+                    will collect and verify your payment reference on floor / upon delivery to
+                    submit to the cashier.
+                  </p>
+                </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
                   <Button variant="ghost" size="sm" onClick={() => setPayingOrderId(null)}>

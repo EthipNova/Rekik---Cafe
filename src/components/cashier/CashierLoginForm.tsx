@@ -1,10 +1,28 @@
 import { useState } from "react";
-import { Coffee, Eye, EyeOff, Lock, Mail, AlertCircle, ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  Coffee,
+  Eye,
+  EyeOff,
+  Lock,
+  Mail,
+  AlertCircle,
+  ArrowRight,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { supabase } from "@/lib/supabase";
 import { fetchCashierMe } from "@/services/cashier";
 import type { CashierStaffProfile } from "@/lib/cashier";
@@ -15,6 +33,7 @@ interface CashierLoginFormProps {
 }
 
 export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFormProps) {
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -81,7 +100,9 @@ export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFor
         } else if (meResult.status === "role_mismatch") {
           if (meResult.role === "admin") {
             setRedirectAdminNotice(true);
-            setErrorMsg("This account has Administrator privileges. Cashier dashboard is for cashier staff.");
+            setErrorMsg(
+              "This account has Administrator privileges. Cashier dashboard is for cashier staff.",
+            );
           } else if (meResult.role === "waiter") {
             setErrorMsg("Waiters do not have cashier authorization. Please use the Waiter portal.");
           } else {
@@ -99,6 +120,7 @@ export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFor
 
       toast.success(`Welcome back, ${meResult.profile.full_name}!`);
       onSuccess(meResult.profile);
+      void navigate({ to: "/casher" });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Network error. Please try again.";
       setErrorMsg(msg);
