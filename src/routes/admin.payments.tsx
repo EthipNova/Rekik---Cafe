@@ -836,11 +836,45 @@ function AdminPayments() {
                 {(() => {
                   const firstProof = selectedPayment.payment_proofs?.[0];
                   if (!firstProof) {
+                    if (selectedPayment.transaction_reference) {
+                      return (
+                        <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3 text-sm">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <span className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                              <CheckCircle2 className="size-4" /> Waiter-Collected Reference
+                            </span>
+                            <Badge variant="outline" className="text-[10px] bg-background">
+                              Awaiting Cashier Review
+                            </Badge>
+                          </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Transaction Reference:</span>
+                            <span className="font-mono font-bold text-foreground text-sm flex items-center gap-1.5">
+                              {selectedPayment.transaction_reference}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(selectedPayment.transaction_reference!);
+                                  toast.success("Reference copied!");
+                                }}
+                                className="text-muted-foreground hover:text-foreground p-1"
+                                title="Copy"
+                              >
+                                <Copy className="size-3.5" />
+                              </button>
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            Recorded by assigned waiter upon service. Verify this transaction code in your merchant portal before approving.
+                          </p>
+                        </div>
+                      );
+                    }
                     return (
                       <div className="rounded-xl border border-dashed border-border/80 bg-muted/20 p-4 text-center text-xs text-muted-foreground">
                         {selectedPayment.method.toLowerCase().includes("cash")
                           ? "Cash transaction. Confirm in-person receipt with customer."
-                          : "No payment proof submitted yet for this order."}
+                          : "Awaiting waiter payment collection for this order."}
                       </div>
                     );
                   }
@@ -932,8 +966,9 @@ function AdminPayments() {
                       Cashier Verification Actions
                     </span>
 
-                    {/* If electronic payment or proof submitted */}
-                    {selectedPayment.payment_proofs && selectedPayment.payment_proofs.length > 0 ? (
+                    {/* If electronic payment proof submitted or waiter-collected reference present */}
+                    {(selectedPayment.payment_proofs && selectedPayment.payment_proofs.length > 0) ||
+                    selectedPayment.transaction_reference ? (
                       <div className="grid grid-cols-2 gap-2">
                         <Button
                           type="button"

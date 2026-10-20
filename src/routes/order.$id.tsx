@@ -11,7 +11,6 @@ import {
   CreditCard,
   ExternalLink,
   Eye,
-  FileCheck2,
   FileText,
   MapPin,
   Phone,
@@ -22,18 +21,14 @@ import {
   Smartphone,
   Store,
   Truck,
-  UploadCloud,
   UserCheck,
   Utensils,
-  X,
   ZoomIn,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -44,7 +39,8 @@ import { EmptyState, Section } from "@/components/site/Section";
 import { OrderTimeline } from "@/components/site/OrderTimeline";
 import { formatETB, getProduct } from "@/lib/menu-data";
 import { findOrder, methodLabels, statusLabels, type Order } from "@/lib/orders";
-import { fetchOrderById, submitPaymentProof, updateOrderPayment } from "@/services/api";
+import { fetchOrderById, updateOrderPaymentMethod } from "@/services/api";
+import { DEFAULT_SETTINGS, fetchStoreSettings, type NebaSettings } from "@/lib/settings";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -84,16 +80,24 @@ function OrderPage() {
     loading: !loaderData?.order,
     order: loaderData?.order || null,
   });
-  const [paymentMethod, setPaymentMethod] = useState<"telebirr" | "cbe" | "cash">("telebirr");
-  const [txRef, setTxRef] = useState("");
-  const [paying, setPaying] = useState(false);
-  const [proofImageBase64, setProofImageBase64] = useState<string | null>(null);
-  const [proofFileName, setProofFileName] = useState<string | null>(null);
-  const [proofFileSize, setProofFileSize] = useState<string | null>(null);
-  const [submittingProof, setSubmittingProof] = useState(false);
+  const [settings, setSettings] = useState<NebaSettings>(DEFAULT_SETTINGS);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<"telebirr" | "cbe" | "cash" | null>(() => {
+    const m = (loaderData?.order?.paymentMethod || "").toLowerCase();
+    if (m.includes("telebirr")) return "telebirr";
+    if (m.includes("cbe") || m.includes("bank")) return "cbe";
+    if (m.includes("cash")) return "cash";
+    return null;
+  });
+  const [updatingMethod, setUpdatingMethod] = useState(false);
   const [zoomModalOpen, setZoomModalOpen] = useState(false);
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
   const [zoomTitle, setZoomTitle] = useState<string>("Payment Receipt");
+
+  useEffect(() => {
+    void fetchStoreSettings().then(({ data }) => {
+      if (data) setSettings(data);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +106,12 @@ function OrderPage() {
         const remote = await fetchOrderById(id);
         if (!cancelled && remote) {
           setState({ loading: false, order: remote });
+          if (remote.paymentMethod) {
+            const m = remote.paymentMethod.toLowerCase();
+            if (m.includes("telebirr")) setSelectedPaymentMethod("telebirr");
+            else if (m.includes("cbe") || m.includes("bank")) setSelectedPaymentMethod("cbe");
+            else if (m.includes("cash")) setSelectedPaymentMethod("cash");
+          }
           return;
         }
       } catch {
@@ -110,6 +120,12 @@ function OrderPage() {
       if (!cancelled) {
         const found = findOrder(id) ?? null;
         setState({ loading: false, order: found });
+        if (found?.paymentMethod) {
+          const m = found.paymentMethod.toLowerCase();
+          if (m.includes("telebirr")) setSelectedPaymentMethod("telebirr");
+          else if (m.includes("cbe") || m.includes("bank")) setSelectedPaymentMethod("cbe");
+          else if (m.includes("cash")) setSelectedPaymentMethod("cash");
+        }
       }
     }
     void load();
@@ -149,92 +165,28 @@ function OrderPage() {
     };
   }, [id]);
 
-  const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please upload an image file (PNG, JPG, or WEBP).");
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Receipt image must be smaller than 5MB.");
-      return;
-    }
-
-    setProofFileName(file.name);
-    setProofFileSize((file.size / (1024 * 1024)).toFixed(2) + " MB");
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setProofImageBase64(event.target?.result as string);
-      toast.success("Receipt image loaded! Preview is ready.");
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleRemoveProof = () => {
-    setProofImageBase64(null);
-    setProofFileName(null);
-    setProofFileSize(null);
-  };
-
-  const handleSubmitProof = async () => {
+  const handleSelectPaymentMethod = async (method: "telebirr" | "cbe" | "cash") => {
+    setSelectedPaymentMethod(method);
     if (!state.order) return;
-    if (!proofImageBase64 && !txRef.trim()) {
-      toast.error("Please upload a receipt screenshot or enter a transaction reference number.");
-      return;
-    }
+    const label =
+      method === "telebirr"
+        ? "Telebirr Mobile"
+        : method === "cbe"
+          ? "Bank Transfer (CBE)"
+          : "Cash / In-Person";
 
-    setSubmittingProof(true);
+    setUpdatingMethod(true);
     try {
-      const result = await submitPaymentProof({
+      const updated = await updateOrderPaymentMethod({
         orderId: state.order.id,
-        proofImageBase64: proofImageBase64 || undefined,
-        transactionReference: txRef.trim() || undefined,
+        paymentMethod: label,
       });
-      if (result.order) {
-        setState((prev) => ({ ...prev, order: result.order }));
-      }
-      setProofImageBase64(null);
-      setProofFileName(null);
-      setProofFileSize(null);
-      setTxRef("");
-      toast.success("Payment proof submitted! Cashier verification pending.");
-    } catch (err: unknown) {
-      console.error(err);
-      const errMsg = err instanceof Error ? err.message : "Failed to submit payment proof";
-      toast.error(errMsg);
-    } finally {
-      setSubmittingProof(false);
-    }
-  };
-
-  const handleCompletePayment = async () => {
-    if (!state.order) return;
-    setPaying(true);
-    try {
-      const methodName =
-        paymentMethod === "telebirr"
-          ? "Telebirr Mobile"
-          : paymentMethod === "cbe"
-            ? "CBE Birr"
-            : "Cash / In-Person";
-
-      const updated = await updateOrderPayment(state.order.id, {
-        paymentStatus: "paid",
-        paymentMethod: methodName,
-        transactionReference: txRef.trim() || undefined,
-      });
-
       setState((prev) => ({ ...prev, order: updated }));
-      toast.success("Payment confirmed! Kitchen notified.");
+      toast.success(`${label} selected. Follow instructions below.`);
     } catch (err) {
-      console.error(err);
-      toast.error("Failed to confirm payment. Please try again.");
+      console.warn("Could not save payment method remotely:", err);
     } finally {
-      setPaying(false);
+      setUpdatingMethod(false);
     }
   };
 
@@ -287,8 +239,8 @@ function OrderPage() {
               ? "bg-success/15 text-success ring-success/5"
               : order.paymentProof?.status === "rejected"
                 ? "bg-destructive/15 text-destructive ring-destructive/5"
-                : order.paymentProof?.status === "pending"
-                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/5"
+                : order.transactionReference
+                  ? "bg-primary/15 text-primary ring-primary/5"
                   : "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-amber-500/5",
           )}
         >
@@ -310,36 +262,36 @@ function OrderPage() {
                 ? "bg-success/15 text-success border-success/30"
                 : order.paymentProof?.status === "rejected"
                   ? "bg-destructive/15 text-destructive border-destructive/30"
-                  : order.paymentProof?.status === "pending"
-                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                  : order.transactionReference
+                    ? "bg-primary/15 text-primary border-primary/30"
                     : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
             )}
           >
             {order.paymentStatus === "paid"
               ? "Order Placed & Payment Verified"
               : order.paymentProof?.status === "rejected"
-                ? "Payment Proof Rejected — Action Needed"
-                : order.paymentProof?.status === "pending"
-                  ? "Payment Proof Submitted — Pending Verification"
-                  : "Order Received — Payment Pending"}
+                ? "Payment Notice — Verification Needed"
+                : order.transactionReference
+                  ? "Details Collected — Awaiting Verification"
+                  : "Order Received — Awaiting Payment"}
           </Badge>
           <h1 className="mt-3 font-display text-3xl sm:text-4xl md:text-5xl font-semibold">
             {order.paymentStatus === "paid"
               ? "Thank you for your order!"
               : order.paymentProof?.status === "rejected"
-                ? "Payment Proof Rejected"
-                : order.paymentProof?.status === "pending"
-                  ? "Verifying Your Payment"
-                  : "Order Received — Settle Payment"}
+                ? "Payment Needs Review"
+                : order.transactionReference
+                  ? "Payment Details Collected"
+                  : "Order Received — Payment Instructions"}
           </h1>
           <p className="mt-3 max-w-xl mx-auto text-sm sm:text-base text-muted-foreground">
             {order.paymentStatus === "paid"
               ? "Your payment is verified and your order is actively being prepared by our baristas and kitchen."
               : order.paymentProof?.status === "rejected"
-                ? "Our cashier reviewed your submitted receipt and could not verify it. Please check the reason below and submit a valid proof."
-                : order.paymentProof?.status === "pending"
-                  ? "Our cashier is verifying your payment with the bank. Status will update here automatically upon approval."
-                  : "Your order details have been saved to the café database. Please submit your payment proof below to finalize fulfillment."}
+                ? "Our cashier was unable to verify the transaction reference with the bank. Please review details with your waiter."
+                : order.transactionReference
+                  ? `Your assigned waiter (${order.waiterName || "Floor Staff"}) recorded reference ${order.transactionReference}. Cashier verification is in progress.`
+                  : `Please select your preferred payment method below to view payment instructions. Total due: ${formatETB(order.total)}.`}
           </p>
         </div>
 
@@ -740,411 +692,276 @@ function OrderPage() {
                   </div>
                 )}
               </div>
-            ) : order.paymentProof && order.paymentProof.status === "pending" ? (
-              /* CASE 2: PAYMENT PROOF SUBMITTED & PENDING CASHIER REVIEW */
+            ) : (
+              /* CASE 2: PAYMENT AWAITING SETTLEMENT / WAITER COLLECTION */
               <div className="mt-4 space-y-4">
-                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-100 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                      <span className="font-display text-base font-bold text-foreground">
-                        Payment Submitted Successfully!
-                      </span>
-                    </div>
-                    <Badge variant="outline" className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 font-semibold text-xs">
-                      Under Review
-                    </Badge>
-                  </div>
-                  <p className="text-muted-foreground text-xs leading-relaxed">
-                    Your payment proof has been received and sent to our cashier for verification. Your order is awaiting approval.
-                  </p>
-                  <p className="text-muted-foreground text-xs leading-relaxed">
-                    We will notify you when your payment has been reviewed. If your payment is rejected, you can upload a corrected screenshot or enter the correct transfer ID.
-                  </p>
-                  <div className="pt-1 text-[11px] font-mono text-muted-foreground border-t border-border/40 flex items-center justify-between">
-                    <span>Order #{order.number}</span>
-                    <span>Status: <strong className="text-amber-600 dark:text-amber-400 font-semibold">Under Review</strong></span>
-                  </div>
-                </div>
-
-                {/* Submitted proof preview card */}
-                <div className="rounded-xl border border-border bg-background/80 p-3.5 space-y-3">
-                  <div className="flex items-center justify-between text-xs font-semibold text-foreground border-b border-border/60 pb-2">
-                    <span>Submitted Information</span>
-                    <span className="text-muted-foreground font-normal">
-                      {new Date(
-                        order.paymentProof.submittedAt || order.paymentProof.createdAt || Date.now(),
-                      ).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </div>
-
-                  {order.paymentProof.screenshotUrl ? (
-                    <div className="flex items-center gap-3">
-                      <div
-                        onClick={() => {
-                          setZoomImageUrl(order.paymentProof!.screenshotUrl!);
-                          setZoomTitle("Submitted Payment Receipt");
-                          setZoomModalOpen(true);
-                        }}
-                        className="relative size-16 shrink-0 rounded-lg overflow-hidden border border-border cursor-pointer group bg-muted/40"
-                        title="Click to view full preview"
-                      >
-                        <img
-                          src={order.paymentProof.screenshotUrl}
-                          alt="Submitted receipt proof"
-                          className="size-full object-cover transition-transform group-hover:scale-105"
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
-                          <Eye className="size-4" />
-                        </div>
-                      </div>
-                      <div className="text-xs space-y-1">
-                        <span className="font-medium text-foreground block">Receipt Screenshot</span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-[11px] px-2 gap-1"
-                          onClick={() => {
-                            setZoomImageUrl(order.paymentProof!.screenshotUrl!);
-                            setZoomTitle("Submitted Payment Receipt");
-                            setZoomModalOpen(true);
-                          }}
-                        >
-                          <ZoomIn className="size-3" />
-                          View Full Image
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-muted-foreground italic">
-                      No receipt screenshot attached (reference-only submission)
-                    </div>
-                  )}
-
-                  {(order.transactionReference || order.paymentProof.transactionReference) && (
-                    <div className="rounded bg-muted/40 p-2 text-xs flex items-center justify-between">
-                      <div>
-                        <span className="text-[11px] text-muted-foreground block">Transaction Reference:</span>
-                        <span className="font-mono font-bold text-foreground">
-                          {order.transactionReference || order.paymentProof.transactionReference}
+                {/* Cashier Rejection Alert (if previously rejected) */}
+                {order.paymentProof && order.paymentProof.status === "rejected" && (
+                  <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2.5">
+                    <AlertCircle className="size-4 shrink-0 mt-0.5 text-destructive" />
+                    <div>
+                      <p className="font-semibold text-sm">Payment Verification Notice</p>
+                      <p className="mt-0.5 font-medium text-foreground">
+                        Cashier Reason:{" "}
+                        <span className="text-destructive font-semibold">
+                          {order.paymentProof.rejectionReason || "Payment could not be verified with the bank."}
                         </span>
+                      </p>
+                      <p className="mt-1 text-muted-foreground text-[11px]">
+                        Please confirm your transfer and present the confirmation SMS to your assigned waiter ({order.waiterName || "Floor Staff"}).
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Waiter Collected Details Banner */}
+                {order.transactionReference ? (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="size-4 text-primary" />
+                        <span className="font-semibold text-foreground">
+                          Payment Details Collected by Waiter
+                        </span>
+                      </div>
+                      <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-[10px]">
+                        Under Review
+                      </Badge>
+                    </div>
+                    <div className="rounded bg-background/80 p-2.5 border border-border/60 flex items-center justify-between font-mono">
+                      <div>
+                        <span className="text-[11px] text-muted-foreground block font-sans">
+                          Collected Reference Code:
+                        </span>
+                        <strong className="text-foreground text-sm">
+                          {order.transactionReference}
+                        </strong>
                       </div>
                       <button
                         type="button"
                         onClick={() => {
-                          const ref = order.transactionReference || order.paymentProof?.transactionReference || "";
-                          void navigator.clipboard.writeText(ref);
+                          void navigator.clipboard.writeText(order.transactionReference!);
                           toast.success("Reference copied!");
                         }}
-                        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
+                        className="text-muted-foreground hover:text-foreground text-xs p-1"
+                        title="Copy"
                       >
-                        <Copy className="size-3" />
-                        Copy
+                        <Copy className="size-3.5" />
                       </button>
                     </div>
-                  )}
-                </div>
-
-                {/* Option to re-upload / replace if customer made an error */}
-                <details className="rounded-lg border border-border/70 p-3 text-xs group">
-                  <summary className="font-medium text-primary cursor-pointer hover:underline">
-                    Need to update or replace your receipt?
-                  </summary>
-                  <div className="mt-3 pt-3 border-t border-border/50 space-y-3">
-                    <p className="text-muted-foreground">
-                      Upload a new screenshot or enter a corrected transaction code below:
-                    </p>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold text-foreground">
-                        Upload Corrected Receipt
-                      </Label>
-                      {!proofImageBase64 ? (
-                        <label className="flex flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border/80 bg-background/50 hover:bg-background/80 hover:border-primary/60 p-3 cursor-pointer text-center">
-                          <UploadCloud className="size-4 text-primary" />
-                          <span className="text-xs font-medium text-foreground">Choose new image</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleProofFileChange}
-                            className="hidden"
-                          />
-                        </label>
-                      ) : (
-                        <div className="flex items-center justify-between rounded-lg border border-border bg-background p-2">
-                          <span className="text-xs font-medium truncate max-w-[180px]">{proofFileName}</span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 text-[11px] text-destructive hover:text-destructive"
-                            onClick={handleRemoveProof}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="replace-txref" className="text-xs font-medium text-foreground">
-                        Corrected Transaction Reference
-                      </Label>
-                      <Input
-                        id="replace-txref"
-                        value={txRef}
-                        onChange={(e) => setTxRef(e.target.value)}
-                        placeholder="e.g. TXN-9281034"
-                        className="h-8 text-xs font-mono"
-                      />
-                    </div>
-                    <Button
-                      onClick={handleSubmitProof}
-                      disabled={submittingProof || (!proofImageBase64 && !txRef.trim())}
-                      size="sm"
-                      className="w-full text-xs font-semibold"
-                    >
-                      {submittingProof ? "Updating Proof…" : "Submit Updated Proof"}
-                    </Button>
-                  </div>
-                </details>
-              </div>
-            ) : order.paymentProof && order.paymentProof.status === "rejected" ? (
-              /* CASE 3: PAYMENT PROOF REJECTED BY CASHIER - ACTION REQUIRED */
-              <div className="mt-4 space-y-4">
-                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2.5">
-                  <AlertCircle className="size-4 shrink-0 mt-0.5 text-destructive" />
-                  <div>
-                    <p className="font-semibold text-sm">Payment Proof Rejected by Cashier</p>
-                    <p className="mt-1 font-medium text-foreground">
-                      Reason:{" "}
-                      <span className="text-destructive font-semibold">
-                        {order.paymentProof.rejectionReason || "Payment could not be verified with the bank."}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-muted-foreground text-[11px]">
-                      Please review your transfer, upload a clear receipt screenshot or provide the correct transaction ID.
+                    <p className="text-[11px] text-muted-foreground">
+                      Collected by {order.waiterName || "Floor Staff"} and submitted to the cashier. Order preparation proceeds while verification completes.
                     </p>
                   </div>
-                </div>
-
-                {/* Resubmission form */}
-                <div className="rounded-xl border border-border bg-background/80 p-4 space-y-3.5">
-                  <h4 className="text-xs font-semibold text-foreground uppercase tracking-wide">
-                    Resubmit Proof for Order #{order.number}
-                  </h4>
-
-                  {/* Transfer instruction reminder */}
-                  <div className="rounded-lg bg-muted/40 p-2.5 text-xs space-y-1 border border-border/50">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Amount Due:</span>
-                      <strong className="text-primary">{formatETB(order.total)}</strong>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-muted-foreground">Merchant / Till:</span>
-                      <span className="font-mono font-medium text-foreground flex items-center gap-1">
-                        0911 234 567
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void navigator.clipboard.writeText("0911234567");
-                            toast.success("Merchant till copied!");
-                          }}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          <Copy className="size-3" />
-                        </button>
-                      </span>
+                ) : (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
+                    <Clock className="size-4 shrink-0 mt-0.5 text-amber-600 animate-pulse" />
+                    <div>
+                      <p className="font-semibold">Awaiting Payment Collection</p>
+                      <p className="mt-0.5 text-muted-foreground">
+                        Total amount due: <strong className="text-foreground">{formatETB(order.total)}</strong>.
+                        Select your preferred payment method below. Your assigned waiter ({order.waiterName || "Floor Staff"}) will collect your payment reference upon service.
+                      </p>
                     </div>
                   </div>
+                )}
 
-                  {/* Image uploader */}
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
-                      <span>Upload New Receipt Photo</span>
-                      <span className="text-[11px] font-normal text-muted-foreground">Max 5MB</span>
-                    </Label>
-                    {!proofImageBase64 ? (
-                      <label className="flex flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border/80 bg-background/50 hover:bg-background/80 hover:border-primary/60 p-3.5 cursor-pointer text-center">
-                        <UploadCloud className="size-5 text-primary" />
-                        <span className="text-xs font-medium text-foreground">Select receipt screenshot</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleProofFileChange}
-                          className="hidden"
-                        />
-                      </label>
-                    ) : (
-                      <div className="rounded-lg border border-border bg-background p-2.5 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 truncate">
-                          <img
-                            src={proofImageBase64}
-                            alt="Receipt preview"
-                            className="size-10 rounded object-cover border border-border"
-                          />
-                          <span className="text-xs font-medium truncate">{proofFileName}</span>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 text-[11px] text-destructive hover:text-destructive"
-                          onClick={handleRemoveProof}
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Transaction ID */}
-                  <div className="space-y-1">
-                    <Label htmlFor="resubmit-txref" className="text-xs font-medium text-foreground">
-                      Transaction Reference / Confirmation Code
-                    </Label>
-                    <Input
-                      id="resubmit-txref"
-                      value={txRef}
-                      onChange={(e) => setTxRef(e.target.value)}
-                      placeholder="e.g. TXN-84729103"
-                      className="h-9 text-xs font-mono"
-                    />
-                  </div>
-
-                  <Button
-                    onClick={handleSubmitProof}
-                    disabled={submittingProof || (!proofImageBase64 && !txRef.trim())}
-                    className="w-full font-semibold"
-                  >
-                    <RefreshCw className={cn("size-4 mr-2", submittingProof && "animate-spin")} />
-                    {submittingProof ? "Submitting Proof…" : `Resubmit Proof (${formatETB(order.total)})`}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              /* CASE 4: PENDING PAYMENT (NO PROOF SUBMITTED YET) */
-              <div className="mt-4 space-y-4">
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5">
-                  <AlertCircle className="size-4 shrink-0 mt-0.5 text-amber-600" />
-                  <div>
-                    <p className="font-semibold">Action required: Submit payment proof</p>
-                    <p className="mt-0.5 text-muted-foreground">
-                      Total due is <strong className="text-foreground">{formatETB(order.total)}</strong>.
-                      Transfer using Telebirr or CBE Birr and upload receipt proof below.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Transfer options instructions */}
-                <div className="rounded-lg border border-border bg-background/80 p-3 space-y-2 text-xs">
-                  <span className="font-semibold text-foreground flex items-center gap-1.5">
-                    <Receipt className="size-3.5 text-primary" />
-                    Rekik Coffee Payment Accounts
+                {/* PAYMENT METHOD SELECTION INTERFACE */}
+                <div className="space-y-3">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
+                    Choose Payment Method
                   </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-muted-foreground">
-                    <div className="rounded bg-muted/40 p-2">
-                      <span className="text-[11px] block font-semibold text-foreground">Telebirr Till:</span>
-                      <span className="font-mono text-xs font-bold text-primary flex items-center justify-between">
-                        0911 234 567
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void navigator.clipboard.writeText("0911234567");
-                            toast.success("Telebirr number copied!");
-                          }}
-                          className="text-muted-foreground hover:text-foreground"
-                          title="Copy"
+
+                  <div className="grid gap-2.5">
+                    {[
+                      {
+                        id: "telebirr" as const,
+                        label: "Telebirr Mobile Payment",
+                        desc: "Instant transfer via Telebirr app or *127#",
+                        icon: Smartphone,
+                        accountName: "Rekik Coffee Lounge",
+                        accountNumber: settings.phone || "0911 234 567",
+                      },
+                      {
+                        id: "cbe" as const,
+                        label: "Bank Transfer (CBE)",
+                        desc: "Transfer via CBE Mobile Banking or CBE Birr",
+                        icon: CreditCard,
+                        bankName: "Commercial Bank of Ethiopia (CBE)",
+                        accountName: "Rekik Coffee & Roastery",
+                        accountNumber: "1000 2345 67890",
+                      },
+                      {
+                        id: "cash" as const,
+                        label: isDelivery ? "Cash on Delivery" : "Pay to Waiter / Cashier",
+                        desc: isDelivery ? "Pay cash directly to the courier" : "Settle cash or card with your floor server",
+                        icon: Banknote,
+                        accountName: "In-Person",
+                        accountNumber: "Cash or Card Terminal",
+                      },
+                    ].map((option) => {
+                      const isSelected = selectedPaymentMethod === option.id;
+                      return (
+                        <div
+                          key={option.id}
+                          onClick={() => void handleSelectPaymentMethod(option.id)}
+                          className={cn(
+                            "cursor-pointer rounded-xl border p-3.5 transition-all",
+                            isSelected
+                              ? "border-primary bg-accent/40 ring-1 ring-primary shadow-xs"
+                              : "border-border hover:bg-secondary/40",
+                          )}
                         >
-                          <Copy className="size-3" />
-                        </button>
-                      </span>
-                    </div>
-                    <div className="rounded bg-muted/40 p-2">
-                      <span className="text-[11px] block font-semibold text-foreground">CBE Account:</span>
-                      <span className="font-mono text-xs font-bold text-primary flex items-center justify-between">
-                        1000 2345 67890
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void navigator.clipboard.writeText("1000234567890");
-                            toast.success("CBE Account copied!");
-                          }}
-                          className="text-muted-foreground hover:text-foreground"
-                          title="Copy"
-                        >
-                          <Copy className="size-3" />
-                        </button>
-                      </span>
-                    </div>
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="radio"
+                              name="order-payment-method"
+                              checked={isSelected}
+                              onChange={() => void handleSelectPaymentMethod(option.id)}
+                              className="mt-0.5 size-4 accent-[var(--primary)]"
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <option.icon className="size-4 text-primary" />
+                                  <span className="font-semibold text-foreground text-xs sm:text-sm">
+                                    {option.label}
+                                  </span>
+                                </div>
+                                {isSelected && (
+                                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                    Selected
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                {option.desc}
+                              </p>
+
+                              {/* METHOD-SPECIFIC INSTRUCTIONS: ONLY DISPLAYED AFTER SELECTION */}
+                              {isSelected && (
+                                <div
+                                  className="mt-3 pt-3 border-t border-border/60 space-y-2.5 text-xs animate-in fade-in-50"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {option.id === "telebirr" && (
+                                    <div className="rounded-lg bg-background/80 border border-border/80 p-3 space-y-2">
+                                      <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                                        <span className="font-semibold text-foreground flex items-center gap-1.5">
+                                          <Receipt className="size-3.5 text-primary" />
+                                          Telebirr Merchant Information
+                                        </span>
+                                        <span className="font-bold text-primary text-xs">
+                                          Amount: {formatETB(order.total)}
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-muted-foreground">
+                                        <div>
+                                          <span className="text-[10px] block uppercase font-medium">Merchant Name:</span>
+                                          <span className="font-semibold text-foreground">{option.accountName}</span>
+                                        </div>
+                                        <div>
+                                          <span className="text-[10px] block uppercase font-medium">Telebirr Till / Phone:</span>
+                                          <span className="font-mono font-bold text-primary flex items-center gap-1">
+                                            {option.accountNumber}
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                void navigator.clipboard.writeText(option.accountNumber.replace(/\s+/g, ""));
+                                                toast.success("Telebirr number copied!");
+                                              }}
+                                              className="text-muted-foreground hover:text-foreground"
+                                              title="Copy"
+                                            >
+                                              <Copy className="size-3" />
+                                            </button>
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="rounded bg-muted/40 p-2 text-[11px] text-muted-foreground space-y-1">
+                                        <p className="font-medium text-foreground">How to pay:</p>
+                                        <ol className="list-decimal list-inside space-y-0.5">
+                                          <li>Open your Telebirr App or dial *127#</li>
+                                          <li>Send <strong>{formatETB(order.total)}</strong> to the merchant number above</li>
+                                          <li>Keep your confirmation SMS handy for your waiter to record</li>
+                                        </ol>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {option.id === "cbe" && (
+                                    <div className="rounded-lg bg-background/80 border border-border/80 p-3 space-y-2">
+                                      <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                                        <span className="font-semibold text-foreground flex items-center gap-1.5">
+                                          <Receipt className="size-3.5 text-primary" />
+                                          CBE Bank Transfer Details
+                                        </span>
+                                        <span className="font-bold text-primary text-xs">
+                                          Amount: {formatETB(order.total)}
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-muted-foreground">
+                                        <div>
+                                          <span className="text-[10px] block uppercase font-medium">Bank Name:</span>
+                                          <span className="font-semibold text-foreground">{option.bankName}</span>
+                                        </div>
+                                        <div>
+                                          <span className="text-[10px] block uppercase font-medium">Account Holder:</span>
+                                          <span className="font-semibold text-foreground">{option.accountName}</span>
+                                        </div>
+                                        <div className="sm:col-span-2">
+                                          <span className="text-[10px] block uppercase font-medium">Account Number:</span>
+                                          <span className="font-mono font-bold text-primary flex items-center gap-1.5 text-sm">
+                                            {option.accountNumber}
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                void navigator.clipboard.writeText(option.accountNumber.replace(/\s+/g, ""));
+                                                toast.success("Account number copied!");
+                                              }}
+                                              className="text-muted-foreground hover:text-foreground"
+                                              title="Copy"
+                                            >
+                                              <Copy className="size-3.5" />
+                                            </button>
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="rounded bg-muted/40 p-2 text-[11px] text-muted-foreground space-y-1">
+                                        <p className="font-medium text-foreground">How to transfer:</p>
+                                        <ol className="list-decimal list-inside space-y-0.5">
+                                          <li>Transfer <strong>{formatETB(order.total)}</strong> using CBE Mobile Banking or CBE Birr</li>
+                                          <li>Save or note your transaction reference number</li>
+                                          <li>Provide the reference number to your waiter upon order service</li>
+                                        </ol>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {option.id === "cash" && (
+                                    <div className="rounded-lg bg-background/80 border border-border/80 p-3 text-xs text-muted-foreground">
+                                      <p className="font-medium text-foreground">In-Person Settlement</p>
+                                      <p className="mt-1 text-[11px]">
+                                        Please have <strong>{formatETB(order.total)}</strong> ready to pay with your assigned waiter ({order.waiterName || "Floor Staff"}) or courier.
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  <div className="rounded-lg bg-primary/5 border border-primary/20 p-2.5 text-[11px] text-muted-foreground flex items-center gap-2">
+                                    <ShieldCheck className="size-4 text-primary shrink-0" />
+                                    <span>
+                                      Your waiter will collect your payment reference on floor and submit it directly to the cashier for official verification.
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-
-                {/* Screenshot uploader */}
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
-                    <span>Upload Payment Receipt Screenshot</span>
-                    <span className="text-[11px] font-normal text-muted-foreground">Max 5MB</span>
-                  </Label>
-                  {!proofImageBase64 ? (
-                    <label className="flex flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-border/80 bg-background/50 hover:bg-background/80 hover:border-primary/60 p-3.5 cursor-pointer text-center">
-                      <UploadCloud className="size-5 text-primary" />
-                      <span className="text-xs font-medium text-foreground">Click to upload receipt photo</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleProofFileChange}
-                        className="hidden"
-                      />
-                    </label>
-                  ) : (
-                    <div className="rounded-lg border border-border bg-background p-2.5 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 truncate">
-                        <img
-                          src={proofImageBase64}
-                          alt="Receipt preview"
-                          className="size-10 rounded object-cover border border-border"
-                        />
-                        <span className="text-xs font-medium truncate">{proofFileName}</span>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 text-[11px] text-destructive hover:text-destructive"
-                        onClick={handleRemoveProof}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Transaction reference */}
-                <div className="space-y-1">
-                  <Label htmlFor="order-txref" className="text-xs font-medium text-foreground flex items-center justify-between">
-                    <span>Transaction Reference Number</span>
-                    <span className="text-[11px] text-muted-foreground">Optional if image uploaded</span>
-                  </Label>
-                  <Input
-                    id="order-txref"
-                    value={txRef}
-                    onChange={(e) => setTxRef(e.target.value)}
-                    placeholder="e.g. TXN-84729103"
-                    className="h-9 text-xs font-mono"
-                  />
-                </div>
-
-                <Button
-                  onClick={handleSubmitProof}
-                  disabled={submittingProof || (!proofImageBase64 && !txRef.trim())}
-                  className="w-full font-semibold"
-                >
-                  <FileCheck2 className="size-4 mr-2" />
-                  {submittingProof ? "Submitting Proof…" : `Submit Proof for Verification`}
-                </Button>
               </div>
             )}
 

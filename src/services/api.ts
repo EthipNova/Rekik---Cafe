@@ -1280,10 +1280,14 @@ export async function fetchAvailableWaiters(): Promise<AvailableWaiter[]> {
  * Records a waiter's approval or rejection decision on an assigned order.
  */
 export async function recordWaiterDecision(
-  orderId: string,
-  decision: "approved" | "rejected",
-  comments?: string,
+  orderIdOrParams: string | { orderId: string; decision: "approved" | "rejected"; reason?: string | undefined; comments?: string | undefined },
+  decisionArg?: "approved" | "rejected",
+  commentsArg?: string,
 ): Promise<Order> {
+  const orderId = typeof orderIdOrParams === "string" ? orderIdOrParams : orderIdOrParams.orderId;
+  const decision = typeof orderIdOrParams === "string" ? decisionArg! : orderIdOrParams.decision;
+  const comments = typeof orderIdOrParams === "string" ? commentsArg : (orderIdOrParams.reason || orderIdOrParams.comments);
+
   const headers: Record<string, string> = {};
   if (typeof window !== "undefined") {
     try {
@@ -1308,3 +1312,80 @@ export async function recordWaiterDecision(
   }
   return updated;
 }
+
+/**
+ * Records payment details collected on the floor by an assigned waiter.
+ */
+export async function recordWaiterPaymentCollection(
+  orderIdOrParams: string | { orderId: string; transactionReference: string; notes?: string | undefined },
+  transactionReferenceArg?: string,
+  notesArg?: string,
+): Promise<Order> {
+  const orderId = typeof orderIdOrParams === "string" ? orderIdOrParams : orderIdOrParams.orderId;
+  const transactionReference =
+    typeof orderIdOrParams === "string"
+      ? transactionReferenceArg!
+      : orderIdOrParams.transactionReference;
+  const notes = typeof orderIdOrParams === "string" ? notesArg : orderIdOrParams.notes;
+
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const updated = await request<Order>(
+    `/api/orders/${encodeURIComponent(orderId)}/waiter-payment-collection`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ transactionReference, notes }),
+    },
+  );
+  if (updated) {
+    saveOrder(updated);
+  }
+  return updated;
+}
+
+/**
+ * Updates the customer's selected payment method on an existing order.
+ */
+export async function updateOrderPaymentMethod(
+  orderIdOrParams: string | { orderId: string; paymentMethod: string },
+  paymentMethodArg?: string,
+): Promise<Order> {
+  const orderId = typeof orderIdOrParams === "string" ? orderIdOrParams : orderIdOrParams.orderId;
+  const paymentMethod =
+    typeof orderIdOrParams === "string" ? paymentMethodArg! : orderIdOrParams.paymentMethod;
+
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const updated = await request<Order>(
+    `/api/orders/${encodeURIComponent(orderId)}/payment-method`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ paymentMethod }),
+    },
+  );
+  if (updated) {
+    saveOrder(updated);
+  }
+  return updated;
+}
+

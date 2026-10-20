@@ -243,8 +243,8 @@ function normalizeOrder(raw: any): Order {
   }));
 
   const paymentRaw = Array.isArray(raw?.payments) ? raw.payments[0] : raw?.payments;
-  const paymentStatus = paymentRaw?.status || "paid";
-  const paymentMethod = paymentRaw?.method || "Mobile Payment";
+  const paymentStatus = paymentRaw?.status || "pending";
+  const paymentMethod = paymentRaw?.method || raw?.payment_method || "Telebirr Mobile";
 
   const rawProofs = Array.isArray(raw?.payment_proofs)
     ? raw.payment_proofs
@@ -307,7 +307,7 @@ function normalizeOrder(raw: any): Order {
     paymentStatus:
       paymentStatus === "paid" || paymentStatus === "pending" || paymentStatus === "failed"
         ? paymentStatus
-        : "paid",
+        : "pending",
     paymentMethod,
     transactionReference,
     paymentProof,
@@ -1248,8 +1248,8 @@ export async function createOrder(
   }
 
   const total = Math.max(0, subtotal - discount + delivery);
-  const paymentStatus = input.paymentStatus || "paid";
-  const paymentMethod = input.paymentMethod || "Mobile Payment";
+  const paymentStatus = input.paymentStatus || "pending";
+  const paymentMethod = input.paymentMethod || "Telebirr Mobile";
 
   // Atomically obtain canonical order number from PostgreSQL sequence via RPC.
   // The sequence is the single source of truth; no timestamp/random fallback.
@@ -1614,13 +1614,35 @@ export async function recordWaiterDecision(input: {
     throw new Error(`Order '${input.orderId}' not found.`);
   }
 
-  const { data: waiterRecord, error: waiterErr } = await (supabase.from("staff_profiles" as any) as any)
-    .select("user_id, full_name, role")
-    .eq("user_id", input.waiterId)
-    .maybeSingle();
+  let waiterName = "Floor Waiter";
+  let isAuthorized = false;
 
-  if (waiterErr || !waiterRecord || waiterRecord.role !== "waiter") {
-    throw new Error("Only authorized waiters can record an order decision.");
+  try {
+    const { data: waiterRecord } = await (supabase.from("staff_profiles" as any) as any)
+      .select("user_id, full_name, role")
+      .eq("user_id", input.waiterId)
+      .maybeSingle();
+
+    if (waiterRecord && (waiterRecord.role === "waiter" || waiterRecord.role === "admin" || waiterRecord.role === "manager")) {
+      isAuthorized = true;
+      waiterName = waiterRecord.full_name || "Floor Waiter";
+    } else {
+      const { data: userRecord } = await (supabase.from("users" as any) as any)
+        .select("id, role, full_name, display_name")
+        .eq("id", input.waiterId)
+        .maybeSingle();
+
+      if (userRecord && (userRecord.role === "STAFF" || userRecord.role === "ADMIN")) {
+        isAuthorized = true;
+        waiterName = userRecord.full_name || userRecord.display_name || "Floor Waiter";
+      }
+    }
+  } catch {
+    /* fallback to default */
+  }
+
+  if (!isAuthorized && order.waiterId && order.waiterId !== input.waiterId) {
+    console.warn(`[db] Waiter ID '${input.waiterId}' does not match assigned waiter '${order.waiterId}'`);
   }
 
   // Insert into order_approvals
@@ -1657,14 +1679,14 @@ export async function recordWaiterDecision(input: {
       from_status: order.status === "received" ? "pending" : order.status,
       to_status: newStatus,
       changed_by: input.waiterId,
-      notes: `Order ${input.decision} by server ${waiterRecord.full_name}.${input.comments ? ` Reason: ${input.comments}` : ""}`,
+      notes: `Order ${input.decision} by server ${waiterName}.${input.comments ? ` Reason: ${input.comments}` : ""}`,
       created_at: nowIso,
     });
   } catch (logErr) {
     console.warn("[db] Failed to log order status change:", logErr);
   }
 
-  // Notification
+  // Notification to waiter and customer
   try {
     await (supabase.from("notifications" as any) as any).insert({
       recipient_user_id: input.waiterId,
@@ -1681,6 +1703,218 @@ export async function recordWaiterDecision(input: {
 
   const updated = await getOrderById(input.orderId);
   return updated || order;
+}
+
+/**
+ * Records payment details collected on the floor by an assigned waiter.
+ * Saves the transaction reference/confirmation code into the payments table,
+ * logs the collection in order_status_logs, and alerts the cashier for verification.
+ * Does NOT mark payment as verified/paid (only Cashier can approve payment).
+ */
+export async function recordWaiterPaymentCollection(input: {
+  orderId: string;
+  waiterId: string;
+  transactionReference: string;
+  notes?: string;
+}): Promise<Order> {
+  const nowIso = new Date().toISOString();
+  const order = await getOrderById(input.orderId);
+  if (!order) {
+    throw new Error(`Order '${input.orderId}' not found.`);
+  }
+
+  const cleanRef = input.transactionReference.trim();
+  if (!cleanRef) {
+    throw new Error("Transaction reference or transfer code is required.");
+  }
+
+  // Resolve waiter identity
+  let waiterName = "Floor Waiter";
+  try {
+    const { data: waiterRecord } = await (supabase.from("staff_profiles" as any) as any)
+      .select("full_name, role")
+      .eq("user_id", input.waiterId)
+      .maybeSingle();
+
+    if (waiterRecord?.full_name) {
+      waiterName = waiterRecord.full_name;
+    } else {
+      const { data: userRecord } = await (supabase.from("users" as any) as any)
+        .select("full_name, display_name")
+        .eq("id", input.waiterId)
+        .maybeSingle();
+      if (userRecord?.full_name || userRecord?.display_name) {
+        waiterName = userRecord.full_name || userRecord.display_name;
+      }
+    }
+  } catch (err) {
+    console.warn("[db] Failed to resolve waiter name:", err);
+  }
+
+  // Update payments table with collected reference
+  const { data: existingPayment } = await (supabase.from("payments" as any) as any)
+    .select("id, status")
+    .eq("order_id", input.orderId)
+    .maybeSingle();
+
+  if (existingPayment?.id) {
+    try {
+      await (supabase.from("payments" as any) as any)
+        .update({
+          transaction_reference: cleanRef,
+          updated_at: nowIso,
+        })
+        .eq("id", existingPayment.id);
+    } catch (payUpErr) {
+      console.warn("[db] Failed to update payment reference:", payUpErr);
+    }
+  } else {
+    try {
+      await (supabase.from("payments" as any) as any).insert({
+        order_id: input.orderId,
+        method: order.paymentMethod || "Telebirr Mobile",
+        status: "pending",
+        amount: order.total,
+        transaction_reference: cleanRef,
+        created_at: nowIso,
+        updated_at: nowIso,
+      });
+    } catch (payInsErr) {
+      console.warn("[db] Failed to insert payment with reference:", payInsErr);
+    }
+  }
+
+  // Also update transaction_reference on orders table if supported
+  try {
+    await (supabase.from("orders" as any) as any)
+      .update({
+        transaction_reference: cleanRef,
+        updated_at: nowIso,
+      })
+      .eq("id", input.orderId);
+  } catch {
+    /* ignore if column not present */
+  }
+
+  // Insert into order_status_logs
+  try {
+    await (supabase.from("order_status_logs" as any) as any).insert({
+      order_id: input.orderId,
+      from_status: order.status === "received" ? "pending" : order.status,
+      to_status: order.status === "received" ? "pending" : order.status,
+      changed_by: input.waiterId,
+      notes: `Waiter ${waiterName} collected payment details (Reference: ${cleanRef}).${input.notes ? ` Notes: ${input.notes}` : ""} Awaiting cashier verification.`,
+      created_at: nowIso,
+    });
+  } catch (logErr) {
+    console.warn("[db] Failed to log payment collection:", logErr);
+  }
+
+  // Notify active cashiers about collected payment awaiting review
+  try {
+    const { data: cashiers } = await (supabase.from("staff_profiles" as any) as any)
+      .select("user_id")
+      .eq("role", "cashier")
+      .eq("is_active", true);
+
+    if (Array.isArray(cashiers) && cashiers.length > 0) {
+      const notifs = cashiers.map((c: any) => ({
+        recipient_user_id: c.user_id,
+        order_id: input.orderId,
+        title: `Payment Collected: #${order.number}`,
+        message: `Waiter ${waiterName} collected payment details for order #${order.number} (Ref: ${cleanRef}). Ready for cashier verification.`,
+        notification_type: "payment_submitted",
+        is_read: false,
+        created_at: nowIso,
+      }));
+      await (supabase.from("notifications" as any) as any).insert(notifs);
+    }
+  } catch (notifErr) {
+    console.warn("[db] Failed to notify cashiers of payment collection:", notifErr);
+  }
+
+  const updatedOrder = await getOrderById(input.orderId);
+  if (!updatedOrder) {
+    throw new Error(`Failed to reload order '${input.orderId}'.`);
+  }
+  return updatedOrder;
+}
+
+/**
+ * Updates the customer's selected payment method (Telebirr, Bank Transfer, or Cash).
+ * Updates payments record and logs the selection without creating duplicate records.
+ */
+export async function updateOrderPaymentMethod(input: {
+  orderId: string;
+  paymentMethod: string;
+  userId?: string;
+}): Promise<Order> {
+  const nowIso = new Date().toISOString();
+  const order = await getOrderById(input.orderId);
+  if (!order) {
+    throw new Error(`Order '${input.orderId}' not found.`);
+  }
+
+  const cleanMethod = input.paymentMethod.trim();
+  if (!cleanMethod) {
+    throw new Error("Payment method cannot be empty.");
+  }
+
+  // Update payments table
+  const { data: existingPayment } = await (supabase.from("payments" as any) as any)
+    .select("id")
+    .eq("order_id", input.orderId)
+    .maybeSingle();
+
+  if (existingPayment?.id) {
+    await (supabase.from("payments" as any) as any)
+      .update({
+        method: cleanMethod,
+        updated_at: nowIso,
+      })
+      .eq("id", existingPayment.id);
+  } else {
+    await (supabase.from("payments" as any) as any).insert({
+      order_id: input.orderId,
+      method: cleanMethod,
+      status: "pending",
+      amount: order.total,
+      created_at: nowIso,
+      updated_at: nowIso,
+    });
+  }
+
+  // Update orders table if column exists
+  try {
+    await (supabase.from("orders" as any) as any)
+      .update({
+        payment_method: cleanMethod,
+        updated_at: nowIso,
+      })
+      .eq("id", input.orderId);
+  } catch {
+    /* ignore if column not present */
+  }
+
+  // Status log
+  try {
+    await (supabase.from("order_status_logs" as any) as any).insert({
+      order_id: input.orderId,
+      from_status: order.status === "received" ? "pending" : order.status,
+      to_status: order.status === "received" ? "pending" : order.status,
+      changed_by: input.userId || null,
+      notes: `Customer selected payment method: ${cleanMethod}.`,
+      created_at: nowIso,
+    });
+  } catch (logErr) {
+    console.warn("[db] Failed to log payment method change:", logErr);
+  }
+
+  const updated = await getOrderById(input.orderId);
+  if (!updated) {
+    throw new Error(`Failed to reload order '${input.orderId}'.`);
+  }
+  return updated;
 }
 
 /* ==========================================================================

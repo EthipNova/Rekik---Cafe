@@ -24,6 +24,7 @@ import {
   Store,
   Truck,
   User,
+  UserCheck,
   Utensils,
   XCircle,
   ZoomIn,
@@ -81,6 +82,8 @@ import {
   approvePaymentProof,
   fetchOrders,
   markCashPaymentSettled,
+  recordWaiterDecision,
+  recordWaiterPaymentCollection,
   rejectPaymentProof,
   updateOrderStatus as apiUpdateOrderStatus,
 } from "@/services/api";
@@ -262,12 +265,66 @@ function AdminOrdersPage() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
+  // Waiter collection & decision states
+  const [waiterRefInput, setWaiterRefInput] = useState("");
+  const [waiterNoteInput, setWaiterNoteInput] = useState("");
+  const [collectingPayment, setCollectingPayment] = useState(false);
+  const [waiterDecisionLoading, setWaiterDecisionLoading] = useState(false);
+
   // Cashier verification states
   const [proofActionLoading, setProofActionLoading] = useState(false);
   const [rejectProofOpen, setRejectProofOpen] = useState(false);
   const [rejectProofReason, setRejectProofReason] = useState("");
   const [proofZoomOpen, setProofZoomOpen] = useState(false);
   const [proofZoomUrl, setProofZoomUrl] = useState<string | null>(null);
+
+  const handleRecordWaiterCollection = async (orderId: string) => {
+    if (!waiterRefInput.trim()) {
+      toast.error("Please enter the collected transaction reference number.");
+      return;
+    }
+    setCollectingPayment(true);
+    try {
+      await recordWaiterPaymentCollection({
+        orderId,
+        transactionReference: waiterRefInput.trim(),
+        notes: waiterNoteInput.trim() || undefined,
+      });
+      toast.success("Payment details recorded and submitted for cashier verification!");
+      setWaiterRefInput("");
+      setWaiterNoteInput("");
+      await loadData();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to record payment details";
+      toast.error(msg);
+    } finally {
+      setCollectingPayment(false);
+    }
+  };
+
+  const handleWaiterDecisionAction = async (
+    orderId: string,
+    decision: "approved" | "rejected",
+    reason?: string,
+  ) => {
+    setWaiterDecisionLoading(true);
+    try {
+      await recordWaiterDecision({
+        orderId,
+        decision,
+        reason,
+      });
+      toast.success(
+        decision === "approved" ? "Order approved by waiter!" : "Order declined by waiter.",
+      );
+      await loadData();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to record waiter decision";
+      toast.error(msg);
+    } finally {
+      setWaiterDecisionLoading(false);
+    }
+  };
 
   const handleApproveProof = async (orderId: string) => {
     setProofActionLoading(true);
@@ -1112,7 +1169,7 @@ function AdminOrdersPage() {
 
 
                   {selectedOrder.waiterName && (
-                    <div className="col-span-2 rounded-lg border border-primary/20 bg-primary/5 p-3 flex items-center justify-between">
+                    <div className="col-span-2 rounded-lg border border-primary/20 bg-primary/5 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
                         <dt className="text-[11px] font-medium text-muted-foreground uppercase">
                           Assigned Waiter
@@ -1146,6 +1203,29 @@ function AdminOrdersPage() {
                           )}
                         </dd>
                       </div>
+
+                      {(!selectedOrder.waiterDecision ||
+                        selectedOrder.waiterDecision === "pending") && (
+                        <div className="flex items-center gap-1.5 self-start sm:self-center">
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-2.5"
+                            onClick={() => void handleWaiterDecisionAction(selectedOrder.id, "approved")}
+                            disabled={waiterDecisionLoading}
+                          >
+                            <Check className="size-3 mr-1" /> Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs text-rose-600 hover:text-rose-700 border-rose-300 font-medium px-2.5"
+                            onClick={() => void handleWaiterDecisionAction(selectedOrder.id, "rejected", "Declined by waiter")}
+                            disabled={waiterDecisionLoading}
+                          >
+                            <XCircle className="size-3 mr-1" /> Decline
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1236,6 +1316,47 @@ function AdminOrdersPage() {
                     <span className="font-bold text-primary">{formatETB(selectedOrder.total)}</span>
                   </div>
                 </div>
+
+                {/* Waiter Collection Interface */}
+                {selectedOrder.paymentStatus !== "paid" && (
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                        <UserCheck className="size-3.5" /> Waiter Payment Collection
+                      </span>
+                      <Badge variant="outline" className="text-[10px] bg-background">
+                        {selectedOrder.paymentMethod || "Electronic"}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      Customer selected <strong className="text-foreground">{selectedOrder.paymentMethod || "Telebirr / Bank Transfer"}</strong>. Collect the customer's transfer confirmation code and record below to submit to the cashier.
+                    </p>
+                    <div className="space-y-1.5">
+                      <Input
+                        placeholder="e.g. TXN-84920193..."
+                        value={waiterRefInput}
+                        onChange={(e) => setWaiterRefInput(e.target.value)}
+                        className="h-8 text-xs font-mono bg-background"
+                      />
+                      <Input
+                        placeholder="Optional note (e.g. Verified Telebirr SMS at Table 2)..."
+                        value={waiterNoteInput}
+                        onChange={(e) => setWaiterNoteInput(e.target.value)}
+                        className="h-8 text-xs bg-background"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void handleRecordWaiterCollection(selectedOrder.id)}
+                        disabled={collectingPayment || !waiterRefInput.trim()}
+                        className="w-full h-8 text-xs font-semibold"
+                      >
+                        <Receipt className="size-3.5 mr-1.5" />
+                        {collectingPayment ? "Recording Details…" : "Record Payment Details & Send to Cashier"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Submitted Proof / Screenshot / Reference Details */}
                 {selectedOrder.paymentProof ? (

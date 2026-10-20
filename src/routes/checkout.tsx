@@ -100,12 +100,7 @@ function Checkout() {
   const [method, setMethod] = useState<OrderMethod>("dine-in");
   const [form, setForm] = useState({ name: "", phone: "", address: "" });
   const [errors, setErrors] = useState<FormErrors>({});
-  const [payment, setPayment] = useState<"telebirr" | "cbe" | "cash">("telebirr");
-  const [transactionRef, setTransactionRef] = useState("");
-  const [proofImageBase64, setProofImageBase64] = useState<string | null>(null);
-  const [proofFileName, setProofFileName] = useState<string | null>(null);
-  const [proofFileSize, setProofFileSize] = useState<string | null>(null);
-  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [payment, setPayment] = useState<"telebirr" | "cbe" | "cash" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [authenticatedCustomerName, setAuthenticatedCustomerName] = useState<string | null>(null);
@@ -113,37 +108,6 @@ function Checkout() {
   const [waitersLoading, setWaitersLoading] = useState(true);
   const [waitersError, setWaitersError] = useState<string | null>(null);
   const [selectedWaiterId, setSelectedWaiterId] = useState<string>("");
-
-  const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please upload an image file (PNG, JPG, or WEBP).");
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Receipt image must be smaller than 5MB.");
-      return;
-    }
-
-    setProofFileName(file.name);
-    setProofFileSize((file.size / (1024 * 1024)).toFixed(2) + " MB");
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setProofImageBase64(event.target?.result as string);
-      toast.success("Receipt image loaded! Preview is ready.");
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleRemoveProof = () => {
-    setProofImageBase64(null);
-    setProofFileName(null);
-    setProofFileSize(null);
-  };
 
   useEffect(() => {
     fetchSettings()
@@ -484,8 +448,6 @@ function Checkout() {
         method,
         paymentMethod: paymentMethodName,
         paymentStatus: initialPaymentStatus,
-        transactionReference: transactionRef.trim() || undefined,
-        proofImageBase64: proofImageBase64 || undefined,
         waiterId: selectedWaiterId || undefined,
         customer: {
           name: form.name.trim() || (method === "dine-in" ? "Dine-in guest" : ""),
@@ -503,11 +465,9 @@ function Checkout() {
       saveOrder(order);
       clear();
       if (payment === "cash") {
-        toast.success("Order placed! Pay in cash upon delivery or to your floor server.");
-      } else if (proofImageBase64 || transactionRef.trim()) {
-        toast.success("Order placed! Payment proof submitted for cashier verification.");
+        toast.success("Order placed! Your waiter has been notified for cash payment.");
       } else {
-        toast.info("Order placed! Please upload receipt proof on your order page to verify payment.");
+        toast.success("Order placed! Your waiter will collect and verify payment confirmation.");
       }
       void navigate({ to: "/order/$id", params: { id: order.id } });
     } catch (e: unknown) {
@@ -1293,26 +1253,34 @@ function Checkout() {
                         </div>
                         <p className="text-xs text-muted-foreground">{option.desc}</p>
 
-                        {/* PAYMENT INSTRUCTIONS & PROOF UPLOAD (When Telebirr or CBE Birr is selected) */}
+                        {/* PAYMENT INSTRUCTIONS (When Telebirr or CBE Birr is selected) */}
                         {isSelected && option.id !== "cash" && (
                           <div
-                            className="mt-3 pt-3 border-t border-border/50 space-y-4"
+                            className="mt-3 pt-3 border-t border-border/50 space-y-3"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {/* Step-by-step transfer instructions */}
-                            <div className="rounded-lg bg-background/80 border border-border/70 p-3 space-y-2 text-xs">
+                            <div className="rounded-lg bg-background/80 border border-border/70 p-3.5 space-y-2.5 text-xs">
                               <div className="flex items-center justify-between">
                                 <span className="font-semibold text-foreground flex items-center gap-1.5">
                                   <Receipt className="size-3.5 text-primary" />
-                                  Transfer Instructions
+                                  {option.id === "telebirr" ? "Telebirr Payment Details" : "Bank Transfer Details"}
                                 </span>
                                 <span className="font-bold text-primary text-sm">
                                   Total: {formatETB(total)}
                                 </span>
                               </div>
+
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-muted-foreground">
+                                {option.id === "cbe" && (
+                                  <div>
+                                    <span className="block text-[11px] text-muted-foreground">Bank Name:</span>
+                                    <span className="font-medium text-foreground text-xs">Commercial Bank of Ethiopia (CBE)</span>
+                                  </div>
+                                )}
                                 <div>
-                                  <span className="block text-[11px] text-muted-foreground">Transfer to:</span>
+                                  <span className="block text-[11px] text-muted-foreground">
+                                    {option.id === "telebirr" ? "Merchant / Till Number:" : "Account Number:"}
+                                  </span>
                                   <span className="font-mono font-medium text-foreground text-xs flex items-center gap-1">
                                     {option.detail}
                                     <button
@@ -1329,119 +1297,28 @@ function Checkout() {
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="block text-[11px] text-muted-foreground">Account Name:</span>
+                                  <span className="block text-[11px] text-muted-foreground">Account Holder:</span>
                                   <span className="font-medium text-foreground text-xs">{option.accountName}</span>
                                 </div>
-                              </div>
-                              <p className="text-[11px] text-muted-foreground/90 border-t border-border/40 pt-1.5">
-                                Transfer exact amount <strong className="text-foreground">{formatETB(total)}</strong>, then upload receipt screenshot or enter transaction code below.
-                              </p>
-                            </div>
-
-                            {/* RECEIPT IMAGE UPLOAD & PREVIEW */}
-                            <div className="space-y-2">
-                              <Label className="text-xs font-semibold text-foreground flex items-center justify-between">
-                                <span>Upload Payment Receipt Screenshot</span>
-                                <span className="text-[11px] font-normal text-muted-foreground">
-                                  PNG, JPG or WEBP (Max 5MB)
-                                </span>
-                              </Label>
-
-                              {!proofImageBase64 ? (
-                                <label
-                                  htmlFor="receipt-upload"
-                                  className="group flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/80 bg-background/40 hover:bg-background/80 hover:border-primary/60 p-4 cursor-pointer transition-colors text-center"
-                                >
-                                  <div className="rounded-full bg-primary/10 p-2 text-primary group-hover:scale-105 transition-transform">
-                                    <UploadCloud className="size-5" />
-                                  </div>
+                                {option.shortCode && (
                                   <div>
-                                    <span className="text-xs font-medium text-foreground">
-                                      Click to upload receipt photo / screenshot
-                                    </span>
-                                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                                      or take a photo of your receipt slip
-                                    </p>
+                                    <span className="block text-[11px] text-muted-foreground">Short Code:</span>
+                                    <span className="font-mono text-foreground text-xs">{option.shortCode}</span>
                                   </div>
-                                  <input
-                                    id="receipt-upload"
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={handleProofFileChange}
-                                    className="hidden"
-                                  />
-                                </label>
-                              ) : (
-                                <div className="rounded-xl border border-border bg-background p-3 space-y-2.5">
-                                  <div className="flex items-center gap-3">
-                                    <div
-                                      onClick={() => setPreviewModalOpen(true)}
-                                      className="relative size-16 shrink-0 rounded-lg overflow-hidden border border-border cursor-pointer group bg-muted/40"
-                                      title="Click to view full preview"
-                                    >
-                                      <img
-                                        src={proofImageBase64}
-                                        alt="Payment receipt preview"
-                                        className="size-full object-cover transition-transform group-hover:scale-105"
-                                      />
-                                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
-                                        <Eye className="size-4" />
-                                      </div>
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-1.5">
-                                        <FileCheck2 className="size-3.5 text-success shrink-0" />
-                                        <p className="text-xs font-medium text-foreground truncate">
-                                          {proofFileName || "Receipt Screenshot"}
-                                        </p>
-                                      </div>
-                                      {proofFileSize && (
-                                        <p className="text-[11px] text-muted-foreground">{proofFileSize}</p>
-                                      )}
-                                      <div className="mt-1 flex items-center gap-2">
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-6 text-[11px] px-2 gap-1"
-                                          onClick={() => setPreviewModalOpen(true)}
-                                        >
-                                          <Eye className="size-3" />
-                                          Preview
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-6 text-[11px] px-2 text-destructive hover:text-destructive gap-1"
-                                          onClick={handleRemoveProof}
-                                        >
-                                          <X className="size-3" />
-                                          Remove
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
+                                )}
+                              </div>
 
-                            {/* TRANSACTION REFERENCE / BANK ID */}
-                            <div className="space-y-1.5">
-                              <Label htmlFor="tx-ref" className="text-xs font-medium text-foreground flex items-center justify-between">
-                                <span>Bank Transfer ID or Transaction Reference</span>
-                                <span className="text-[11px] text-muted-foreground">Optional if screenshot uploaded</span>
-                              </Label>
-                              <Input
-                                id="tx-ref"
-                                value={transactionRef}
-                                onChange={(e) => setTransactionRef(e.target.value)}
-                                placeholder="e.g. TXN-84729103 or FT230983..."
-                                className="h-9 text-xs font-mono"
-                              />
-                              <p className="text-[11px] text-muted-foreground">
-                                Enter the confirmation code from your SMS or mobile banking app.
-                              </p>
+                              <div className="border-t border-border/40 pt-2 text-[11px] text-muted-foreground space-y-1">
+                                <p>
+                                  {option.id === "telebirr"
+                                    ? `Transfer exact amount ${formatETB(total)} via Telebirr app or *127# to merchant number ${option.detail}.`
+                                    : `Transfer exact amount ${formatETB(total)} via CBE Birr or CBE Mobile Banking app to account ${option.detail}.`}
+                                </p>
+                                <p className="font-medium text-primary flex items-center gap-1">
+                                  <ShieldCheck className="size-3 shrink-0" />
+                                  Your floor waiter will collect and record your payment details at your table.
+                                </p>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -1449,7 +1326,7 @@ function Checkout() {
                         {/* Cash in person message */}
                         {isSelected && option.id === "cash" && (
                           <div className="mt-2 text-xs text-muted-foreground bg-background/60 rounded p-2.5 border border-border/40">
-                            No upload required. Your order will be placed immediately and settled with the server or delivery agent.
+                            Pay exact amount <strong className="text-foreground">{formatETB(total)}</strong> in person to your floor server or delivery courier upon service.
                           </div>
                         )}
                       </div>
@@ -1459,38 +1336,10 @@ function Checkout() {
               })}
             </fieldset>
 
-            {/* FULL RECEIPT PREVIEW MODAL */}
-            <Dialog open={previewModalOpen} onOpenChange={setPreviewModalOpen}>
-              <DialogContent className="max-w-md p-4 sm:p-6">
-                <DialogHeader>
-                  <DialogTitle className="text-base flex items-center gap-2">
-                    <Receipt className="size-4 text-primary" />
-                    Payment Receipt Preview
-                  </DialogTitle>
-                </DialogHeader>
-                <div className="mt-2 flex flex-col items-center justify-center">
-                  {proofImageBase64 ? (
-                    <div className="w-full max-h-[70vh] overflow-auto rounded-lg border border-border bg-black/5 flex items-center justify-center p-2">
-                      <img
-                        src={proofImageBase64}
-                        alt="Full receipt proof"
-                        className="max-h-[65vh] w-auto object-contain rounded"
-                      />
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No image available.</p>
-                  )}
-                  {proofFileName && (
-                    <p className="mt-2 text-xs text-muted-foreground font-mono">{proofFileName}</p>
-                  )}
-                </div>
-              </DialogContent>
-            </Dialog>
-
             <div className="rounded-lg border border-border bg-muted/30 p-3.5 text-xs text-muted-foreground flex items-center gap-2">
               <ShieldCheck className="size-4 text-primary shrink-0" />
               <span>
-                All payment proofs are verified by our cashier and receptionist team before processing.
+                Payment information is collected by authorized floor staff and verified by our cashier team.
               </span>
             </div>
           </div>
