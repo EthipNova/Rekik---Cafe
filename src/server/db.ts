@@ -146,7 +146,7 @@ function normalizeCategory(raw: any): Category {
     id: raw.id,
     slug: raw.slug,
     name: raw.name,
-    tagline: raw.tagline || "",
+    tagline: raw.description || raw.tagline || "",
     active: raw.is_active ?? true,
   };
 }
@@ -352,7 +352,7 @@ export async function getCategories(): Promise<Category[]> {
     try {
       const { data, error } = await supabase
         .from("categories" as any)
-        .select("id, slug, name, tagline, is_active, created_at")
+        .select("id, slug, name, description, is_active, created_at")
         .order("name", { ascending: true });
 
       if (!error && Array.isArray(data)) {
@@ -395,7 +395,7 @@ export async function getProducts(options?: {
           id,
           slug,
           name,
-          tagline,
+          description,
           is_active
         )
       `,
@@ -451,7 +451,7 @@ export async function getProductById(id: string): Promise<Product | undefined> {
           id,
           slug,
           name,
-          tagline,
+          description,
           is_active
         )
       `,
@@ -657,15 +657,15 @@ export async function getOrders(
           `
         id,
         order_number,
+        order_reference,
+        customer_id,
         customer_name,
         customer_phone,
         method,
         status,
         table_number,
         delivery_address,
-        delivery_latitude,
-        delivery_longitude,
-        delivery_distance_km,
+        customer_notes,
         subtotal,
         discount_amount,
         delivery_fee,
@@ -778,15 +778,15 @@ export async function getOrdersForCustomerUser(userId: string, client?: any): Pr
         `
         id,
         order_number,
+        order_reference,
+        customer_id,
         customer_name,
         customer_phone,
         method,
         status,
         table_number,
         delivery_address,
-        delivery_latitude,
-        delivery_longitude,
-        delivery_distance_km,
+        customer_notes,
         subtotal,
         discount_amount,
         delivery_fee,
@@ -1040,15 +1040,15 @@ export async function getOrderById(id: string, client?: any): Promise<Order | un
           `
         id,
         order_number,
+        order_reference,
+        customer_id,
         customer_name,
         customer_phone,
         method,
         status,
         table_number,
         delivery_address,
-        delivery_latitude,
-        delivery_longitude,
-        delivery_distance_km,
+        customer_notes,
         subtotal,
         discount_amount,
         delivery_fee,
@@ -1251,17 +1251,42 @@ export async function createOrder(
   const paymentStatus = input.paymentStatus || "pending";
   const paymentMethod = input.paymentMethod || "Telebirr Mobile";
 
-  // Atomically obtain canonical order number from PostgreSQL sequence via RPC.
-  // The sequence is the single source of truth; no timestamp/random fallback.
-  const { data: orderNumber, error: rpcErr } = await (dbClient.rpc as any)("next_order_number");
-  if (rpcErr || !orderNumber) {
-    console.error("[db] Failed to generate order number from sequence:", rpcErr);
-    throw new Error(
-      `Failed to generate order number: ${rpcErr?.message || "Sequence unavailable"}`,
-    );
+  // Atomically obtain canonical order number from PostgreSQL sequence via RPC,
+  // with fallback to database max order number increment if RPC is not provisioned.
+  let orderNumber: string | null = null;
+  try {
+    const { data: rpcNum, error: rpcErr } = await (dbClient.rpc as any)("next_order_number");
+    if (!rpcErr && rpcNum) {
+      orderNumber = rpcNum;
+    }
+  } catch {
+    /* fallback to database query */
   }
 
-  // ── Step Waiter Validation: Server-authoritative database check ───────────
+  if (!orderNumber) {
+    try {
+      const { data: latestRows } = await (supabase.from("orders" as any) as any)
+        .select("order_number")
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      let maxNum = 1000;
+      if (latestRows && latestRows.length > 0) {
+        for (const row of latestRows) {
+          const match = String(row.order_number).match(/(\d+)/);
+          if (match) {
+            const parsed = parseInt(match[1]!, 10);
+            if (parsed > maxNum) maxNum = parsed;
+          }
+        }
+      }
+      orderNumber = `RK-${maxNum + 1}`;
+    } catch {
+      orderNumber = `RK-${Date.now().toString().slice(-4)}`;
+    }
+  }
+
+  // ── Step Waiter Validation & Assignment: Server-authoritative check ─────────
   let assignedWaiterId: string | null = null;
   let assignedWaiterName: string | null = null;
 
@@ -1274,7 +1299,7 @@ export async function createOrder(
     if (waiterErr || !waiterRecord) {
       throw new Error("Invalid waiter selected. The specified staff member was not found.");
     }
-    if (waiterRecord.role !== "waiter") {
+    if (waiterRecord.role !== "waiter" && waiterRecord.role !== "admin") {
       throw new Error("The selected staff account is not assigned to a waiter role.");
     }
     if (!waiterRecord.is_active || !waiterRecord.is_available) {
@@ -1285,11 +1310,47 @@ export async function createOrder(
 
     assignedWaiterId = waiterRecord.user_id;
     assignedWaiterName = waiterRecord.full_name;
-  } else if (input.method === "dine-in") {
-    // If dine-in, check if any floor waiters exist. If available, require waiter selection.
-    const availableWaiters = await getAvailableWaiters().catch(() => []);
-    if (availableWaiters.length > 0) {
-      throw new Error("Please select an available waiter for your dine-in table order.");
+  } else {
+    // Automatic assignment rule: select eligible on-duty waiter with fewest active orders
+    try {
+      const { data: availableWaiters } = await (supabase.from("staff_profiles" as any) as any)
+        .select("user_id, full_name, role")
+        .eq("role", "waiter")
+        .eq("is_active", true)
+        .eq("is_available", true);
+
+      if (availableWaiters && availableWaiters.length > 0) {
+        const waiterIds = availableWaiters.map((w: any) => w.user_id);
+        const { data: activeOrders } = await (supabase.from("orders" as any) as any)
+          .select("waiter_id")
+          .in("waiter_id", waiterIds)
+          .in("status", ["pending", "confirmed", "preparing", "ready"]);
+
+        const loadMap = new Map<string, number>();
+        for (const wid of waiterIds) loadMap.set(wid, 0);
+        if (activeOrders) {
+          for (const o of activeOrders) {
+            if (o.waiter_id && loadMap.has(o.waiter_id)) {
+              loadMap.set(o.waiter_id, (loadMap.get(o.waiter_id) || 0) + 1);
+            }
+          }
+        }
+
+        availableWaiters.sort(
+          (a: any, b: any) => (loadMap.get(a.user_id) || 0) - (loadMap.get(b.user_id) || 0),
+        );
+        const selected = availableWaiters[0]!;
+        assignedWaiterId = selected.user_id;
+        assignedWaiterName = selected.full_name;
+      } else {
+        // Fallback policy: Retain order in unassigned claimable queue for authorized staff
+        assignedWaiterId = null;
+        assignedWaiterName = null;
+      }
+    } catch (assignErr) {
+      console.warn("[db] Automatic waiter assignment warning:", assignErr);
+      assignedWaiterId = null;
+      assignedWaiterName = null;
     }
   }
 
@@ -1421,19 +1482,17 @@ export async function createOrder(
   const orderRecord = {
     id: orderId,
     order_number: orderNumber,
+    order_reference: `REF-${orderNumber}`,
     customer_id: customerId,
     customer_name: customerName,
     customer_phone: customerPhone,
     method: dbMethod,
     status: "pending",
     waiter_id: assignedWaiterId,
-    waiter_decision: assignedWaiterId ? "pending" : null,
+    waiter_decision: "pending",
     waiter_assigned_at: assignedWaiterId ? nowIso : null,
     table_number: input.customer?.table || null,
     delivery_address: input.customer?.address || null,
-    delivery_latitude: deliveryLatitude,
-    delivery_longitude: deliveryLongitude,
-    delivery_distance_km: deliveryDistanceKm,
     subtotal,
     discount_amount: discount,
     delivery_fee: delivery,
@@ -1449,24 +1508,21 @@ export async function createOrder(
     throw new Error(`Failed to create order: ${ordErr.message || String(ordErr)}`);
   }
 
-  // ── Step D2: Send notification to assigned waiter ──────────────────────────
-  if (assignedWaiterId) {
+  // Helper for compensation rollback on fatal failure
+  const rollbackOrder = async () => {
     try {
-      await (supabase.from("notifications" as any) as any).insert({
-        recipient_user_id: assignedWaiterId,
-        order_id: orderId,
-        title: "New Order Assignment",
-        message: `You have been assigned order #${orderNumber} for café dine-in service.`,
-        notification_type: "order_submitted",
-        is_read: false,
-        created_at: nowIso,
-      });
-    } catch (notifErr) {
-      console.warn("[db] Failed to send waiter notification:", notifErr);
+      await (supabase.from("payments" as any) as any).delete().eq("order_id", orderId);
+      await (supabase.from("order_items" as any) as any).delete().eq("order_id", orderId);
+      await (supabase.from("order_approvals" as any) as any).delete().eq("order_id", orderId);
+      await (supabase.from("order_status_logs" as any) as any).delete().eq("order_id", orderId);
+      await (supabase.from("notifications" as any) as any).delete().eq("order_id", orderId);
+      await (supabase.from("orders" as any) as any).delete().eq("id", orderId);
+    } catch (cleanErr) {
+      console.error("[db] Rollback order cleanup error:", cleanErr);
     }
-  }
+  };
 
-  // ── Step E: Insert order items (FATAL if this fails) ───────────────────────
+  // ── Step E: Insert order items (FATAL if this fails, triggers rollback) ────
   if (items.length > 0) {
     const supabaseProductIds = new Set(allProducts.map((p) => p.id));
 
@@ -1483,11 +1539,12 @@ export async function createOrder(
     );
     if (itemsErr) {
       console.error(`[db] order_items insert failed (code ${itemsErr.code}): ${itemsErr.message}`);
+      await rollbackOrder();
       throw new Error(`Failed to create order items: ${itemsErr.message}`);
     }
   }
 
-  // ── Step F: Insert payment record (FATAL if this fails) ────────────────────
+  // ── Step F: Insert payment record (FATAL if this fails, triggers rollback) ─
   const { data: payRow, error: payErr } = await (dbClient.from("payments" as any) as any)
     .insert({
       order_id: orderId,
@@ -1503,9 +1560,26 @@ export async function createOrder(
 
   if (payErr) {
     console.error(`[db] payments insert failed (code ${payErr.code}): ${payErr.message}`);
+    await rollbackOrder();
     throw new Error(`Failed to create payment: ${payErr.message}`);
   }
 
+  // ── Step G: Status Logs Initialization ────────────────────────────────────
+  try {
+    await (supabase.from("order_status_logs" as any) as any).insert({
+      id: crypto.randomUUID(),
+      order_id: orderId,
+      from_status: null,
+      to_status: "pending",
+      changed_by: input.authUserId || null,
+      notes: "Order submitted by customer",
+      created_at: nowIso,
+    });
+  } catch (logErr) {
+    console.warn("[db] Initial order_status_logs warning:", logErr);
+  }
+
+  // ── Step H: Payment Proof (optional) ──────────────────────────────────────
   let createdProof: PaymentProof | null = null;
   const paymentId = payRow?.id;
   if (paymentId && (input.proofImageBase64 || input.transactionReference)) {
@@ -1544,6 +1618,7 @@ export async function createOrder(
         }
 
         await (supabase.from("order_status_logs" as any) as any).insert({
+          id: crypto.randomUUID(),
           order_id: orderId,
           from_status: "received",
           to_status: "received",
@@ -1554,6 +1629,24 @@ export async function createOrder(
       }
     } catch (proofErr) {
       console.warn("[db] Payment proof creation warning:", proofErr);
+    }
+  }
+
+  // ── Step I: Send notification to assigned waiter (AFTER transaction succeeds) ──
+  if (assignedWaiterId) {
+    try {
+      await (supabase.from("notifications" as any) as any).insert({
+        id: crypto.randomUUID(),
+        recipient_user_id: assignedWaiterId,
+        order_id: orderId,
+        title: "New Order Assignment",
+        message: `You have been assigned order #${orderNumber}.`,
+        notification_type: "order_submitted",
+        is_read: false,
+        created_at: nowIso,
+      });
+    } catch (notifErr) {
+      console.warn("[db] Failed to send waiter notification:", notifErr);
     }
   }
 

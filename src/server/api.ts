@@ -35,6 +35,19 @@ import {
   recordWaiterPaymentCollection,
   updateOrderPaymentMethod,
 } from "./db";
+import {
+  resolveStaffUser,
+  getWaiterProfile,
+  updateWaiterAvailability,
+  getWaiterMetrics,
+  getWaiterOrders,
+  approveWaiterOrder,
+  rejectWaiterOrder,
+  submitWaiterPaymentProof,
+  getWaiterPayments,
+  getWaiterNotifications,
+  markWaiterNotificationRead,
+} from "./waiter";
 import { validateContactInput } from "@/lib/contact";
 import type { AboutContent } from "@/lib/content";
 import type { Order, OrderStatus } from "@/lib/orders";
@@ -311,6 +324,177 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           console.error("[api] Available waiters query error:", err);
           return json({ error: "Query Failed", message }, 500);
         }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       2e. Waiter Station Operations:
+           GET   /api/waiter/profile
+           PATCH /api/waiter/profile
+           GET   /api/waiter/metrics
+           GET   /api/waiter/orders
+           POST  /api/waiter/orders/:id/approve
+           POST  /api/waiter/orders/:id/reject
+           POST  /api/waiter/orders/:id/payment-proof
+           GET   /api/waiter/payments
+           GET   /api/waiter/notifications
+           PATCH /api/waiter/notifications/:id
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/waiter/profile") {
+      const staff = await resolveStaffUser(request);
+      if (!staff) {
+        return unauthorized("Authentication required as active waiter or admin");
+      }
+
+      if (method === "GET") {
+        const profile = await getWaiterProfile(staff.userId);
+        return json({ user: profile || staff });
+      }
+
+      if (method === "PATCH") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body.isAvailable !== "boolean") {
+          return badRequest("Field 'isAvailable' boolean is required");
+        }
+        const updated = await updateWaiterAvailability(staff.userId, body.isAvailable);
+        return json(updated);
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/metrics") {
+      if (method === "GET") {
+        const staff = await resolveStaffUser(request);
+        if (!staff) {
+          return unauthorized("Authentication required as active waiter or admin");
+        }
+        const metrics = await getWaiterMetrics(staff);
+        return json(metrics);
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/orders") {
+      if (method === "GET") {
+        const staff = await resolveStaffUser(request);
+        if (!staff) {
+          return unauthorized("Authentication required as active waiter or admin");
+        }
+        const filters: { status?: string; search?: string; date?: string } = {};
+        const statusParam = url.searchParams.get("status");
+        if (statusParam) filters.status = statusParam;
+        const searchParam = url.searchParams.get("search");
+        if (searchParam) filters.search = searchParam;
+        const dateParam = url.searchParams.get("date");
+        if (dateParam) filters.date = dateParam;
+        const orders = await getWaiterOrders(staff, filters);
+        return json(orders);
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterOrderApproveMatch = pathname.match(/^\/api\/waiter\/orders\/([^/]+)\/approve$/);
+    if (waiterOrderApproveMatch) {
+      if (method === "POST") {
+        const staff = await resolveStaffUser(request);
+        if (!staff) {
+          return unauthorized("Authentication required as active waiter or admin");
+        }
+        const orderId = decodeURIComponent(waiterOrderApproveMatch[1]!);
+        const body = await request.json().catch(() => ({}));
+        try {
+          const approved = await approveWaiterOrder(staff, orderId, body?.comments);
+          return json(approved);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Approval failed";
+          return json({ error: "Approval Failed", message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterOrderRejectMatch = pathname.match(/^\/api\/waiter\/orders\/([^/]+)\/reject$/);
+    if (waiterOrderRejectMatch) {
+      if (method === "POST") {
+        const staff = await resolveStaffUser(request);
+        if (!staff) {
+          return unauthorized("Authentication required as active waiter or admin");
+        }
+        const orderId = decodeURIComponent(waiterOrderRejectMatch[1]!);
+        const body = await request.json().catch(() => null);
+        if (!body?.reason || !body.reason.trim()) {
+          return badRequest("A rejection reason is required.");
+        }
+        try {
+          const rejected = await rejectWaiterOrder(staff, orderId, body.reason.trim());
+          return json(rejected);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Rejection failed";
+          return json({ error: "Rejection Failed", message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterOrderProofMatch = pathname.match(/^\/api\/waiter\/orders\/([^/]+)\/payment-proof$/);
+    if (waiterOrderProofMatch) {
+      if (method === "POST") {
+        const staff = await resolveStaffUser(request);
+        if (!staff) {
+          return unauthorized("Authentication required as active waiter or admin");
+        }
+        const orderId = decodeURIComponent(waiterOrderProofMatch[1]!);
+        const body = await request.json().catch(() => null);
+        if (!body || !body.screenshotPath || !body.paymentMethod) {
+          return badRequest("Fields 'screenshotPath' and 'paymentMethod' are required");
+        }
+        try {
+          const updated = await submitWaiterPaymentProof(staff, orderId, body);
+          return json(updated);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Payment submission failed";
+          return json({ error: "Submission Failed", message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/payments") {
+      if (method === "GET") {
+        const staff = await resolveStaffUser(request);
+        if (!staff) {
+          return unauthorized("Authentication required as active waiter or admin");
+        }
+        const payments = await getWaiterPayments(staff);
+        return json(payments);
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/notifications") {
+      if (method === "GET") {
+        const staff = await resolveStaffUser(request);
+        if (!staff) {
+          return unauthorized("Authentication required as active waiter or admin");
+        }
+        const notifications = await getWaiterNotifications(staff.userId);
+        return json(notifications);
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterNotificationMatch = pathname.match(/^\/api\/waiter\/notifications\/([^/]+)$/);
+    if (waiterNotificationMatch) {
+      if (method === "PATCH" || method === "PUT") {
+        const staff = await resolveStaffUser(request);
+        if (!staff) {
+          return unauthorized("Authentication required as active waiter or admin");
+        }
+        const notifId = decodeURIComponent(waiterNotificationMatch[1]!);
+        const result = await markWaiterNotificationRead(staff.userId, notifId);
+        return json(result);
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
