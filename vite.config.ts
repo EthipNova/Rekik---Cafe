@@ -8,6 +8,8 @@ import path from "node:path";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import type { Plugin } from "vite";
 
+process.env["NITRO_PRESET"] = process.env["NITRO_PRESET"] || "vercel";
+
 /**
  * Reads .env (and .env.local) files and injects every variable into process.env so
  * that server-side SSR modules loaded via ssrLoadModule() — in particular

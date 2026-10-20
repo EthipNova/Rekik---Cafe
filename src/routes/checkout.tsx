@@ -5,6 +5,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Copy,
   CreditCard,
   MapPin,
   Phone,
@@ -1135,15 +1136,18 @@ function Checkout() {
                   id: "telebirr" as const,
                   label: "Telebirr Mobile Payment",
                   desc: "Instant payment via Telebirr app or USSD *127#",
-                  detail: "NEBA Merchant Till / Phone: 0911 234 567",
+                  detail: "0911 234 567",
+                  accountName: "Rekik Coffee Lounge",
                   icon: Smartphone,
                   tag: "Instant settlement",
                 },
                 {
                   id: "cbe" as const,
-                  label: "CBE Birr (Commercial Bank of Ethiopia)",
+                  label: "Bank Transfer (Commercial Bank of Ethiopia)",
                   desc: "Transfer using CBE Birr mobile wallet or CBE Mobile Banking",
-                  detail: "Account: 1000 2345 67890 · Shortcode: 123456",
+                  detail: "1000 2345 67890",
+                  accountName: "Rekik Coffee",
+                  shortCode: "123456",
                   icon: CreditCard,
                   tag: "Fast & verified",
                 },
@@ -1204,23 +1208,90 @@ function Checkout() {
                           {option.detail}
                         </p>
 
-                        {/* Optional Transaction reference input for mobile payments */}
+                        {/* PAYMENT INSTRUCTIONS (When Telebirr or CBE Birr is selected) */}
                         {isSelected && option.id !== "cash" && (
                           <div
-                            className="mt-3 pt-3 border-t border-border/40 space-y-1.5"
+                            className="mt-3 pt-3 border-t border-border/50 space-y-3"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <Label htmlFor="tx-ref" className="text-xs font-medium text-foreground">
-                              Transaction Reference / Confirmation Code{" "}
-                              <span className="text-muted-foreground">(optional)</span>
-                            </Label>
-                            <Input
-                              id="tx-ref"
-                              value={transactionRef}
-                              onChange={(e) => setTransactionRef(e.target.value)}
-                              placeholder="e.g. TXN-84729103"
-                              className="h-8 text-xs font-mono"
-                            />
+                            <div className="rounded-lg bg-background/80 border border-border/70 p-3.5 space-y-2.5 text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-foreground flex items-center gap-1.5">
+                                  <ShieldCheck className="size-3.5 text-primary" />
+                                  {option.id === "telebirr" ? "Telebirr Payment Details" : "Bank Transfer Details"}
+                                </span>
+                                <span className="font-bold text-primary text-sm">
+                                  Total: {formatETB(total)}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-muted-foreground">
+                                {option.id === "cbe" && (
+                                  <div>
+                                    <span className="block text-[11px] text-muted-foreground">Bank Name:</span>
+                                    <span className="font-medium text-foreground text-xs">Commercial Bank of Ethiopia (CBE)</span>
+                                  </div>
+                                )}
+                                <div>
+                                  <span className="block text-[11px] text-muted-foreground">
+                                    {option.id === "telebirr" ? "Merchant / Till Number:" : "Account Number:"}
+                                  </span>
+                                  <span className="font-mono font-medium text-foreground text-xs flex items-center gap-1">
+                                    {option.detail}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void navigator.clipboard.writeText(option.detail.replace(/\s+/g, ""));
+                                        toast.success("Account details copied to clipboard!");
+                                      }}
+                                      className="text-muted-foreground hover:text-foreground inline-flex items-center"
+                                      title="Copy account number"
+                                    >
+                                      <Copy className="size-3 ml-1" />
+                                    </button>
+                                  </span>
+                                </div>
+                                {option.accountName && (
+                                  <div>
+                                    <span className="block text-[11px] text-muted-foreground">Account Holder:</span>
+                                    <span className="font-medium text-foreground text-xs">{option.accountName}</span>
+                                  </div>
+                                )}
+                                {option.shortCode && (
+                                  <div>
+                                    <span className="block text-[11px] text-muted-foreground">Short Code:</span>
+                                    <span className="font-mono text-foreground text-xs">{option.shortCode}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="border-t border-border/40 pt-2 text-[11px] text-muted-foreground space-y-1">
+                                <p>
+                                  {option.id === "telebirr"
+                                    ? `Transfer exact amount ${formatETB(total)} via Telebirr app or *127# to merchant number ${option.detail}.`
+                                    : `Transfer exact amount ${formatETB(total)} via CBE Birr or CBE Mobile Banking app to account ${option.detail}.`}
+                                </p>
+                                <p className="font-medium text-primary flex items-center gap-1">
+                                  <ShieldCheck className="size-3 shrink-0" />
+                                  Your floor waiter will collect and record your payment details at your table.
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Optional Transaction reference input for mobile payments */}
+                            <div className="space-y-1.5">
+                              <Label htmlFor="tx-ref" className="text-xs font-medium text-foreground">
+                                Transaction Reference / Confirmation Code{" "}
+                                <span className="text-muted-foreground">(optional)</span>
+                              </Label>
+                              <Input
+                                id="tx-ref"
+                                value={transactionRef}
+                                onChange={(e) => setTransactionRef(e.target.value)}
+                                placeholder="e.g. TXN-84729103"
+                                className="h-8 text-xs font-mono"
+                              />
+                            </div>
                           </div>
                         )}
                       </div>

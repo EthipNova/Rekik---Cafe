@@ -360,9 +360,9 @@ export async function getWaiterMetrics(staff: AuthenticatedStaff): Promise<Waite
 export async function getWaiterOrders(
   staff: AuthenticatedStaff,
   filters?: {
-    status?: string;
-    search?: string;
-    date?: string;
+    status?: string | undefined;
+    search?: string | undefined;
+    date?: string | undefined;
   },
 ): Promise<WaiterOrder[]> {
   const isSuperAdmin = staff.role === "admin";

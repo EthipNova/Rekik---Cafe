@@ -32,6 +32,7 @@ export type Order = {
   waiterName?: string | null;
   waiterDecision?: "pending" | "approved" | "rejected";
   waiterRejectionReason?: string | null;
+  transactionReference?: string | null;
   paymentProof?: {
     id: string;
     paymentId?: string;

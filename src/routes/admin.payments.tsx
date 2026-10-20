@@ -4,6 +4,7 @@ import {
   ArrowUpDown,
   CheckCircle2,
   Clock,
+  Copy,
   CreditCard,
   Eye,
   RefreshCw,
@@ -14,6 +15,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -608,11 +610,30 @@ function AdminPayments() {
                     <PaymentStatusBadge status={selectedPayment.status} />
                   </div>
                   {selectedPayment.transaction_reference && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground text-xs">Transaction Ref</span>
-                      <span className="font-mono text-xs text-foreground bg-muted px-2 py-0.5 rounded">
-                        {selectedPayment.transaction_reference}
-                      </span>
+                    <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-xs font-semibold text-primary flex items-center gap-1.5">
+                          <CheckCircle2 className="size-3.5" />
+                          Waiter-Collected Reference
+                        </span>
+                        <span className="font-mono font-bold text-foreground text-xs flex items-center gap-1 bg-background px-2 py-0.5 rounded border border-border">
+                          {selectedPayment.transaction_reference}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(selectedPayment.transaction_reference!);
+                              toast.success("Reference copied!");
+                            }}
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Copy reference"
+                          >
+                            <Copy className="size-3 ml-0.5" />
+                          </button>
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Recorded by assigned floor waiter. Verify in merchant portal before approving.
+                      </p>
                     </div>
                   )}
                   <div className="flex items-center justify-between">

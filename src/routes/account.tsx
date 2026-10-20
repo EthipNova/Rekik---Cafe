@@ -44,7 +44,7 @@ import {
   type OrderMethod,
   type OrderStatus,
 } from "@/lib/orders";
-import { fetchCustomerProfile, fetchOrders, updateOrderPayment } from "@/services/api";
+import { fetchCustomerProfile, fetchOrders, updateOrderPaymentMethod } from "@/services/api";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -96,10 +96,9 @@ function AccountPage() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [submittingAuth, setSubmittingAuth] = useState(false);
 
-  // Inline payment modal / settlement state
+  // Inline payment modal state
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<"telebirr" | "cbe" | "cash">("telebirr");
-  const [payTxRef, setPayTxRef] = useState("");
   const [submittingPayment, setSubmittingPayment] = useState(false);
 
   // Load customer profile and orders using verified Bearer session token
@@ -328,31 +327,29 @@ function AccountPage() {
     toast.success("You have signed out");
   };
 
-  // Immediate payment settlement action
-  const handleSettlePayment = async (order: Order) => {
+  // Update payment method for pending order
+  const handleUpdatePaymentMethod = async (order: Order) => {
     setSubmittingPayment(true);
     try {
       const methodName =
         payMethod === "telebirr"
           ? "Telebirr Mobile"
           : payMethod === "cbe"
-            ? "CBE Birr"
+            ? "Bank Transfer (CBE)"
             : "Cash / In-Person";
 
-      const updated = await updateOrderPayment(order.id, {
-        paymentStatus: "paid",
+      const updated = await updateOrderPaymentMethod({
+        orderId: order.id,
         paymentMethod: methodName,
-        transactionReference: payTxRef.trim() || undefined,
       });
 
       saveOrder(updated);
       setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
       setPayingOrderId(null);
-      setPayTxRef("");
-      toast.success(`Payment confirmed for Order ${order.number}! Kitchen notified.`);
+      toast.success(`Payment method updated to ${methodName} for Order ${order.number}!`);
     } catch (err) {
       console.error(err);
-      toast.error("Failed to complete payment. Please try again.");
+      toast.error("Failed to update payment method. Please try again.");
     } finally {
       setSubmittingPayment(false);
     }
@@ -873,19 +870,25 @@ function AccountPage() {
                 </div>
               </div>
 
-              {/* Instant Pay Now button if payment is pending */}
+              {/* Payment status and instructions link */}
               {primaryActiveOrder.paymentStatus !== "paid" ? (
                 <div className="space-y-2 pt-2 border-t border-border/60">
                   <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 font-medium">
                     <AlertCircle className="size-3.5" />
-                    <span>Payment pending settlement</span>
+                    <span>
+                      {primaryActiveOrder.transactionReference
+                        ? "Details collected — awaiting cashier verification"
+                        : "Payment awaiting settlement"}
+                    </span>
                   </div>
                   <Button
-                    onClick={() => setPayingOrderId(primaryActiveOrder.id)}
+                    asChild
                     className="w-full text-xs font-semibold gap-1.5"
                   >
-                    <CreditCard className="size-3.5" />
-                    <span>Pay {formatETB(primaryActiveOrder.total)} Now</span>
+                    <Link to="/order/$id" params={{ id: primaryActiveOrder.id }}>
+                      <CreditCard className="size-3.5" />
+                      <span>View Payment Instructions ({formatETB(primaryActiveOrder.total)})</span>
+                    </Link>
                   </Button>
                 </div>
               ) : (
@@ -899,7 +902,7 @@ function AccountPage() {
         </section>
       )}
 
-      {/* MODAL / DRAWER FOR INSTANT DASHBOARD PAYMENT */}
+      {/* MODAL / DRAWER FOR DASHBOARD PAYMENT SELECTION */}
       {payingOrderId &&
         (() => {
           const targetOrder = orders.find((o) => o.id === payingOrderId);
@@ -911,7 +914,7 @@ function AccountPage() {
                   <div className="flex items-center gap-2">
                     <CreditCard className="size-5 text-primary" />
                     <h3 className="font-display text-lg font-bold">
-                      Settle Order {targetOrder.number}
+                      Payment for Order #{targetOrder.number}
                     </h3>
                   </div>
                   <button
@@ -924,7 +927,7 @@ function AccountPage() {
                 </div>
 
                 <div className="flex items-center justify-between bg-secondary/40 p-3 rounded-xl text-sm">
-                  <span className="text-muted-foreground">Amount to pay:</span>
+                  <span className="text-muted-foreground">Amount due:</span>
                   <span className="font-display text-xl font-bold text-primary">
                     {formatETB(targetOrder.total)}
                   </span>
@@ -937,13 +940,13 @@ function AccountPage() {
                       {
                         id: "telebirr" as const,
                         name: "Telebirr Mobile",
-                        detail: "Till: 0911 234 567",
+                        detail: "Till: 0911 234 567 (Rekik Coffee Lounge)",
                         icon: Smartphone,
                       },
                       {
                         id: "cbe" as const,
-                        name: "CBE Birr",
-                        detail: "Account: 1000 2345 67890",
+                        name: "Bank Transfer (CBE)",
+                        detail: "Account: 1000 2345 67890 (Rekik Coffee)",
                         icon: CreditCard,
                       },
                       {
@@ -981,33 +984,25 @@ function AccountPage() {
                   </div>
                 </div>
 
-                {payMethod !== "cash" && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="dash-tx" className="text-xs">
-                      Transaction Reference / Code (Optional)
-                    </Label>
-                    <Input
-                      id="dash-tx"
-                      value={payTxRef}
-                      onChange={(e) => setPayTxRef(e.target.value)}
-                      placeholder="e.g. TXN-10293847"
-                      className="h-8 text-xs font-mono"
-                    />
-                  </div>
-                )}
+                <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-xs text-muted-foreground space-y-1">
+                  <p className="font-semibold text-foreground">Waiter-Verified Settlement</p>
+                  <p className="text-[11px] leading-relaxed">
+                    Your assigned waiter ({targetOrder.waiterName || "Floor Staff"}) will collect and record your payment reference on floor / upon delivery to submit to the cashier.
+                  </p>
+                </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
                   <Button variant="ghost" size="sm" onClick={() => setPayingOrderId(null)}>
-                    Cancel
+                    Close
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => void handleSettlePayment(targetOrder)}
+                    onClick={() => void handleUpdatePaymentMethod(targetOrder)}
                     disabled={submittingPayment}
                     className="font-semibold"
                   >
                     <CheckCircle2 className="size-3.5 mr-1.5" />
-                    {submittingPayment ? "Confirming…" : `Confirm ${formatETB(targetOrder.total)}`}
+                    {submittingPayment ? "Saving…" : "Save Payment Preference"}
                   </Button>
                 </div>
               </div>

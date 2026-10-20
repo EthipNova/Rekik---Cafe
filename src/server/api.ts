@@ -28,6 +28,9 @@ import {
   deleteContactMessage,
   createPaymentProof,
   testCashierReview,
+  recordWaiterDecision,
+  recordWaiterPaymentCollection,
+  updateOrderPaymentMethod,
 } from "./db";
 import { serverSupabase } from "./supabase";
 import { validateContactInput } from "@/lib/contact";
@@ -502,6 +505,97 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : "Failed to record payment proof";
           return badRequest(msg);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterDecisionMatch = pathname.match(/^\/api\/orders\/([^/]+)\/waiter-decision$/);
+    if (waiterDecisionMatch) {
+      const orderId = decodeURIComponent(waiterDecisionMatch[1]!);
+      if (method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required to record waiter decision");
+        }
+        if (authUser.role !== "STAFF" && authUser.role !== "ADMIN") {
+          return forbidden("Only assigned waiters or authorized staff can record order decisions");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || (body.decision !== "approved" && body.decision !== "rejected")) {
+          return badRequest("Field 'decision' must be either 'approved' or 'rejected'.");
+        }
+
+        try {
+          const updated = await recordWaiterDecision({
+            orderId,
+            waiterId: authUser.id,
+            decision: body.decision,
+            comments: body.comments,
+          });
+          return json(updated);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Failed to record waiter decision";
+          return json({ error: "Decision Failed", message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterPaymentCollectionMatch = pathname.match(/^\/api\/orders\/([^/]+)\/waiter-payment-collection$/);
+    if (waiterPaymentCollectionMatch) {
+      const orderId = decodeURIComponent(waiterPaymentCollectionMatch[1]!);
+      if (method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required to record payment collection");
+        }
+        if (authUser.role !== "STAFF" && authUser.role !== "ADMIN") {
+          return forbidden("Only assigned waiters or authorized staff can record payment collection");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || !body.transactionReference || !body.transactionReference.trim()) {
+          return badRequest("Field 'transactionReference' is required.");
+        }
+
+        try {
+          const updated = await recordWaiterPaymentCollection({
+            orderId,
+            waiterId: authUser.id,
+            transactionReference: body.transactionReference,
+            notes: body.notes,
+          });
+          return json(updated);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Failed to record payment collection";
+          return json({ error: "Collection Failed", message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const paymentMethodMatch = pathname.match(/^\/api\/orders\/([^/]+)\/payment-method$/);
+    if (paymentMethodMatch) {
+      const orderId = decodeURIComponent(paymentMethodMatch[1]!);
+      if (method === "POST" || method === "PATCH") {
+        const authUser = await resolveAuthUser(request);
+        const body = await request.json().catch(() => null);
+        if (!body || !body.paymentMethod || !body.paymentMethod.trim()) {
+          return badRequest("Field 'paymentMethod' is required.");
+        }
+
+        try {
+          const updated = await updateOrderPaymentMethod({
+            orderId,
+            paymentMethod: body.paymentMethod,
+            ...(authUser?.id ? { userId: authUser.id } : {}),
+          });
+          return json(updated);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Failed to update payment method";
+          return json({ error: "Update Failed", message }, 400);
         }
       }
       return json({ error: "Method Not Allowed" }, 405);
