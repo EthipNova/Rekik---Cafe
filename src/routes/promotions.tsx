@@ -31,13 +31,13 @@ export const Route = createFileRoute("/promotions")({
   },
   head: () => ({
     meta: [
-      { title: "Promotions & Specials — NEBA Café" },
+      { title: "Promotions & Specials — Rekik Café" },
       {
         name: "description",
         content:
-          "Browse all active special promotions, limited-time discounts, and combo deals at NEBA Café.",
+          "Browse all active special promotions, limited-time discounts, and combo deals at Rekik Café.",
       },
-      { property: "og:title", content: "Promotions & Specials — NEBA Café" },
+      { property: "og:title", content: "Promotions & Specials — Rekik Café" },
       {
         property: "og:description",
         content:

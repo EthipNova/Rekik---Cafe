@@ -37,11 +37,11 @@ import { getInitials, type AdminUserData } from "@/lib/admin-account";
 export const Route = createFileRoute("/admin")({
   head: () => ({
     meta: [
-      { title: "Admin — NEBA Café" },
+      { title: "Admin — Rekik Café" },
       {
         name: "description",
         content:
-          "Operations, catalog, availability, payments and settings for NEBA Café management.",
+          "Operations, catalog, availability, payments and settings for Rekik Café management.",
       },
       { name: "robots", content: "noindex" },
     ],
@@ -171,7 +171,7 @@ function AdminLayout() {
           setRole(null);
           setAdminUser(null);
           setErrorMsg(
-            "Your account has been authenticated, but it has not been assigned an authorized NEBA staff role. Please contact the administrator.",
+            "Your account has been authenticated, but it has not been assigned an authorized Rekik staff role. Please contact the administrator.",
           );
         } else {
           // Transient verification or network error: do NOT destroy the session
@@ -238,7 +238,7 @@ function AdminLayout() {
           setRole(null);
           setAdminUser(null);
           setErrorMsg(
-            "Your account has been authenticated, but it has not been assigned an authorized NEBA staff role. Please contact the administrator.",
+            "Your account has been authenticated, but it has not been assigned an authorized Rekik staff role. Please contact the administrator.",
           );
         } else {
           // Transient verification / database / network failure: do NOT destroy session
@@ -284,7 +284,7 @@ function AdminLayout() {
         <div className="surface-card w-full max-w-sm p-8">
           <h1 className="font-display text-2xl font-semibold">Admin sign in</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Enter your NEBA staff credentials to access café operations.
+            Enter your Rekik staff credentials to access café operations.
           </p>
 
           <form onSubmit={handleSignIn} className="mt-6 space-y-4">
@@ -306,7 +306,7 @@ function AdminLayout() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="staff@nebacafe.com"
+                placeholder="staff@rekikcafe.com"
                 autoComplete="email"
                 disabled={loading}
               />
@@ -343,7 +343,7 @@ function AdminLayout() {
     <div className="flex min-h-screen bg-cream">
       <aside className="hidden w-60 shrink-0 flex-col bg-sidebar p-4 text-sidebar-foreground md:flex">
         <Link to="/" className="px-2 py-3">
-          <span className="font-display text-lg font-semibold">NEBA</span>
+          <span className="font-display text-lg font-semibold">REKIK</span>
           <span className="ml-2 text-[10px] uppercase tracking-[0.2em] opacity-70">Console</span>
         </Link>
         <nav className="mt-4 flex-1 space-y-1" aria-label="Admin navigation">
@@ -411,7 +411,7 @@ function AdminLayout() {
         {/* Mobile Header */}
         <header className="sticky top-0 z-40 flex h-14 w-full items-center justify-between border-b border-sidebar-border bg-sidebar px-4 text-sidebar-foreground md:hidden">
           <Link to="/admin" className="flex items-center">
-            <span className="font-display text-lg font-semibold text-sidebar-foreground">NEBA</span>
+            <span className="font-display text-lg font-semibold text-sidebar-foreground">REKIK</span>
             <span className="ml-2 text-[10px] uppercase tracking-[0.2em] opacity-70">Console</span>
           </Link>
 
@@ -433,7 +433,7 @@ function AdminLayout() {
               <div>
                 <SheetHeader className="text-left pb-3 border-b border-sidebar-border pr-6">
                   <SheetTitle className="font-display text-lg font-semibold text-sidebar-foreground flex items-center">
-                    <span>NEBA</span>
+                    <span>REKIK</span>
                     <span className="ml-2 text-[10px] uppercase tracking-[0.2em] opacity-70">
                       Console
                     </span>

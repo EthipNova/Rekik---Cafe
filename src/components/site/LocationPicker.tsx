@@ -134,7 +134,7 @@ export function LocationPicker({
           html: `
             <div style="display: flex; flex-direction: column; align-items: center; cursor: default;">
               <div style="background: #C8102E; color: white; padding: 4px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 2px solid white; white-space: nowrap; margin-bottom: 2px;">
-                ☕ NEBA CAFÉ
+                ☕ REKIK CAFÉ
               </div>
               <div style="width: 14px; height: 14px; background: #C8102E; border: 2px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>
             </div>

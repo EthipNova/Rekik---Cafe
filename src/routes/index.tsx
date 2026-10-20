@@ -52,16 +52,16 @@ export const Route = createFileRoute("/")({
   },
   head: () => ({
     meta: [
-      { title: "NEBA CafÃ© â€” Good Food. Great Moments. Simply NEBA." },
+      { title: "Rekik Café — Good Food. Great Moments. Simply Rekik." },
       {
         name: "description",
         content:
-          "Order burgers, pizza, sides and drinks from NEBA CafÃ©. Browse the menu, pay securely and track your order in real time.",
+          "Order burgers, pizza, sides and drinks from Rekik Café. Browse the menu, pay securely and track your order in real time.",
       },
-      { property: "og:title", content: "NEBA CafÃ© â€” Good Food. Great Moments." },
+      { property: "og:title", content: "Rekik Café — Good Food. Great Moments." },
       {
         property: "og:description",
-        content: "A modern cafÃ© ordering experience, powered by ORNIX-TECH.",
+        content: "A modern café ordering experience, powered by ORNIX-TECH.",
       },
     ],
   }),
@@ -235,7 +235,7 @@ function Home() {
       <section className="relative isolate overflow-hidden">
         <img
           src={heroImgSrc}
-          alt="Freshly prepared burger meal at NEBA CafÃ©"
+          alt="Freshly prepared burger meal at Rekik Café"
           width={1440}
           height={1800}
           className="absolute inset-0 size-full object-cover"
@@ -251,7 +251,7 @@ function Home() {
                 <div className="overflow-hidden rounded-full border border-espresso-foreground/20 size-8 sm:size-9 shrink-0">
                   <img
                     src={hero}
-                    alt="Freshly prepared burger at NEBA CafÃ©"
+                    alt="Freshly prepared burger at Rekik Café"
                     className="size-full object-cover"
                   />
                 </div>
@@ -262,7 +262,7 @@ function Home() {
               </div>
 
               <h1 className="rise-in [animation-delay:100ms] font-display text-4xl font-semibold leading-[1.12] sm:leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl text-espresso-foreground max-w-2xl">
-                Good Food. Great Moments. Simply NEBA.
+                Good Food. Great Moments. Simply Rekik.
               </h1>
 
               <p className="rise-in [animation-delay:200ms] max-w-xl text-base leading-relaxed opacity-90 sm:text-lg">
@@ -309,7 +309,7 @@ function Home() {
                 <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-espresso-foreground/20 bg-espresso/60 shadow-[var(--shadow-lift)] backdrop-blur-md transition-all duration-700 ease-out [transform-style:preserve-3d] group-hover:[transform:rotateX(2deg)_rotateY(-2deg)_translateY(-4px)] motion-reduce:transform-none">
                   <img
                     src={heroImgSrc}
-                    alt="Freshly prepared culinary dishes at NEBA Café"
+                    alt="Freshly prepared culinary dishes at Rekik Café"
                     width={800}
                     height={600}
                     className="size-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.04] motion-reduce:transform-none"
@@ -509,13 +509,13 @@ function Home() {
       )}
 
       {/* ----------------------------------------------------------------------
-          SECTION 5 â€” WHY NEBA
+          SECTION 5 — WHY REKIK
           Editorial feature matrix with watermark numerals and tracking highlight
          ---------------------------------------------------------------------- */}
       <div className="border-y border-border/60 bg-cream py-10 sm:py-16 sm:py-20 md:py-24">
         <Section>
           <SectionHeading
-            eyebrow="Why NEBA"
+            eyebrow="Why Rekik"
             title="Built around the way you order"
             align="center"
             description="A thoughtfully designed digital ordering experience built for speed, transparency, and delight."
@@ -576,7 +576,7 @@ function Home() {
           eyebrow="Ordering process"
           title="Six simple steps"
           align="center"
-          description="From your first tap to your final bite, here is how effortless ordering is at NEBA."
+          description="From your first tap to your final bite, here is how effortless ordering is at Rekik Café."
         />
 
         <div className="relative mt-8 sm:mt-14">
@@ -700,7 +700,7 @@ function Home() {
       </Section>
 
       {/* ----------------------------------------------------------------------
-          SECTION 8 â€” VISIT NEBA & ORNIX-TECH PLATFORM
+          SECTION 8 — VISIT REKIK & ORNIX-TECH PLATFORM
           Atmospheric espresso flagship experience with technology highlights
          ---------------------------------------------------------------------- */}
       <Section className="py-10 sm:py-16 sm:py-20 md:py-24">
@@ -720,7 +720,7 @@ function Home() {
             <div className="space-y-4 sm:space-y-6 lg:col-span-7">
               <div className="inline-flex items-center gap-2 rounded-full border border-espresso-foreground/20 bg-espresso-foreground/10 px-3.5 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-espresso-foreground/80">
                 <MapPin className="size-3.5 text-primary" aria-hidden />
-                Visit NEBA CafÃ©
+                Visit Rekik Café
               </div>
 
               <h2 className="font-display text-2xl sm:text-3xl lg:text-5xl font-semibold tracking-tight text-espresso-foreground">

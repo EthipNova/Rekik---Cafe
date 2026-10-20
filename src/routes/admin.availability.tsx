@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/admin/availability")({
   head: () => ({
     meta: [
-      { title: "Menu Availability — NEBA Café Admin" },
+      { title: "Menu Availability — Rekik Café Admin" },
       { name: "description", content: "Manage menu item availability for orders." },
       { name: "robots", content: "noindex" },
     ],

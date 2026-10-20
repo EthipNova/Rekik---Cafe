@@ -50,20 +50,25 @@ export const Route = createFileRoute("/checkout")({
   },
   head: () => ({
     meta: [
-      { title: "Checkout — NEBA Café" },
+      { title: "Checkout — Rekik Café" },
       {
         name: "description",
-        content: "Complete your NEBA Café order: method, details and payment.",
+        content: "Complete your Rekik Café order: method, details and payment.",
       },
       { name: "robots", content: "noindex" },
-      { property: "og:title", content: "Checkout — NEBA Café" },
-      { property: "og:description", content: "Complete your NEBA Café order." },
+      { property: "og:title", content: "Checkout — Rekik Café" },
+      { property: "og:description", content: "Complete your Rekik Café order." },
     ],
   }),
   component: Checkout,
 });
 
-const defaultSteps = ["Ordering method", "Customer information", "Order summary", "Payment"] as const;
+const defaultSteps = [
+  "Ordering method",
+  "Customer information",
+  "Order summary",
+  "Payment",
+] as const;
 
 type FormField = "name" | "phone" | "table" | "address";
 type FormErrors = Partial<Record<FormField, string>>;
@@ -714,7 +719,8 @@ function Checkout() {
                 {availableWaiters.length > 0 && (
                   <div className="space-y-1.5 pt-2 border-t border-border/50">
                     <Label htmlFor="waiter" className="text-sm font-medium">
-                      Select Server / Waiter <span className="text-xs text-muted-foreground">(optional)</span>
+                      Select Server / Waiter{" "}
+                      <span className="text-xs text-muted-foreground">(optional)</span>
                     </Label>
                     <select
                       id="waiter"
@@ -734,7 +740,8 @@ function Checkout() {
 
                 <div className="space-y-1.5">
                   <Label htmlFor="customer-notes" className="text-sm font-medium">
-                    Special Instructions / Notes <span className="text-xs text-muted-foreground">(optional)</span>
+                    Special Instructions / Notes{" "}
+                    <span className="text-xs text-muted-foreground">(optional)</span>
                   </Label>
                   <Input
                     id="customer-notes"
@@ -1218,7 +1225,9 @@ function Checkout() {
                               <div className="flex items-center justify-between">
                                 <span className="font-semibold text-foreground flex items-center gap-1.5">
                                   <ShieldCheck className="size-3.5 text-primary" />
-                                  {option.id === "telebirr" ? "Telebirr Payment Details" : "Bank Transfer Details"}
+                                  {option.id === "telebirr"
+                                    ? "Telebirr Payment Details"
+                                    : "Bank Transfer Details"}
                                 </span>
                                 <span className="font-bold text-primary text-sm">
                                   Total: {formatETB(total)}
@@ -1228,20 +1237,28 @@ function Checkout() {
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-muted-foreground">
                                 {option.id === "cbe" && (
                                   <div>
-                                    <span className="block text-[11px] text-muted-foreground">Bank Name:</span>
-                                    <span className="font-medium text-foreground text-xs">Commercial Bank of Ethiopia (CBE)</span>
+                                    <span className="block text-[11px] text-muted-foreground">
+                                      Bank Name:
+                                    </span>
+                                    <span className="font-medium text-foreground text-xs">
+                                      Commercial Bank of Ethiopia (CBE)
+                                    </span>
                                   </div>
                                 )}
                                 <div>
                                   <span className="block text-[11px] text-muted-foreground">
-                                    {option.id === "telebirr" ? "Merchant / Till Number:" : "Account Number:"}
+                                    {option.id === "telebirr"
+                                      ? "Merchant / Till Number:"
+                                      : "Account Number:"}
                                   </span>
                                   <span className="font-mono font-medium text-foreground text-xs flex items-center gap-1">
                                     {option.detail}
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        void navigator.clipboard.writeText(option.detail.replace(/\s+/g, ""));
+                                        void navigator.clipboard.writeText(
+                                          option.detail.replace(/\s+/g, ""),
+                                        );
                                         toast.success("Account details copied to clipboard!");
                                       }}
                                       className="text-muted-foreground hover:text-foreground inline-flex items-center"
@@ -1253,14 +1270,22 @@ function Checkout() {
                                 </div>
                                 {option.accountName && (
                                   <div>
-                                    <span className="block text-[11px] text-muted-foreground">Account Holder:</span>
-                                    <span className="font-medium text-foreground text-xs">{option.accountName}</span>
+                                    <span className="block text-[11px] text-muted-foreground">
+                                      Account Holder:
+                                    </span>
+                                    <span className="font-medium text-foreground text-xs">
+                                      {option.accountName}
+                                    </span>
                                   </div>
                                 )}
                                 {option.shortCode && (
                                   <div>
-                                    <span className="block text-[11px] text-muted-foreground">Short Code:</span>
-                                    <span className="font-mono text-foreground text-xs">{option.shortCode}</span>
+                                    <span className="block text-[11px] text-muted-foreground">
+                                      Short Code:
+                                    </span>
+                                    <span className="font-mono text-foreground text-xs">
+                                      {option.shortCode}
+                                    </span>
                                   </div>
                                 )}
                               </div>
@@ -1273,14 +1298,18 @@ function Checkout() {
                                 </p>
                                 <p className="font-medium text-primary flex items-center gap-1">
                                   <ShieldCheck className="size-3 shrink-0" />
-                                  Your floor waiter will collect and record your payment details at your table.
+                                  Your floor waiter will collect and record your payment details at
+                                  your table.
                                 </p>
                               </div>
                             </div>
 
                             {/* Optional Transaction reference input for mobile payments */}
                             <div className="space-y-1.5">
-                              <Label htmlFor="tx-ref" className="text-xs font-medium text-foreground">
+                              <Label
+                                htmlFor="tx-ref"
+                                className="text-xs font-medium text-foreground"
+                              >
                                 Transaction Reference / Confirmation Code{" "}
                                 <span className="text-muted-foreground">(optional)</span>
                               </Label>

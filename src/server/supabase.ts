@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * ============================================================================
- * NEBA Cafe -- Server-Side Supabase Client (src/server/supabase.ts)
+ * Rekik Cafe -- Server-Side Supabase Client (src/server/supabase.ts)
  * ============================================================================
  * Used exclusively by server-side code: SSR handlers, API routes, db helpers.
  *

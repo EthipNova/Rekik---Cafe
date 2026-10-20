@@ -46,18 +46,18 @@ export const Route = createFileRoute("/order/$id")({
   },
   head: ({ loaderData, params }) => {
     const title = loaderData?.order
-      ? `Order ${loaderData.order.number} — NEBA Café`
-      : `Order ${params.id} — NEBA Café`;
+      ? `Order ${loaderData.order.number} — Rekik Café`
+      : `Order ${params.id} — Rekik Café`;
     return {
       meta: [
         { title },
         {
           name: "description",
-          content: "Confirmation details and live tracking for your NEBA Café order.",
+          content: "Confirmation details and live tracking for your Rekik Café order.",
         },
         { name: "robots", content: "noindex" },
         { property: "og:title", content: title },
-        { property: "og:description", content: "Your NEBA Café order has been confirmed." },
+        { property: "og:description", content: "Your Rekik Café order has been confirmed." },
       ],
     };
   },
@@ -867,7 +867,7 @@ function OrderPage() {
                       {
                         id: "telebirr" as const,
                         name: "Telebirr Mobile Payment",
-                        info: "Till: 0911 234 567 (NEBA Café)",
+                        info: "Till: 0911 234 567 (Rekik Café)",
                         icon: Smartphone,
                       },
                       {

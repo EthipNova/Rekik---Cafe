@@ -26,7 +26,7 @@ export function Footer() {
     <footer className="mt-12 sm:mt-20 md:mt-24 bg-espresso text-espresso-foreground">
       <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
-          <p className="font-display text-2xl font-semibold">NEBA CAFÉ</p>
+          <p className="font-display text-2xl font-semibold">REKIK CAFÉ</p>
           <p className="mt-2 text-sm opacity-80">Good Food. Great Moments.</p>
           <p className="mt-6 max-w-sm text-sm opacity-70">
             A modern café ordering experience — browse, order, pay and track your food from any
@@ -57,8 +57,16 @@ export function Footer() {
 
       <div className="border-t border-espresso-foreground/15">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-6 text-xs opacity-70 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p>© {new Date().getFullYear()} NEBA Café. All rights reserved.</p>
-          <p>Powered by ORNIX-TECH — from business requirements to real-world software.</p>
+          <p>© {new Date().getFullYear()} Rekik Café. All rights reserved.</p>
+          <div className="flex items-center gap-4">
+            <Link to="/casher" className="hover:underline opacity-80 hover:opacity-100 font-medium">
+              Cashier Portal
+            </Link>
+            <Link to="/admin" className="hover:underline opacity-80 hover:opacity-100 font-medium">
+              Admin Portal
+            </Link>
+            <span>Powered by ORNIX-TECH</span>
+          </div>
         </div>
       </div>
     </footer>

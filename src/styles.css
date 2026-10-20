@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * NEBA CAFÉ design system — Red, White and Charcoal.
+ * Rekik Café design system — Red, White and Charcoal.
  * Clean, modern, appetizing café aesthetic.
  * All colors are oklch tokens. Never hardcode colors in components.
  */
@@ -73,7 +73,7 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.2 0.003 85);
 
-  /* Primary Brand: NEBA Red #C8102E, White text */
+  /* Primary Brand: Rekik Red #C8102E, White text */
   --primary: oklch(0.53 0.22 26.5);
   --primary-foreground: oklch(1 0 0);
 
@@ -113,7 +113,7 @@
   --chart-4: oklch(0.2 0.003 85);
   --chart-5: oklch(0.6 0.005 85);
 
-  /* Admin Sidebar: Professional dark charcoal with NEBA red highlights */
+  /* Admin Sidebar: Professional dark charcoal with Rekik red highlights */
   --sidebar: oklch(0.17 0.003 85);
   --sidebar-foreground: oklch(0.93 0.002 85);
   --sidebar-primary: oklch(0.53 0.22 26.5);

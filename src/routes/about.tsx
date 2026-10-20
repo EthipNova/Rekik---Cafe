@@ -19,13 +19,13 @@ export const Route = createFileRoute("/about")({
   },
   head: () => ({
     meta: [
-      { title: "About NEBA Café — Our Story" },
+      { title: "About Rekik Café — Our Story" },
       {
         name: "description",
         content:
-          "NEBA Café brings warm hospitality, fresh food and a modern digital ordering experience together in one place.",
+          "Rekik Café brings warm hospitality, fresh food and a modern digital ordering experience together in one place.",
       },
-      { property: "og:title", content: "About NEBA Café" },
+      { property: "og:title", content: "About Rekik Café" },
       { property: "og:description", content: "Warm hospitality, fresh food, modern ordering." },
     ],
   }),
@@ -121,7 +121,7 @@ function AboutPage() {
             <div className="flex flex-col justify-center space-y-6 lg:col-span-6 xl:col-span-7">
               <div className="rise-in inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-primary w-fit shadow-xs">
                 <span className="size-1.5 rounded-full bg-primary animate-pulse" aria-hidden />
-                About NEBA Café
+                About Rekik Café
               </div>
 
               <h1 className="rise-in [animation-delay:100ms] font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl lg:text-6xl leading-[1.08] max-w-xl">
@@ -162,7 +162,7 @@ function AboutPage() {
                 <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl surface-card shadow-[var(--shadow-lift)] border border-border/80 transition-all duration-700 ease-out [transform-style:preserve-3d] group-hover:[transform:rotateX(2deg)_rotateY(-2deg)_translateY(-4px)] motion-reduce:transform-none">
                   <img
                     src={heroImgSrc}
-                    alt={content.about_title || "Guests enjoying coffee inside NEBA Café"}
+                    alt={content.about_title || "Guests enjoying coffee inside Rekik Café"}
                     loading="lazy"
                     width={1200}
                     height={900}
@@ -333,7 +333,7 @@ function AboutPage() {
 
           <div className="relative z-10 mx-auto max-w-2xl text-center space-y-6">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-espresso-foreground/70">
-              Experience NEBA Café
+              Experience Rekik Café
             </p>
 
             <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl text-espresso-foreground">
@@ -341,7 +341,7 @@ function AboutPage() {
             </h2>
 
             <p className="mx-auto max-w-xl text-sm leading-relaxed text-espresso-foreground/80 sm:text-base">
-              Take a seat, explore the menu, and enjoy the NEBA experience — whether dining in with
+              Take a seat, explore the menu, and enjoy the Rekik experience — whether dining in with
               us in Hawassa or ordering ahead for quick pickup.
             </p>
 

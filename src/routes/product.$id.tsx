@@ -28,13 +28,13 @@ export const Route = createFileRoute("/product/$id")({
     if (!loaderData) {
       return {
         meta: [
-          { title: "Product unavailable — NEBA Café" },
+          { title: "Product unavailable — Rekik Café" },
           { name: "robots", content: "noindex" },
         ],
       };
     }
     const { product } = loaderData;
-    const title = `${product.name} — NEBA Café`;
+    const title = `${product.name} — Rekik Café`;
     return {
       meta: [
         { title },

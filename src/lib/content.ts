@@ -24,7 +24,7 @@ export const DEFAULT_ABOUT_CONTENT: AboutContent = {
   about_hero_image: null,
   about_title: "A neighbourhood café, thoughtfully modernised",
   about_description:
-    "NEBA Café began with a simple idea: good food should be easy to enjoy. Our kitchen focuses on a short, well-made menu — burgers, stone-baked pizza, crisp sides and cold drinks — while our digital ordering platform removes the queues and the guesswork.",
+    "Rekik Café began with a simple idea: good food should be easy to enjoy. Our kitchen focuses on a short, well-made menu — burgers, stone-baked pizza, crisp sides and cold drinks — while our digital ordering platform removes the queues and the guesswork.",
   story_title: "Our Story",
   story_content:
     "Every dish is prepared to order. Every order is visible to you in real time, from the moment it's received to the moment it reaches your table, your hand or your door.",

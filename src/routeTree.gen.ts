@@ -14,6 +14,8 @@ import { Route as AboutRouteImport } from './routes/about'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as CartRouteImport } from './routes/cart'
+import { Route as CasherRouteImport } from './routes/casher'
+import { Route as CashierRouteImport } from './routes/cashier'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as OrdersRouteImport } from './routes/orders'
@@ -65,6 +67,16 @@ const AdminRoute = AdminRouteImport.update({
 const CartRoute = CartRouteImport.update({
   id: '/cart',
   path: '/cart',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CasherRoute = CasherRouteImport.update({
+  id: '/casher',
+  path: '/casher',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CashierRoute = CashierRouteImport.update({
+  id: '/cashier',
+  path: '/cashier',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CheckoutRoute = CheckoutRouteImport.update({
@@ -209,6 +221,8 @@ export interface FileRoutesByFullPath {
   '/account': typeof AccountRoute
   '/admin': typeof AdminRouteWithChildren
   '/cart': typeof CartRoute
+  '/casher': typeof CasherRoute
+  '/cashier': typeof CashierRoute
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
   '/orders': typeof OrdersRoute
@@ -242,6 +256,8 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/account': typeof AccountRoute
   '/cart': typeof CartRoute
+  '/casher': typeof CasherRoute
+  '/cashier': typeof CashierRoute
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
   '/orders': typeof OrdersRoute
@@ -276,6 +292,8 @@ export interface FileRoutesById {
   '/account': typeof AccountRoute
   '/admin': typeof AdminRouteWithChildren
   '/cart': typeof CartRoute
+  '/casher': typeof CasherRoute
+  '/cashier': typeof CashierRoute
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
   '/orders': typeof OrdersRoute
@@ -312,6 +330,8 @@ export interface FileRouteTypes {
     | '/account'
     | '/admin'
     | '/cart'
+    | '/casher'
+    | '/cashier'
     | '/checkout'
     | '/contact'
     | '/orders'
@@ -345,6 +365,8 @@ export interface FileRouteTypes {
     | '/about'
     | '/account'
     | '/cart'
+    | '/casher'
+    | '/cashier'
     | '/checkout'
     | '/contact'
     | '/orders'
@@ -378,6 +400,8 @@ export interface FileRouteTypes {
     | '/account'
     | '/admin'
     | '/cart'
+    | '/casher'
+    | '/cashier'
     | '/checkout'
     | '/contact'
     | '/orders'
@@ -413,6 +437,8 @@ export interface RootRouteChildren {
   AccountRoute: typeof AccountRoute
   AdminRoute: typeof AdminRouteWithChildren
   CartRoute: typeof CartRoute
+  CasherRoute: typeof CasherRoute
+  CashierRoute: typeof CashierRoute
   CheckoutRoute: typeof CheckoutRoute
   ContactRoute: typeof ContactRoute
   OrdersRoute: typeof OrdersRoute
@@ -459,6 +485,20 @@ declare module '@tanstack/react-router' {
       path: '/cart'
       fullPath: '/cart'
       preLoaderRoute: typeof CartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/casher': {
+      id: '/casher'
+      path: '/casher'
+      fullPath: '/casher'
+      preLoaderRoute: typeof CasherRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cashier': {
+      id: '/cashier'
+      path: '/cashier'
+      fullPath: '/cashier'
+      preLoaderRoute: typeof CashierRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/checkout': {
@@ -712,6 +752,8 @@ const rootRouteChildren: RootRouteChildren = {
   AccountRoute: AccountRoute,
   AdminRoute: AdminRouteWithChildren,
   CartRoute: CartRoute,
+  CasherRoute: CasherRoute,
+  CashierRoute: CashierRoute,
   CheckoutRoute: CheckoutRoute,
   ContactRoute: ContactRoute,
   OrdersRoute: OrdersRoute,

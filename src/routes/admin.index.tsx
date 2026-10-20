@@ -10,7 +10,7 @@ import { fetchOrders, fetchProducts } from "@/services/api";
 
 export const Route = createFileRoute("/admin/")({
   head: () => ({
-    meta: [{ title: "Staff Dashboard — NEBA Café" }, { name: "robots", content: "noindex" }],
+    meta: [{ title: "Staff Dashboard — Rekik Café" }, { name: "robots", content: "noindex" }],
   }),
   component: AdminDashboard,
 });

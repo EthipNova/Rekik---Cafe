@@ -44,7 +44,7 @@ import {
 export const Route = createFileRoute("/admin/products")({
   head: () => ({
     meta: [
-      { title: "Menu Products — NEBA Café Admin" },
+      { title: "Menu Products — Rekik Café Admin" },
       { name: "description", content: "Manage menu items, categories, pricing, and availability." },
       { name: "robots", content: "noindex" },
     ],

@@ -23,7 +23,7 @@ export function Navbar() {
         className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6"
       >
         <Link to="/" className="flex flex-col leading-none">
-          <span className="font-display text-xl font-semibold tracking-tight">NEBA</span>
+          <span className="font-display text-xl font-semibold tracking-tight text-foreground">REKIK</span>
           <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
             Café
           </span>
@@ -91,7 +91,7 @@ export function Navbar() {
             </SheetTrigger>
             <SheetContent side="right" className="w-72 flex flex-col justify-between">
               <div>
-                <SheetTitle className="font-display text-lg">NEBA Café</SheetTitle>
+                <SheetTitle className="font-display text-lg">Rekik Café</SheetTitle>
                 <ul className="mt-6 space-y-1">
                   {links.map((l) => (
                     <li key={l.to}>

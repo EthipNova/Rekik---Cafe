@@ -60,7 +60,7 @@ import { methodLabels, statusLabels, type Order, type OrderMethod } from "@/lib/
 export const Route = createFileRoute("/admin/customers")({
   head: () => ({
     meta: [
-      { title: "Customer Management — NEBA Café" },
+      { title: "Customer Management — Rekik Café" },
       {
         name: "description",
         content: "View customer profiles and order history derived from customer orders.",
