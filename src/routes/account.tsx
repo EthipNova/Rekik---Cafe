@@ -52,13 +52,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/account")({
   head: () => ({
     meta: [
-      { title: "Customer Dashboard & Orders — Rekik Café" },
+      { title: "Customer Dashboard & Orders — Rekik Coffee" },
       {
         name: "description",
         content:
-          "Track live orders, view your complete order history, and manage your Rekik Café account.",
+          "Track live orders, view your complete order history, and manage your Rekik Coffee account.",
       },
-      { property: "og:title", content: "Customer Dashboard — Rekik Café" },
+      { property: "og:title", content: "Customer Dashboard — Rekik Coffee" },
       { property: "og:description", content: "Real-time order tracking and customer history." },
     ],
   }),
@@ -326,7 +326,7 @@ function AccountPage() {
 
       if (data.session) {
         setSession(data.session);
-        toast.success("Welcome to Rekik Café! Your account is created.");
+        toast.success("Welcome to Rekik Coffee! Your account is created.");
         void loadProfileAndOrders(data.session.access_token);
       } else if (data.user) {
         toast.info(
@@ -1069,7 +1069,7 @@ function AccountPage() {
               Order History
             </h2>
             <p className="text-xs text-muted-foreground">
-              Complete log of all orders placed with Rekik Café.
+              Complete log of all orders placed with Rekik Coffee.
             </p>
           </div>
 

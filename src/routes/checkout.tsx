@@ -7,16 +7,22 @@ import {
   Clock,
   Copy,
   CreditCard,
+  Eye,
+  FileCheck2,
+  FileText,
   MapPin,
   Phone,
+  Receipt,
   RotateCcw,
   ShieldCheck,
   ShoppingBag,
   Smartphone,
   Store,
   Truck,
+  UploadCloud,
   User,
   Utensils,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -25,13 +31,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { EmptyState, Section } from "@/components/site/Section";
 import { LocationPicker } from "@/components/site/LocationPicker";
 import { useCart } from "@/lib/cart";
 import { formatETB, getProduct } from "@/lib/menu-data";
 import { methodLabels, saveOrder, type OrderMethod } from "@/lib/orders";
-import { createOrder as apiCreateOrder, fetchCustomerProfile, fetchSettings } from "@/services/api";
-import { fetchAvailableWaiters, type AvailableWaiterClient } from "@/lib/waiter";
+import {
+  createOrder as apiCreateOrder,
+  fetchAvailableWaiters,
+  fetchCustomerProfile,
+  fetchSettings,
+  type AvailableWaiter,
+} from "@/services/api";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -52,27 +69,22 @@ export const Route = createFileRoute("/checkout")({
   },
   head: () => ({
     meta: [
-      { title: "Checkout — Rekik Café" },
+      { title: "Checkout — Rekik Coffee" },
       {
         name: "description",
-        content: "Complete your Rekik Café order: method, details and payment.",
+        content: "Complete your Rekik Coffee order: method, details and payment.",
       },
       { name: "robots", content: "noindex" },
-      { property: "og:title", content: "Checkout — Rekik Café" },
-      { property: "og:description", content: "Complete your Rekik Café order." },
+      { property: "og:title", content: "Checkout — Rekik Coffee" },
+      { property: "og:description", content: "Complete your Rekik Coffee order." },
     ],
   }),
   component: Checkout,
 });
 
-const defaultSteps = [
-  "Ordering method",
-  "Customer information",
-  "Order summary",
-  "Payment",
-] as const;
+const steps = ["Ordering method", "Customer information", "Order summary", "Payment"] as const;
 
-type FormField = "name" | "phone" | "table" | "address" | "waiter";
+type FormField = "name" | "phone" | "address" | "waiter";
 type FormErrors = Partial<Record<FormField, string>>;
 
 function Checkout() {
@@ -86,18 +98,24 @@ function Checkout() {
   } | null>(null);
   const [step, setStep] = useState(0);
   const [method, setMethod] = useState<OrderMethod>("dine-in");
-  const [form, setForm] = useState({ name: "", phone: "", table: "", address: "" });
+  const [form, setForm] = useState({ name: "", phone: "", address: "" });
   const [errors, setErrors] = useState<FormErrors>({});
-  const [payment, setPayment] = useState<"telebirr" | "cbe" | "cash">("telebirr");
-  const [transactionRef, setTransactionRef] = useState("");
+  const [payment, setPayment] = useState<"telebirr" | "cbe" | "cash" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [authenticatedCustomerName, setAuthenticatedCustomerName] = useState<string | null>(null);
-  const [waiters, setWaiters] = useState<AvailableWaiterClient[]>([]);
+  const [waiters, setWaiters] = useState<AvailableWaiter[]>([]);
   const [waitersLoading, setWaitersLoading] = useState(true);
   const [waitersError, setWaitersError] = useState<string | null>(null);
   const [selectedWaiterId, setSelectedWaiterId] = useState<string>("");
-  const [customerNotes, setCustomerNotes] = useState<string>("");
+
+  useEffect(() => {
+    fetchSettings()
+      .then((s) => {
+        if (s) setSettings(s);
+      })
+      .catch(() => {});
+  }, []);
 
   const loadWaiters = async () => {
     setWaitersLoading(true);
@@ -106,7 +124,7 @@ function Checkout() {
       const data = await fetchAvailableWaiters();
       setWaiters(data || []);
       if (data && data.length === 1 && !selectedWaiterId) {
-        setSelectedWaiterId(data[0]!.id || data[0]!.userId);
+        setSelectedWaiterId(data[0]!.id);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load floor staff";
@@ -117,12 +135,6 @@ function Checkout() {
   };
 
   useEffect(() => {
-    fetchSettings()
-      .then((s) => {
-        if (s) setSettings(s);
-      })
-      .catch(() => {});
-
     void loadWaiters();
   }, []);
 
@@ -299,15 +311,8 @@ function Checkout() {
     );
   }
 
-  const activeSteps =
-    method === "dine-in"
-      ? ["Ordering method", "Customer & Table", "Review & Submit"]
-      : defaultSteps;
-
   const handleFieldChange = (field: FormField, value: string) => {
-    if (field !== "waiter") {
-      setForm((prev) => ({ ...prev, [field]: value }));
-    }
+    setForm((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors((prev) => {
         const next = { ...prev };
@@ -319,10 +324,8 @@ function Checkout() {
 
   const handleMethodSelect = (newMethod: OrderMethod) => {
     setMethod(newMethod);
+    // Clear any obsolete field errors when method changes
     setErrors({});
-    if (newMethod === "dine-in" && step > 2) {
-      setStep(2);
-    }
   };
 
   const validateCurrentStep = (): boolean => {
@@ -346,9 +349,6 @@ function Checkout() {
       const newErrors: FormErrors = {};
 
       if (method === "dine-in") {
-        if (!form.table.trim()) {
-          newErrors.table = "Please enter your table number.";
-        }
         if (waiters.length > 0 && !selectedWaiterId) {
           newErrors.waiter = "Please select an available waiter from the floor list.";
         }
@@ -408,53 +408,7 @@ function Checkout() {
 
   const next = () => {
     if (validateCurrentStep()) {
-      setStep((s) => Math.min(activeSteps.length - 1, s + 1));
-    }
-  };
-
-  const submitDineInOrder = async () => {
-    if (submitting) return;
-    if (!form.table.trim()) {
-      toast.error("Please enter your table number.");
-      setStep(1);
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const resolvedLines = lines.map((l) => {
-        const p = getProduct(l.productId);
-        return {
-          productId: l.productId,
-          name: p?.name || "Menu Item",
-          quantity: l.quantity,
-          price: p?.price !== undefined ? p.price : 0,
-        };
-      });
-
-      const orderData = {
-        lines: resolvedLines,
-        method: "dine-in" as const,
-        paymentMethod: "Pending Waiter Approval",
-        paymentStatus: "pending" as const,
-        customer: {
-          name: form.name.trim() || "Dine-in guest",
-          phone: form.phone.trim(),
-          table: form.table.trim(),
-        },
-        waiterId: selectedWaiterId || undefined,
-        customerNotes: customerNotes.trim() || undefined,
-      };
-
-      const order = await apiCreateOrder(orderData);
-      saveOrder(order);
-      clear();
-      toast.success("Order submitted! Waiting for waiter approval.");
-      void navigate({ to: "/order/$id", params: { id: order.id } });
-    } catch (e: unknown) {
-      console.error("Dine-in checkout submission error:", e);
-      const errMsg = e instanceof Error ? e.message : "Failed to place order. Please try again.";
-      toast.error(`Order submission failed: ${errMsg}`);
-      setSubmitting(false);
+      setStep((s) => Math.min(steps.length - 1, s + 1));
     }
   };
 
@@ -484,9 +438,8 @@ function Checkout() {
                 ? "Pay at Table / Cash"
                 : "Pay at Pickup Counter";
 
-      // If user chose cash/in-person, payment is pending settlement upon delivery/table.
-      // If mobile wallet, marked paid immediately or verified.
-      const initialPaymentStatus: "paid" | "pending" = payment === "cash" ? "pending" : "paid";
+      // Orders requiring cashier verification or cash settlement start as pending.
+      const initialPaymentStatus: "paid" | "pending" = "pending";
 
       // Client sends only order requirements. Monetary amounts and fees are authoritatively
       // calculated on the server using canonical database prices and distance settings.
@@ -495,17 +448,15 @@ function Checkout() {
         method,
         paymentMethod: paymentMethodName,
         paymentStatus: initialPaymentStatus,
+        waiterId: selectedWaiterId || undefined,
         customer: {
           name: form.name.trim() || (method === "dine-in" ? "Dine-in guest" : ""),
           phone: form.phone.trim(),
-          ...(method === "dine-in" && form.table.trim() ? { table: form.table.trim() } : {}),
           ...(method === "delivery" && form.address.trim() ? { address: form.address.trim() } : {}),
           ...(method === "delivery" && deliveryLocation
             ? { latitude: deliveryLocation.latitude, longitude: deliveryLocation.longitude }
             : {}),
         },
-        waiterId: selectedWaiterId || undefined,
-        customerNotes: customerNotes.trim() || undefined,
       };
 
       const order = await apiCreateOrder(orderData);
@@ -513,11 +464,11 @@ function Checkout() {
       // Cache order in local storage for instant offline access
       saveOrder(order);
       clear();
-      toast.success(
-        initialPaymentStatus === "paid"
-          ? "Order placed & payment confirmed!"
-          : "Order placed! Payment pending upon delivery/service.",
-      );
+      if (payment === "cash") {
+        toast.success("Order placed! Your waiter has been notified for cash payment.");
+      } else {
+        toast.success("Order placed! Your waiter will collect and verify payment confirmation.");
+      }
       void navigate({ to: "/order/$id", params: { id: order.id } });
     } catch (e: unknown) {
       console.error("Checkout order creation error:", e);
@@ -533,7 +484,7 @@ function Checkout() {
       <h1 className="text-4xl font-semibold">Checkout</h1>
 
       <ol className="mt-8 flex flex-wrap gap-2" aria-label="Checkout progress">
-        {activeSteps.map((label, i) => (
+        {steps.map((label, i) => (
           <li
             key={label}
             aria-current={i === step ? "step" : undefined}
@@ -640,7 +591,7 @@ function Checkout() {
                   Step 2 — Customer information
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {method === "dine-in" && "Enter your table number for café table service."}
+                  {method === "dine-in" && "Select your floor waiter for café service."}
                   {method === "takeaway" && "Enter your contact details for order pickup."}
                   {method === "delivery" && "Enter your contact details and delivery location."}
                 </p>
@@ -687,55 +638,6 @@ function Checkout() {
             {/* Dine-in fields */}
             {method === "dine-in" && (
               <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="table" className="text-sm font-medium">
-                    Table number <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="table"
-                    value={form.table}
-                    onChange={(e) => handleFieldChange("table", e.target.value)}
-                    placeholder="e.g. 12"
-                    aria-invalid={!!errors.table}
-                    aria-describedby={errors.table ? "error-table" : undefined}
-                    className={cn(
-                      errors.table && "border-destructive focus-visible:ring-destructive",
-                    )}
-                  />
-                  {errors.table && (
-                    <p id="error-table" role="alert" className="text-xs text-destructive">
-                      {errors.table}
-                    </p>
-                  )}
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2 pt-2 border-t border-border/50">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="name" className="text-sm font-medium">
-                      Guest name <span className="text-xs text-muted-foreground">(optional)</span>
-                    </Label>
-                    <Input
-                      id="name"
-                      value={form.name}
-                      onChange={(e) => handleFieldChange("name", e.target.value)}
-                      placeholder="Your name"
-                      autoComplete="name"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="phone" className="text-sm font-medium">
-                      Phone number <span className="text-xs text-muted-foreground">(optional)</span>
-                    </Label>
-                    <Input
-                      id="phone"
-                      value={form.phone}
-                      onChange={(e) => handleFieldChange("phone", e.target.value)}
-                      placeholder="+251 ..."
-                      autoComplete="tel"
-                    />
-                  </div>
-                </div>
-
                 {/* Select Your Waiter Field */}
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
@@ -819,15 +721,11 @@ function Checkout() {
                           <option value="" disabled>
                             -- Select Your Waiter --
                           </option>
-                          {waiters.map((w) => {
-                            const wid = w.id || w.userId;
-                            const wname = w.name || w.fullName || "Floor Waiter";
-                            return (
-                              <option key={wid} value={wid} className="text-foreground py-1">
-                                {wname} (Active Waiter)
-                              </option>
-                            );
-                          })}
+                          {waiters.map((w) => (
+                            <option key={w.id} value={w.id} className="text-foreground py-1">
+                              {w.name} (Active Waiter)
+                            </option>
+                          ))}
                         </select>
                         <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground">
                           <User className="size-4" aria-hidden />
@@ -846,8 +744,7 @@ function Checkout() {
                           <span>
                             Assigned Floor Waiter:{" "}
                             <strong className="text-foreground capitalize">
-                              {waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.name ||
-                               waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.fullName}
+                              {waiters.find((w) => w.id === selectedWaiterId)?.name}
                             </strong>
                           </span>
                         </div>
@@ -856,18 +753,31 @@ function Checkout() {
                   )}
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="customer-notes" className="text-sm font-medium">
-                    Special Instructions / Notes{" "}
-                    <span className="text-xs text-muted-foreground">(optional)</span>
-                  </Label>
-                  <Input
-                    id="customer-notes"
-                    value={customerNotes}
-                    onChange={(e) => setCustomerNotes(e.target.value)}
-                    placeholder="e.g. Extra napkins, no ice, food allergy"
-                    className="text-xs"
-                  />
+                <div className="grid gap-4 sm:grid-cols-2 pt-2 border-t border-border/50">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="name" className="text-sm font-medium">
+                      Guest name <span className="text-xs text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      id="name"
+                      value={form.name}
+                      onChange={(e) => handleFieldChange("name", e.target.value)}
+                      placeholder="Your name"
+                      autoComplete="name"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="phone" className="text-sm font-medium">
+                      Phone number <span className="text-xs text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Input
+                      id="phone"
+                      value={form.phone}
+                      onChange={(e) => handleFieldChange("phone", e.target.value)}
+                      placeholder="+251 ..."
+                      autoComplete="tel"
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -945,15 +855,11 @@ function Checkout() {
                         className="w-full rounded-lg border border-input bg-background px-3.5 py-2.5 text-sm font-medium text-foreground transition-colors appearance-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:border-primary"
                       >
                         <option value="">-- Any Available Staff Member --</option>
-                        {waiters.map((w) => {
-                          const wid = w.id || w.userId;
-                          const wname = w.name || w.fullName || "Floor Waiter";
-                          return (
-                            <option key={wid} value={wid}>
-                              {wname} (Active Waiter)
-                            </option>
-                          );
-                        })}
+                        {waiters.map((w) => (
+                          <option key={w.id} value={w.id}>
+                            {w.name} (Active Waiter)
+                          </option>
+                        ))}
                       </select>
                       <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground">
                         <User className="size-4" aria-hidden />
@@ -1078,32 +984,7 @@ function Checkout() {
                   <dt className="inline font-medium text-foreground">Method: </dt>
                   <dd className="inline">{methodLabels[method]}</dd>
                 </div>
-                {method === "dine-in" && (
-                  <>
-                    <div>
-                      <dt className="inline font-medium text-foreground">Table: </dt>
-                      <dd className="inline font-semibold">#{form.table || "Not specified"}</dd>
-                    </div>
-                    <div>
-                      <dt className="inline font-medium text-foreground">Assigned Server: </dt>
-                      <dd className="inline font-semibold text-primary">
-                        {waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.name ||
-                          waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.fullName ||
-                          "Any available server (auto-assign)"}
-                      </dd>
-                    </div>
-                  </>
-                )}
-                {method !== "dine-in" && selectedWaiterId && (
-                  <div>
-                    <dt className="inline font-medium text-foreground">Assigned Staff: </dt>
-                    <dd className="inline font-semibold text-primary">
-                      {waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.name ||
-                        waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.fullName ||
-                        "Floor Staff"}
-                    </dd>
-                  </div>
-                )}
+
                 {form.name && (
                   <div>
                     <dt className="inline font-medium text-foreground">Name: </dt>
@@ -1114,6 +995,14 @@ function Checkout() {
                   <div>
                     <dt className="inline font-medium text-foreground">Phone: </dt>
                     <dd className="inline">{form.phone}</dd>
+                  </div>
+                )}
+                {selectedWaiterId && (
+                  <div>
+                    <dt className="inline font-medium text-foreground">Assigned Waiter: </dt>
+                    <dd className="inline font-semibold text-primary capitalize">
+                      {waiters.find((w) => w.id === selectedWaiterId)?.name || "Floor Staff"}
+                    </dd>
                   </div>
                 )}
                 {method === "delivery" && (
@@ -1140,26 +1029,6 @@ function Checkout() {
                 )}
               </dl>
             </div>
-
-            {method === "dine-in" && (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
-                <div className="flex items-center gap-2 font-semibold text-foreground">
-                  <Clock className="size-4 text-amber-500 shrink-0" />
-                  <span>Waiter Approval Required Before Payment</span>
-                </div>
-                <p>
-                  For dine-in service at Table #{form.table || "—"}, your order will be submitted
-                  directly to{" "}
-                  <strong>
-                    {waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.name ||
-                      waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.fullName ||
-                      "an available server"}
-                  </strong>{" "}
-                  for confirmation. You will be redirected to the live order tracking page to await
-                  waiter approval before proceeding to payment.
-                </p>
-              </div>
-            )}
 
             {/* Calculations breakdown */}
             <dl className="space-y-2 border-t border-border pt-4 text-sm">
@@ -1267,7 +1136,6 @@ function Checkout() {
                     {method === "delivery" && <Truck className="size-3.5 text-primary shrink-0" />}
                     <span>
                       <strong className="text-foreground">{methodLabels[method]}</strong>
-                      {method === "dine-in" && ` · Table #${form.table || "Not set"}`}
                       {method === "delivery" && ` · ${form.address || "Delivery location"}`}
                     </span>
                   </div>
@@ -1302,7 +1170,7 @@ function Checkout() {
             </div>
 
             {/* PAYMENT METHOD SELECTOR */}
-            <fieldset className="space-y-3">
+            <fieldset className="space-y-4">
               <legend className="text-sm font-semibold text-foreground">
                 Select payment method
               </legend>
@@ -1314,16 +1182,18 @@ function Checkout() {
                   desc: "Instant payment via Telebirr app or USSD *127#",
                   detail: "0911 234 567",
                   accountName: "Rekik Coffee Lounge",
+                  accountType: "Telebirr Merchant / Phone",
                   icon: Smartphone,
                   tag: "Instant settlement",
                 },
                 {
                   id: "cbe" as const,
-                  label: "Bank Transfer (Commercial Bank of Ethiopia)",
-                  desc: "Transfer using CBE Birr mobile wallet or CBE Mobile Banking",
+                  label: "CBE Birr / CBE Mobile Banking",
+                  desc: "Transfer using CBE Birr mobile wallet or CBE Mobile Banking app",
                   detail: "1000 2345 67890",
-                  accountName: "Rekik Coffee",
                   shortCode: "123456",
+                  accountName: "Rekik Coffee & Roastery",
+                  accountType: "CBE Account / Shortcode",
                   icon: CreditCard,
                   tag: "Fast & verified",
                 },
@@ -1331,17 +1201,19 @@ function Checkout() {
                   id: "cash" as const,
                   label:
                     method === "dine-in"
-                      ? "Pay at Table / Counter"
+                      ? "Pay to Server / Counter"
                       : method === "delivery"
                         ? "Cash on Delivery"
                         : "Pay at Pickup Counter",
                   desc:
                     method === "dine-in"
-                      ? "Pay cash or card with your server at table #" + (form.table || "")
+                      ? "Pay cash or card with your floor server upon service"
                       : method === "delivery"
                         ? "Pay cash directly to the courier upon delivery"
                         : "Pay cash or card at the pickup counter",
-                  detail: "Order will be marked as Payment Pending until settled in person",
+                  detail: "Pay in person",
+                  accountName: "Cashier or Server",
+                  accountType: "In-person Settlement",
                   icon: Banknote,
                   tag: "In-person",
                 },
@@ -1354,7 +1226,7 @@ function Checkout() {
                     className={cn(
                       "cursor-pointer rounded-xl border p-4 transition-all",
                       isSelected
-                        ? "border-primary bg-accent/60 ring-1 ring-primary shadow-sm"
+                        ? "border-primary bg-accent/40 ring-1 ring-primary shadow-sm"
                         : "border-border hover:bg-secondary/40",
                     )}
                   >
@@ -1367,7 +1239,7 @@ function Checkout() {
                         onChange={() => setPayment(option.id)}
                         className="mt-1 size-4 accent-[var(--primary)]"
                       />
-                      <div className="flex-1">
+                      <div className="flex-1 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <option.icon className="size-4 text-primary" aria-hidden />
@@ -1379,10 +1251,7 @@ function Checkout() {
                             {option.tag}
                           </Badge>
                         </div>
-                        <p className="mt-1 text-xs text-muted-foreground">{option.desc}</p>
-                        <p className="mt-1 text-xs font-mono font-medium text-foreground/80 bg-background/60 rounded px-2 py-1 inline-block border border-border/40">
-                          {option.detail}
-                        </p>
+                        <p className="text-xs text-muted-foreground">{option.desc}</p>
 
                         {/* PAYMENT INSTRUCTIONS (When Telebirr or CBE Birr is selected) */}
                         {isSelected && option.id !== "cash" && (
@@ -1393,10 +1262,8 @@ function Checkout() {
                             <div className="rounded-lg bg-background/80 border border-border/70 p-3.5 space-y-2.5 text-xs">
                               <div className="flex items-center justify-between">
                                 <span className="font-semibold text-foreground flex items-center gap-1.5">
-                                  <ShieldCheck className="size-3.5 text-primary" />
-                                  {option.id === "telebirr"
-                                    ? "Telebirr Payment Details"
-                                    : "Bank Transfer Details"}
+                                  <Receipt className="size-3.5 text-primary" />
+                                  {option.id === "telebirr" ? "Telebirr Payment Details" : "Bank Transfer Details"}
                                 </span>
                                 <span className="font-bold text-primary text-sm">
                                   Total: {formatETB(total)}
@@ -1406,28 +1273,20 @@ function Checkout() {
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-muted-foreground">
                                 {option.id === "cbe" && (
                                   <div>
-                                    <span className="block text-[11px] text-muted-foreground">
-                                      Bank Name:
-                                    </span>
-                                    <span className="font-medium text-foreground text-xs">
-                                      Commercial Bank of Ethiopia (CBE)
-                                    </span>
+                                    <span className="block text-[11px] text-muted-foreground">Bank Name:</span>
+                                    <span className="font-medium text-foreground text-xs">Commercial Bank of Ethiopia (CBE)</span>
                                   </div>
                                 )}
                                 <div>
                                   <span className="block text-[11px] text-muted-foreground">
-                                    {option.id === "telebirr"
-                                      ? "Merchant / Till Number:"
-                                      : "Account Number:"}
+                                    {option.id === "telebirr" ? "Merchant / Till Number:" : "Account Number:"}
                                   </span>
                                   <span className="font-mono font-medium text-foreground text-xs flex items-center gap-1">
                                     {option.detail}
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        void navigator.clipboard.writeText(
-                                          option.detail.replace(/\s+/g, ""),
-                                        );
+                                        void navigator.clipboard.writeText(option.detail.replace(/\s+/g, ""));
                                         toast.success("Account details copied to clipboard!");
                                       }}
                                       className="text-muted-foreground hover:text-foreground inline-flex items-center"
@@ -1437,24 +1296,14 @@ function Checkout() {
                                     </button>
                                   </span>
                                 </div>
-                                {option.accountName && (
-                                  <div>
-                                    <span className="block text-[11px] text-muted-foreground">
-                                      Account Holder:
-                                    </span>
-                                    <span className="font-medium text-foreground text-xs">
-                                      {option.accountName}
-                                    </span>
-                                  </div>
-                                )}
+                                <div>
+                                  <span className="block text-[11px] text-muted-foreground">Account Holder:</span>
+                                  <span className="font-medium text-foreground text-xs">{option.accountName}</span>
+                                </div>
                                 {option.shortCode && (
                                   <div>
-                                    <span className="block text-[11px] text-muted-foreground">
-                                      Short Code:
-                                    </span>
-                                    <span className="font-mono text-foreground text-xs">
-                                      {option.shortCode}
-                                    </span>
+                                    <span className="block text-[11px] text-muted-foreground">Short Code:</span>
+                                    <span className="font-mono text-foreground text-xs">{option.shortCode}</span>
                                   </div>
                                 )}
                               </div>
@@ -1467,29 +1316,17 @@ function Checkout() {
                                 </p>
                                 <p className="font-medium text-primary flex items-center gap-1">
                                   <ShieldCheck className="size-3 shrink-0" />
-                                  Your floor waiter will collect and record your payment details at
-                                  your table.
+                                  Your floor waiter will collect and record your payment details at your table.
                                 </p>
                               </div>
                             </div>
+                          </div>
+                        )}
 
-                            {/* Optional Transaction reference input for mobile payments */}
-                            <div className="space-y-1.5">
-                              <Label
-                                htmlFor="tx-ref"
-                                className="text-xs font-medium text-foreground"
-                              >
-                                Transaction Reference / Confirmation Code{" "}
-                                <span className="text-muted-foreground">(optional)</span>
-                              </Label>
-                              <Input
-                                id="tx-ref"
-                                value={transactionRef}
-                                onChange={(e) => setTransactionRef(e.target.value)}
-                                placeholder="e.g. TXN-84729103"
-                                className="h-8 text-xs font-mono"
-                              />
-                            </div>
+                        {/* Cash in person message */}
+                        {isSelected && option.id === "cash" && (
+                          <div className="mt-2 text-xs text-muted-foreground bg-background/60 rounded p-2.5 border border-border/40">
+                            Pay exact amount <strong className="text-foreground">{formatETB(total)}</strong> in person to your floor server or delivery courier upon service.
                           </div>
                         )}
                       </div>
@@ -1502,8 +1339,7 @@ function Checkout() {
             <div className="rounded-lg border border-border bg-muted/30 p-3.5 text-xs text-muted-foreground flex items-center gap-2">
               <ShieldCheck className="size-4 text-primary shrink-0" />
               <span>
-                All orders are saved to the persistent café database. Status updates reflect live
-                kitchen operations in real-time.
+                Payment information is collected by authorized floor staff and verified by our cashier team.
               </span>
             </div>
           </div>
@@ -1519,12 +1355,7 @@ function Checkout() {
             Back
           </Button>
 
-          {method === "dine-in" && step === 2 ? (
-            <Button onClick={submitDineInOrder} disabled={submitting}>
-              <Utensils className="size-4" />
-              {submitting ? "Submitting to Server…" : "Submit Order for Server Approval"}
-            </Button>
-          ) : step < activeSteps.length - 1 ? (
+          {step < steps.length - 1 ? (
             <Button
               onClick={next}
               disabled={
