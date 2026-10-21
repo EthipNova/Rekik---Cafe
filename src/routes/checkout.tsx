@@ -9,11 +9,13 @@ import {
   CreditCard,
   MapPin,
   Phone,
+  RotateCcw,
   ShieldCheck,
   ShoppingBag,
   Smartphone,
   Store,
   Truck,
+  User,
   Utensils,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -29,7 +31,7 @@ import { useCart } from "@/lib/cart";
 import { formatETB, getProduct } from "@/lib/menu-data";
 import { methodLabels, saveOrder, type OrderMethod } from "@/lib/orders";
 import { createOrder as apiCreateOrder, fetchCustomerProfile, fetchSettings } from "@/services/api";
-import { fetchAvailableWaiters } from "@/lib/waiter";
+import { fetchAvailableWaiters, type AvailableWaiterClient } from "@/lib/waiter";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import {
@@ -70,7 +72,7 @@ const defaultSteps = [
   "Payment",
 ] as const;
 
-type FormField = "name" | "phone" | "table" | "address";
+type FormField = "name" | "phone" | "table" | "address" | "waiter";
 type FormErrors = Partial<Record<FormField, string>>;
 
 function Checkout() {
@@ -91,11 +93,28 @@ function Checkout() {
   const [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [authenticatedCustomerName, setAuthenticatedCustomerName] = useState<string | null>(null);
-  const [availableWaiters, setAvailableWaiters] = useState<
-    { userId: string; fullName: string; phone: string | null }[]
-  >([]);
+  const [waiters, setWaiters] = useState<AvailableWaiterClient[]>([]);
+  const [waitersLoading, setWaitersLoading] = useState(true);
+  const [waitersError, setWaitersError] = useState<string | null>(null);
   const [selectedWaiterId, setSelectedWaiterId] = useState<string>("");
   const [customerNotes, setCustomerNotes] = useState<string>("");
+
+  const loadWaiters = async () => {
+    setWaitersLoading(true);
+    setWaitersError(null);
+    try {
+      const data = await fetchAvailableWaiters();
+      setWaiters(data || []);
+      if (data && data.length === 1 && !selectedWaiterId) {
+        setSelectedWaiterId(data[0]!.id || data[0]!.userId);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load floor staff";
+      setWaitersError(msg);
+    } finally {
+      setWaitersLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchSettings()
@@ -104,11 +123,7 @@ function Checkout() {
       })
       .catch(() => {});
 
-    fetchAvailableWaiters()
-      .then((w) => {
-        if (Array.isArray(w)) setAvailableWaiters(w);
-      })
-      .catch(() => {});
+    void loadWaiters();
   }, []);
 
   useEffect(() => {
@@ -290,7 +305,9 @@ function Checkout() {
       : defaultSteps;
 
   const handleFieldChange = (field: FormField, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    if (field !== "waiter") {
+      setForm((prev) => ({ ...prev, [field]: value }));
+    }
     if (errors[field]) {
       setErrors((prev) => {
         const next = { ...prev };
@@ -331,6 +348,9 @@ function Checkout() {
       if (method === "dine-in") {
         if (!form.table.trim()) {
           newErrors.table = "Please enter your table number.";
+        }
+        if (waiters.length > 0 && !selectedWaiterId) {
+          newErrors.waiter = "Please select an available waiter from the floor list.";
         }
       } else {
         if (!form.name.trim()) {
@@ -716,27 +736,125 @@ function Checkout() {
                   </div>
                 </div>
 
-                {availableWaiters.length > 0 && (
-                  <div className="space-y-1.5 pt-2 border-t border-border/50">
-                    <Label htmlFor="waiter" className="text-sm font-medium">
-                      Select Server / Waiter{" "}
-                      <span className="text-xs text-muted-foreground">(optional)</span>
-                    </Label>
-                    <select
-                      id="waiter"
-                      value={selectedWaiterId}
-                      onChange={(e) => setSelectedWaiterId(e.target.value)}
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                {/* Select Your Waiter Field */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="waiter-select"
+                      className="text-sm font-medium flex items-center gap-1.5"
                     >
-                      <option value="">Any available staff (auto-assign)</option>
-                      {availableWaiters.map((w) => (
-                        <option key={w.userId} value={w.userId}>
-                          {w.fullName} {w.phone ? `(${w.phone})` : ""}
-                        </option>
-                      ))}
-                    </select>
+                      <User className="size-4 text-primary" aria-hidden />
+                      <span>
+                        Select Your Waiter{" "}
+                        {waiters.length > 0 && <span className="text-destructive">*</span>}
+                      </span>
+                    </Label>
+                    <span className="text-[11px] text-muted-foreground">
+                      Floor table service
+                    </span>
                   </div>
-                )}
+
+                  {waitersLoading ? (
+                    <div
+                      className="flex items-center gap-2.5 rounded-lg border border-border bg-secondary/30 px-3.5 py-2.5 text-xs text-muted-foreground animate-pulse"
+                      role="status"
+                    >
+                      <RotateCcw className="size-3.5 animate-spin text-primary" aria-hidden />
+                      <span>Fetching available floor staff from Rekik Coffee…</span>
+                    </div>
+                  ) : waitersError ? (
+                    <div className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
+                        <span>Failed to load waiters: {waitersError}</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void loadWaiters()}
+                        className="self-start text-xs h-7 px-2.5 gap-1.5"
+                      >
+                        <RotateCcw className="size-3" aria-hidden />
+                        <span>Retry connection</span>
+                      </Button>
+                    </div>
+                  ) : waiters.length === 0 ? (
+                    <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+                      <AlertTriangle
+                        className="size-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400"
+                        aria-hidden
+                      />
+                      <div>
+                        <p className="font-medium">No floor waiters currently available</p>
+                        <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80 mt-0.5">
+                          No dedicated floor waiters are currently on duty. An expeditor will attend your table.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <select
+                          id="waiter-select"
+                          value={selectedWaiterId}
+                          onChange={(e) => {
+                            setSelectedWaiterId(e.target.value);
+                            if (errors.waiter) {
+                              setErrors((prev) => {
+                                const next = { ...prev };
+                                delete next.waiter;
+                                return next;
+                              });
+                            }
+                          }}
+                          aria-invalid={!!errors.waiter}
+                          aria-describedby={errors.waiter ? "error-waiter" : undefined}
+                          className={cn(
+                            "w-full rounded-lg border border-input bg-background px-3.5 py-2.5 text-sm font-medium text-foreground transition-colors appearance-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:border-primary",
+                            errors.waiter && "border-destructive focus-visible:ring-destructive",
+                            !selectedWaiterId && "text-muted-foreground",
+                          )}
+                        >
+                          <option value="" disabled>
+                            -- Select Your Waiter --
+                          </option>
+                          {waiters.map((w) => {
+                            const wid = w.id || w.userId;
+                            const wname = w.name || w.fullName || "Floor Waiter";
+                            return (
+                              <option key={wid} value={wid} className="text-foreground py-1">
+                                {wname} (Active Waiter)
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground">
+                          <User className="size-4" aria-hidden />
+                        </div>
+                      </div>
+
+                      {errors.waiter && (
+                        <p id="error-waiter" role="alert" className="text-xs text-destructive">
+                          {errors.waiter}
+                        </p>
+                      )}
+
+                      {selectedWaiterId && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-primary/5 border border-primary/20 rounded-md px-3 py-1.5">
+                          <span className="size-2 rounded-full bg-success animate-pulse" aria-hidden />
+                          <span>
+                            Assigned Floor Waiter:{" "}
+                            <strong className="text-foreground capitalize">
+                              {waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.name ||
+                               waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.fullName}
+                            </strong>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 <div className="space-y-1.5">
                   <Label htmlFor="customer-notes" className="text-sm font-medium">
@@ -804,6 +922,45 @@ function Checkout() {
                     )}
                   </div>
                 </div>
+
+                {/* Optional Waiter/Server Selection for Takeaway/Delivery */}
+                {waiters.length > 0 && !waitersLoading && (
+                  <div className="space-y-1.5 pt-2 border-t border-border/50">
+                    <Label
+                      htmlFor="waiter-select-opt"
+                      className="text-sm font-medium flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <User className="size-4 text-primary" aria-hidden />
+                        <span>Select Your Server</span>
+                        <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">Order assistance</span>
+                    </Label>
+                    <div className="relative">
+                      <select
+                        id="waiter-select-opt"
+                        value={selectedWaiterId}
+                        onChange={(e) => setSelectedWaiterId(e.target.value)}
+                        className="w-full rounded-lg border border-input bg-background px-3.5 py-2.5 text-sm font-medium text-foreground transition-colors appearance-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-visible:border-primary"
+                      >
+                        <option value="">-- Any Available Staff Member --</option>
+                        {waiters.map((w) => {
+                          const wid = w.id || w.userId;
+                          const wname = w.name || w.fullName || "Floor Waiter";
+                          return (
+                            <option key={wid} value={wid}>
+                              {wname} (Active Waiter)
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground">
+                        <User className="size-4" aria-hidden />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {method === "delivery" && (
                   <div className="space-y-4 pt-2">
@@ -930,11 +1087,22 @@ function Checkout() {
                     <div>
                       <dt className="inline font-medium text-foreground">Assigned Server: </dt>
                       <dd className="inline font-semibold text-primary">
-                        {availableWaiters.find((w) => w.userId === selectedWaiterId)?.fullName ||
+                        {waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.name ||
+                          waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.fullName ||
                           "Any available server (auto-assign)"}
                       </dd>
                     </div>
                   </>
+                )}
+                {method !== "dine-in" && selectedWaiterId && (
+                  <div>
+                    <dt className="inline font-medium text-foreground">Assigned Staff: </dt>
+                    <dd className="inline font-semibold text-primary">
+                      {waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.name ||
+                        waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.fullName ||
+                        "Floor Staff"}
+                    </dd>
+                  </div>
                 )}
                 {form.name && (
                   <div>
@@ -983,7 +1151,8 @@ function Checkout() {
                   For dine-in service at Table #{form.table || "—"}, your order will be submitted
                   directly to{" "}
                   <strong>
-                    {availableWaiters.find((w) => w.userId === selectedWaiterId)?.fullName ||
+                    {waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.name ||
+                      waiters.find((w) => (w.id || w.userId) === selectedWaiterId)?.fullName ||
                       "an available server"}
                   </strong>{" "}
                   for confirmation. You will be redirected to the live order tracking page to await

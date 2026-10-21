@@ -816,12 +816,21 @@ export async function markWaiterNotificationRead(
   return { success: true };
 }
 
+export interface AvailableWaiterDTO {
+  id: string;
+  userId: string;
+  name: string;
+  fullName: string;
+  phone: string | null;
+  role: string;
+  isAvailable: boolean;
+  isActive: boolean;
+}
+
 /**
  * Retrieves the list of available waiters for customer table selection during checkout.
  */
-export async function getAvailableWaiters(): Promise<
-  { userId: string; fullName: string; phone: string | null }[]
-> {
+export async function getAvailableWaiters(): Promise<AvailableWaiterDTO[]> {
   const { data, error } = await (supabase.from("staff_profiles" as any) as any)
     .select("user_id, full_name, phone, role, is_available, is_active")
     .eq("role", "waiter")
@@ -832,24 +841,34 @@ export async function getAvailableWaiters(): Promise<
   if (error || !data) {
     // If no dedicated 'waiter' role rows yet, check for active admin/staff available
     const { data: fallbackStaff } = await (supabase.from("staff_profiles" as any) as any)
-      .select("user_id, full_name, phone")
+      .select("user_id, full_name, phone, role, is_available, is_active")
       .eq("is_available", true)
       .eq("is_active", true);
 
     if (fallbackStaff && fallbackStaff.length > 0) {
       return fallbackStaff.map((s: any) => ({
+        id: s.user_id,
         userId: s.user_id,
-        fullName: s.full_name,
-        phone: s.phone,
+        name: s.full_name || "Floor Staff",
+        fullName: s.full_name || "Floor Staff",
+        phone: s.phone || null,
+        role: s.role || "staff",
+        isAvailable: Boolean(s.is_available ?? true),
+        isActive: Boolean(s.is_active ?? true),
       }));
     }
     return [];
   }
 
   return data.map((w: any) => ({
+    id: w.user_id,
     userId: w.user_id,
-    fullName: w.full_name,
-    phone: w.phone,
+    name: w.full_name || "Floor Waiter",
+    fullName: w.full_name || "Floor Waiter",
+    phone: w.phone || null,
+    role: w.role || "waiter",
+    isAvailable: Boolean(w.is_available ?? true),
+    isActive: Boolean(w.is_active ?? true),
   }));
 }
 

@@ -1179,6 +1179,8 @@ export interface AvailableWaiter {
   phone?: string | null;
   isAvailable?: boolean;
   isActive?: boolean;
+  userId?: string;
+  fullName?: string;
 }
 
 /**

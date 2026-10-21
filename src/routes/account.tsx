@@ -433,13 +433,17 @@ function AccountPage() {
     return (
       <Section className="max-w-md py-12">
         <div className="text-center">
-          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <User className="size-7" />
+          <div className="mx-auto size-16 overflow-hidden rounded-full border-2 border-gold shadow-sm">
+            <img
+              src="/images/rekik-logo.jpg"
+              alt="Rekik Coffee Logo"
+              className="size-full object-cover"
+            />
           </div>
-          <h1 className="mt-4 text-3xl font-display font-semibold">Customer Account</h1>
+          <h1 className="mt-4 text-3xl font-display font-semibold">Rekik Coffee Account</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Sign in to track active orders in real time, view your order history, and manage your
-            account.
+            Rekik Coffee account.
           </p>
         </div>
 

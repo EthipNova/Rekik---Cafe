@@ -17,28 +17,36 @@ export function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/70 bg-background/90 shadow-[0_1px_20px_-14px_oklch(0_0_0_/_0.35)] backdrop-blur-md">
+    <header className="sticky top-0 z-50 border-b border-border/80 bg-background/95 shadow-xs backdrop-blur-md">
       <nav
         aria-label="Main navigation"
-        className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6"
+        className="mx-auto flex h-18 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6"
       >
-        <Link to="/" className="flex flex-col leading-none">
-          <span className="font-display text-xl font-semibold tracking-tight text-foreground">REKIK</span>
-          <span className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
-            Café
-          </span>
+        <Link to="/" className="flex items-center gap-2.5 sm:gap-3 group">
+          <div className="relative size-11 sm:size-12 shrink-0 overflow-hidden rounded-full border-2 border-gold shadow-xs transition-transform duration-300 group-hover:scale-105">
+            <img
+              src="/images/rekik-logo.jpg"
+              alt="Rekik Coffee Logo"
+              className="size-full object-cover"
+            />
+          </div>
+          <div className="flex flex-col leading-none">
+            <span className="font-display text-xl sm:text-2xl font-bold tracking-tight text-primary group-hover:text-primary/90 transition-colors">
+              Rekik Coffee
+            </span>
+          </div>
         </Link>
 
-        <ul className="hidden items-center gap-1 md:flex">
+        <ul className="hidden items-center gap-1.5 md:flex">
           {links.map((l) => (
             <li key={l.to}>
               <Link
                 to={l.to}
                 activeOptions={{ exact: l.to === "/" }}
                 activeProps={{
-                  className: "bg-secondary text-foreground shadow-sm shadow-primary/10",
+                  className: "bg-primary text-primary-foreground shadow-xs font-semibold",
                 }}
-                className="rounded-full px-4 py-2 text-sm font-medium text-muted-foreground transition-all hover:bg-secondary/80 hover:text-foreground"
+                className="rounded-full px-4 py-2 text-sm font-medium text-foreground/80 transition-all hover:bg-cream hover:text-primary"
               >
                 {l.label}
               </Link>
@@ -46,12 +54,12 @@ export function Navbar() {
           ))}
         </ul>
 
-        <div className="flex items-center gap-1 sm:gap-1.5">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <Button
             asChild
             variant="ghost"
             size="icon"
-            className="size-11 sm:size-9"
+            className="size-10 rounded-full hover:bg-cream hover:text-primary"
             aria-label="Your account"
           >
             <Link to="/account">
@@ -62,20 +70,24 @@ export function Navbar() {
             asChild
             variant="ghost"
             size="icon"
-            className="relative size-11 sm:size-9"
+            className="relative size-10 rounded-full hover:bg-cream hover:text-primary"
             aria-label={`Cart, ${count} items`}
           >
             <Link to="/cart">
               <ShoppingBag className="size-5" />
               {count > 0 && (
-                <span className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground sm:-right-0.5 sm:-top-0.5">
+                <span className="absolute -top-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full bg-gold text-[11px] font-bold text-espresso shadow-xs">
                   {count}
                 </span>
               )}
             </Link>
           </Button>
-          <Button asChild size="sm" className="ml-1 hidden sm:inline-flex">
-            <Link to="/menu">Order Now</Link>
+          <Button
+            asChild
+            size="sm"
+            className="ml-1 hidden sm:inline-flex rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 border border-gold/30"
+          >
+            <Link to="/menu">Order Online</Link>
           </Button>
 
           <Sheet open={open} onOpenChange={setOpen}>
@@ -83,16 +95,29 @@ export function Navbar() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-11 md:hidden"
+                className="size-10 rounded-full md:hidden hover:bg-cream"
                 aria-label="Open menu"
               >
                 <Menu className="size-5" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-72 flex flex-col justify-between">
+            <SheetContent side="right" className="w-80 flex flex-col justify-between bg-background border-border">
               <div>
-                <SheetTitle className="font-display text-lg">Rekik Café</SheetTitle>
-                <ul className="mt-6 space-y-1">
+                <div className="flex items-center gap-3 pb-4 border-b border-border">
+                  <div className="size-11 overflow-hidden rounded-full border-2 border-gold shrink-0">
+                    <img
+                      src="/images/rekik-logo.jpg"
+                      alt="Rekik Coffee Logo"
+                      className="size-full object-cover"
+                    />
+                  </div>
+                  <div>
+                    <SheetTitle className="font-display text-xl font-bold text-primary">Rekik Coffee</SheetTitle>
+                    <p className="text-xs text-gold font-medium uppercase tracking-wider">Ethiopian Roastery</p>
+                  </div>
+                </div>
+
+                <ul className="mt-6 space-y-1.5">
                   {links.map((l) => (
                     <li key={l.to}>
                       <Link
@@ -101,9 +126,9 @@ export function Navbar() {
                         activeOptions={{ exact: l.to === "/" }}
                         activeProps={{
                           className:
-                            "bg-primary/10 text-primary font-semibold border-l-2 border-primary pl-2.5",
+                            "bg-primary text-primary-foreground font-semibold shadow-xs",
                         }}
-                        className="block rounded-lg px-3 py-3 text-base font-medium text-foreground/85 transition-colors hover:bg-secondary"
+                        className="block rounded-xl px-4 py-3 text-base font-medium text-foreground transition-colors hover:bg-cream hover:text-primary"
                       >
                         {l.label}
                       </Link>
@@ -115,9 +140,9 @@ export function Navbar() {
                       onClick={() => setOpen(false)}
                       activeProps={{
                         className:
-                          "bg-primary/10 text-primary font-semibold border-l-2 border-primary pl-2.5",
+                          "bg-primary text-primary-foreground font-semibold shadow-xs",
                       }}
-                      className="block rounded-lg px-3 py-3 text-base font-medium text-foreground/85 transition-colors hover:bg-secondary"
+                      className="block rounded-xl px-4 py-3 text-base font-medium text-foreground transition-colors hover:bg-cream hover:text-primary"
                     >
                       My Orders
                     </Link>
@@ -125,14 +150,14 @@ export function Navbar() {
                 </ul>
               </div>
 
-              <div className="pt-6 border-t border-border/70 mt-auto">
+              <div className="pt-6 border-t border-border mt-auto">
                 <Button
                   asChild
                   size="lg"
-                  className="w-full rounded-full bg-primary text-primary-foreground shadow-md shadow-primary/25 hover:bg-primary/90"
+                  className="w-full rounded-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90 border border-gold/30"
                 >
                   <Link to="/menu" onClick={() => setOpen(false)}>
-                    Order Now
+                    Browse Menu & Order
                   </Link>
                 </Button>
               </div>

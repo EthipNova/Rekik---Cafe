@@ -238,14 +238,23 @@ export async function markWaiterNotificationRead(
   );
 }
 
+export interface AvailableWaiterClient {
+  id: string;
+  userId: string;
+  name: string;
+  fullName: string;
+  phone: string | null;
+  role?: string;
+  isAvailable?: boolean;
+  isActive?: boolean;
+}
+
 /**
  * Fetches available waiters for customer table selection during checkout.
  */
-export async function fetchAvailableWaiters(): Promise<
-  { userId: string; fullName: string; phone: string | null }[]
-> {
+export async function fetchAvailableWaiters(): Promise<AvailableWaiterClient[]> {
   try {
-    return await waiterRequest<{ userId: string; fullName: string; phone: string | null }[]>(
+    return await waiterRequest<AvailableWaiterClient[]>(
       "/api/waiters/available",
     );
   } catch {

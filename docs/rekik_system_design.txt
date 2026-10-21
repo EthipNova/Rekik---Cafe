@@ -1,0 +1,407 @@
+
+Rekik Project Updated System Design
+Feature extension to the existing ordering and administration system
+Prepared 17 October 2026  |  Version 1.0  |  Design basis: available project evidence and stated requirements
+
+DOCUMENT BASIS  The available Neba Burger file is a commercial proposal, not the original PRSD or technical system design. It identifies a website, customer ordering, and administration/order management as the existing project deliverables. Details about the deployed architecture, database, stack, and original five PRSD stages were not available. Such details below are explicitly treated as assumptions or recommendations and must be reconciled with the actual system before implementation.
+
+Executive summary
+This design extends the Neba Burger ordering and administration system for the Rekik project. It adds table QR entry points, shared waiter visibility with explicit service ownership, a cashier bill verification step, and owner monitoring with role-scoped access and audit history. The recommended approach is incremental: preserve existing order capture and administration behavior, add workflow states and assignment records, and adapt the current application and persistence layer rather than replace them.
+The design is technology-neutral because the original stack and deployment topology were not supplied. API names and data structures are proposals. The five-stage PRSD sequence below is a practical reconstruction for organizing work, not a claim about the missing original framework.
+Decision summary
+
+Area
+Design direction
+QR
+Use a signed or opaque, revocable table QR token that opens the existing ordering experience with venue/table context. Never encode customer or payment secrets.
+Waiters
+Broadcast new orders to all authorized on-duty waiters. Track one accountable primary waiter; allow authorized reassignment with reason and audit event.
+Cashier
+Make cashier bill verification a distinct controlled transition before payment completion/closure. Recalculate totals server-side and preserve verification evidence.
+Owner
+Provide a read-oriented owner dashboard for operational and financial summaries, with narrowly scoped management actions and complete audit logging.
+Delivery
+Use feature flags, backward-compatible schema changes, staged rollout, reconciliation, monitoring, and rollback safeguards.
+
+1. Scope and design basis
+1.1 Evidence from available Neba Burger material
+The only matching local source located was “Ornix Tech Neba Burger Commercial Proposal.” It lists a website for Neba Burger, customer ordering functionality, and administration and order management functionality. It does not describe the PRSD, current architecture, schema, endpoints, deployment, or operating procedures. No connected document sessions were available, and Google Drive was unavailable in the connected library search.
+1.2 Scope for the Rekik extension
+In scope: table QR entry and operational QR configuration; customer order context; waiter-wide incoming-order visibility; primary waiter assignment and reassignment; cashier bill verification; owner monitoring with role-scoped access; authorization, auditability, migration, acceptance, and testing.
+Out of scope unless confirmed: payment gateway replacement, menu/catalog redesign, inventory management, delivery logistics, loyalty, accounting integrations, hardware procurement, and a full rewrite.
+Compatibility principle: existing non-QR ordering and current administration remain usable during rollout. New workflow controls need migration defaults and exception handling.
+1.3 Assumptions requiring validation
+
+ID
+Assumption / validation question
+A1
+The existing system has a web ordering surface and an administration/order-management surface, consistent with the proposal. Exact clients and services are unknown.
+A2
+Orders have persistent IDs, item lines, totals, status, timestamps, and a restaurant/table or service context. Confirm current fields and status semantics.
+A3
+Waiters and cashiers can authenticate as individual accounts. If accounts are shared, individual identities are needed for reliable attribution.
+A4
+Dine-in tables are the initial QR target. QR for menu-only, pickup, or staff operations requires distinct QR purpose types.
+A5
+Cashier verification checks the order and computed bill before payment is recorded or the order is closed. Confirm timing and checklist.
+A6
+Owner visibility is limited to the owner's business/location, with personal customer data hidden unless operationally required.
+A7
+Original five PRSD labels and artifacts are unavailable; section 2 is a proposed working structure.
+
+2. Five-stage PRSD approach
+Use these stages to integrate Rekik into the existing product design. The names are an explicit proposed reconstruction; map them to the original labels once that source is found.
+
+Stage
+Purpose
+Rekik outputs / gate
+1. Baseline and discovery
+Map product, workflow, users, system boundaries, data, and constraints.
+Confirm order lifecycle, role model, QR needs, bill rules, deployment, source design, and quality targets. Gate: signed baseline and assumptions log.
+2. Requirements and acceptance
+Turn needs into measurable functional and quality requirements.
+Prioritized requirements, permissions, exceptions, acceptance criteria, owner/cashier reporting scope. Gate: business approval.
+3. Workflow and interaction design
+Define journeys, states, ownership, and exception handling.
+QR to order, waiter claim/reassignment, bill verification, owner dashboard, and recovery flows. Gate: workflow/state review.
+4. Architecture and data/API design
+Fit additions to current components and define schema, APIs, events, security, migration.
+Incremental component changes, data model, endpoint proposals, audit events, rollout/rollback. Gate: technical review against existing stack.
+5. Delivery, validation, and operation
+Build, migrate, test, roll out, observe, and improve.
+Feature flags, test evidence, runbook, training, phased rollout, post-launch review. Gate: readiness and acceptance.
+
+3. Requirements
+
+ID
+Requirement
+Priority
+Measure / evidence
+R1
+Each dine-in table has a QR code opening the existing ordering flow with validated table context.
+Must
+Valid table resolves correctly; revoked/unknown QR is safely rejected.
+R2
+All authorized on-duty waiters see incoming customer orders in near real time.
+Must
+New order appears to eligible clients within a target set during discovery; reconnect catches up without duplicates.
+R3
+Each order has one accountable primary waiter at a time, with assignment history and actor/timestamps.
+Must
+Order shows current owner and prior assignment events.
+R4
+Eligible waiter can claim an unassigned order; authorized lead/manager can reassign with reason.
+Must
+Concurrent claims leave exactly one current primary assignment.
+R5
+Cashier reviews server-calculated bill, verifies or rejects with reason, and records result.
+Must
+Payment/closure cannot bypass required verification except an audited privileged override.
+R6
+Owner monitors operational state and historical business summaries within assigned business/location.
+Must
+Dashboard includes orders, sales, service times, voids/discounts, and verification exceptions as authorized.
+R7
+Security-relevant and workflow changes are recorded in an append-only audit trail.
+Must
+Actor, action, target, timestamp, reason/context, and compact change summary are retained.
+R8
+Existing order channels and records continue during staged rollout.
+Must
+Regression checks pass; legacy rows receive safe defaults or explicit legacy treatment.
+
+4. Roles and authorization
+
+Role
+Core permissions
+Restrictions / controls
+Customer
+View menu; start through valid QR context; submit; view own status where supported.
+QR grants table context only; no staff screens or access to other orders/owner metrics.
+Waiter
+See incoming orders at assigned location; claim/accept; update service; request bill; see assigned work.
+Cannot silently replace another waiter or verify own bill unless policy permits an audited exception.
+Cashier
+View review queue and bill details; approve/reject; record payment outcome if current system supports it.
+Actions individually attributed; no role/menu administration by default.
+Owner
+View location-scoped operations/business summaries; manage QR/table/staff only if granted.
+Least privilege; minimize customer data; audit exports and privileged actions.
+Manager / shift lead
+Optional: monitor queues, resolve assignments, handle documented exceptions.
+Assumed role; enable only if the staffing policy needs it.
+System administrator
+Configure system, roles, locations, integrations, and support access.
+Separate admin from operations; privileged access is time-limited and audited.
+
+The server must enforce role and location scope on every read and state change. Hiding a client-side action is not an authorization boundary.
+5. Workflows and order state changes
+5.1 QR ordering
+Owner or authorized manager creates/activates a table QR record. The system issues an opaque token or URL identifier; signing secrets remain server-side.
+Customer scans the code. Server validates token status, venue/table mapping, expiry/rotation policy, and allowed ordering window; the page receives safe table context.
+Customer submits through the existing ordering path. Server revalidates menu prices, availability, fees/tax, and table context; records source=QR and table reference.
+System confirms the order and publishes an incoming-order event to authorized waiter clients. Invalid/revoked codes provide a safe recovery path (retry, ask staff, or use existing ordering).
+5.2 Waiter visibility and accountable service
+On-duty waiter clients subscribe to the location-scoped incoming queue. Persisted queue query is the source of truth; events notify clients.
+An eligible waiter claims an unassigned order. Claim is atomic; the first valid claim becomes primary waiter. A competing claim returns current assignment.
+Primary waiter updates service progress. Other waiters can see ownership but cannot silently replace it.
+A service change requires reassignment by current waiter or authorized lead, with reason. System records prior/new waiter, actor, time, reason, then notifies clients.
+5.3 Cashier bill verification
+Waiter requests the bill after confirming order changes. System snapshots bill inputs and calculates totals from trusted server-side prices and rules.
+Order enters BILL_REVIEW_PENDING and appears in cashier queue. Cashier reviews items, modifiers, discounts, taxes/fees, adjustments, and total.
+Cashier verifies to BILL_VERIFIED or rejects to BILL_REJECTED with required reason. Rejection returns the order for correction; any edit invalidates prior verification and creates a new bill version.
+Payment/closure follows the existing payment workflow but is gated on current-version verification when enabled. Exceptions require authorized override, reason, and audit record.
+5.4 Owner monitoring
+Owner dashboard defaults to a location and time range and shows operational queues plus summarized business measures. Suggested views: order count/value by status/time; average placement-to-acceptance and service completion; unclaimed orders; bills awaiting verification; rejected/reopened bills; discounts/voids; cashier verification volume. Confirm revenue basis, timezone, closed-order treatment, refunds, and voids with the owner.
+6. Proposed architecture changes
+Implement these as logical capabilities inside the current application unless discovery shows a need for a separate service. Do not introduce infrastructure solely for these features.
+
+Capability
+Change
+Integration / reliability notes
+Existing ordering UI
+Add QR landing/context resolution; preserve current menu/cart/submit path.
+QR is not a parallel pricing or order path.
+Order application/API
+Add QR source/context, assignment actions, bill review transitions, role checks, owner queries.
+Validate transitions server-side; idempotency keys for retries.
+Persistence
+Extend order/table metadata; add assignment, bill review/version, QR registry, and audit records.
+Additive migrations first; preserve history and define legacy defaults.
+Realtime notification
+Publish order-created/workflow-changed events to location-scoped waiter/cashier clients.
+Persist before publish; reconnect via cursor and API refresh; database remains truth.
+Reporting/query layer
+Provide owner-scoped aggregates and operational queues.
+Start with indexed queries; add read model only if measured load warrants it.
+Identity/authorization
+Map individual accounts to roles, location membership, and on-duty status.
+Deny by default; log privileged denials without sensitive payloads.
+Operations
+Add metrics, alerts, health checks, QR disable controls, exception runbook.
+Monitor queue delay, unassigned orders, review age, audit and notification failures.
+
+6.1 Logical interaction
+
+Flow
+Sequence
+Order intake
+Customer browser → existing order API → order database → persisted order event → waiter live queue + recovery API
+Bill review
+Waiter UI → bill request → bill version/pending status → cashier queue → verify/reject → audit + status event
+Owner monitoring
+Owner UI → authenticated location-scoped report API → order/operational data → summaries
+QR resolution
+Printed QR → public resolver → token validation/table context → existing customer ordering flow
+
+7. Data model changes
+Names are logical proposals, not claims about the existing schema. Map them to current entities and conventions during discovery.
+
+Entity / fields
+Purpose and key constraints
+Order (extend): source_channel, table_id, status, bill_version, bill_status, timestamps
+Keep current order/line fields. source_channel: WEB, QR, STAFF, OTHER. Bill state is separate from fulfillment state.
+Table: id, location_id, display_name, active
+Dine-in service point; enforce location ownership.
+QrCode: id, token_hash, purpose, location_id, table_id, status, created_at, expires_at, revoked_at
+Store token hash where possible; scope purpose; define unique active mapping.
+OrderAssignment: id, order_id, waiter_user_id, assigned_by_user_id, assigned_at, ended_at, reason, assignment_type
+Append assignment episodes; at most one active primary assignment; distinguish claim/reassignment.
+BillVersion: id, order_id, version, line_snapshot, subtotal, adjustments, tax, fees, total, currency, created_at, created_by
+Immutable verification snapshot; follow existing currency precision and rounding.
+BillReview: id, order_id, bill_version_id, cashier_user_id, result, reason, reviewed_at
+Review result per version: VERIFIED or REJECTED; edits create a new version.
+AuditEvent: id, actor_user_id, actor_role, location_id, action, target_type, target_id, occurred_at, request_id, reason, change_summary
+Append-only; omit credentials/payment secrets and unnecessary personal data.
+Membership / RoleAssignment: user_id, location_id, role, active, valid_from, valid_to
+Add only if current identity model lacks equivalent scoped memberships.
+
+7.1 State model
+
+Dimension
+Suggested states / rules
+Fulfillment
+RECEIVED → ACCEPTED → IN_PROGRESS → READY → SERVED/CLOSED; map existing statuses. Cancellation/void remain explicit.
+Assignment
+UNASSIGNED → ASSIGNED(waiter) → REASSIGNED(waiter history). Orthogonal to fulfillment.
+Bill
+NOT_REQUESTED → REVIEW_PENDING → VERIFIED or REJECTED. Material edit creates new version and returns to REVIEW_PENDING.
+Payment
+Use existing states. Where required, closure/payment needs current bill version VERIFIED, except audited override.
+
+8. Proposed API endpoint contracts
+REST-style proposals; adapt to current conventions. Staff endpoints require authentication and location authorization. State changes should accept idempotency key or conditional version.
+
+Method and path
+Purpose / key behavior
+Access
+GET /public/qr/{token}
+Resolve to minimal ordering context; safe error for invalid/revoked token.
+Public, rate-limited
+POST /orders
+Submit order with table/QR reference and idempotency key; validate prices/availability.
+Customer flow
+GET /staff/orders/incoming?locationId=…&cursor=…
+Recoverable incoming queue; cursor supports reconnect.
+Waiter, manager
+GET /staff/orders/stream?locationId=…
+Optional event stream/WebSocket for order changes.
+Waiter, cashier, manager
+POST /staff/orders/{id}/claim
+Atomically claim unassigned order; conflicts return current assignment.
+Waiter
+POST /staff/orders/{id}/reassign
+Set primary waiter; reason and expected assignment version required.
+Current waiter/manager by policy
+POST /staff/orders/{id}/request-bill
+Create bill snapshot/version and enter review pending.
+Assigned waiter/manager
+GET /cashier/bills/pending?locationId=…
+List bills awaiting review.
+Cashier, manager
+POST /cashier/bills/{id}/verify
+Verify current version; stale version rejected.
+Cashier
+POST /cashier/bills/{id}/reject
+Reject current version with required reason.
+Cashier
+POST /staff/orders/{id}/payment
+Record payment via existing flow; enforce verification prerequisite.
+Cashier/current role
+GET /owner/overview?locationId=…&from=…&to=…
+Scoped KPIs and queue summary with definition metadata.
+Owner/authorized manager
+GET /owner/audit?locationId=…&from=…&to=…&type=…
+Search permitted audit summaries; omit sensitive payload.
+Owner/authorized manager
+POST /admin/tables/{id}/qr/rotate
+Issue replacement QR token and revoke prior token.
+Owner/admin
+POST /admin/qr/{id}/revoke
+Disable QR immediately.
+Owner/admin
+
+9. Security, audit, and privacy
+Authentication: individual staff identities for waiter and cashier actions; owner/admin authentication should match the existing identity system.
+Authorization: enforce role and location checks on each endpoint and live subscription. Public QR resolution returns minimal ordering context.
+QR safety: high-entropy opaque identifiers or signed tokens; server-side revocation and rate limits; no personal data, credentials, or payment secrets in the QR. Define replay and table reassignment behavior.
+Order integrity: server is authoritative for price, tax, discounts, bill totals, and allowed transitions. Use immutable bill versions and optimistic concurrency.
+Audit: record QR create/rotate/revoke, assignment, bill request/review/rejection, discounts/voids, payment/closure, role changes, and overrides. Retain by policy and protect integrity.
+Privacy: minimize personal data in owner reports; scope access by location; mask sensitive fields; define retention, export, and deletion requirements.
+Resilience: persist before broadcasting; assume at-least-once delivery; make clients idempotent; refresh queue on reconnect; alert on audit or notification failures.
+9.1 Minimum audit event fields
+Retain actor ID and effective role, location, action, target type/ID, timestamp, request/correlation ID, outcome, reason where required, and compact change summary. Do not copy payment instruments, credentials, or unrestricted customer payloads into audit logs.
+10. Owner dashboard and monitoring
+
+View
+Suggested measures
+Definition to confirm
+Live operations
+Open orders by status; unassigned count/age; active assignments; pending cashier bills.
+Status mapping; on-duty roster source; service hours.
+Service performance
+Median and percentile time from received to claimed, accepted, served, closed.
+Clock source, pauses, cancellations, timezone.
+Sales summary
+Order count/net sales by period; average order value; QR vs other channel.
+Gross/net basis, discounts, tax, refunds, voids, currency.
+Control exceptions
+Rejected bills; overrides; voids/discounts; QR failures; assignment changes.
+Thresholds and review cadence.
+Staff activity
+Orders served/verified per user and shift.
+Attribution rules for reassignment and shared work.
+
+11. Acceptance criteria
+
+ID
+Acceptance criterion
+AC1
+Active table QR opens the ordering experience with correct context and QR/table source persisted. Unknown, revoked, or inactive codes cannot place a table-linked order.
+AC2
+Accepted customer order appears for all authorized on-duty waiters at the location and is recoverable after reconnect without duplicating the order.
+AC3
+Concurrent waiter claims cannot create multiple active primary assignments; competing client receives current assignment.
+AC4
+Reassignment records previous/new waiter, actor, time, and reason; unauthorized roles cannot reassign.
+AC5
+Bill request creates server-calculated version and cashier review item. Cashier verifies or rejects; rejection requires reason.
+AC6
+Material bill edits invalidate prior verification. Payment/closure is blocked for unverified current version unless authorized override with reason/actor is recorded.
+AC7
+Owner sees approved summaries for authorized locations and cannot read another location by changing request parameters.
+AC8
+Role/location enforcement is verified for APIs and live subscriptions. Sensitive customer/payment data is absent from audit summaries.
+AC9
+Legacy orders remain readable and follow defined legacy behavior; rollback does not destroy history.
+AC10
+Monitoring reveals notification lag, stale unclaimed orders, bill review age, and audit persistence errors.
+
+12. Migration and rollout
+Inventory modules, order statuses, roles, data model, hosting, notification method, bill rules, and reporting. Map the proposal to the original PRSD when found.
+Add backward-compatible schema fields and history tables. Deploy code that reads old and new records before requiring new values.
+Backfill safe defaults: source_channel=LEGACY/OTHER; historical assignment or approval remains unknown, not fabricated. Define routing for open legacy orders.
+Enable QR/table setup and roles for a pilot location. Test resolve, revoke, and recovery before printing labels.
+Roll out waiter visibility/assignment first, cashier verification behind a feature flag, then owner dashboard after KPI and permission approval.
+Monitor events, claim conflicts, bill rework, queue age, API failures, and audit health. Train staff and provide manual fallback.
+Expand by location after acceptance. Retain controls to disable workflows without deleting orders, bill versions, assignments, or audits.
+12.1 Rollback and data safety
+Use feature flags and additive migrations so UI/workflow can be disabled without deleting data. Capture and test restore from backup before production migration. If verification is disabled during an incident, record the decision and context, prevent silent edits, and reconcile affected bills afterward.
+13. Testing and operational readiness
+
+Test area
+Coverage
+Functional
+QR resolve/revoke; order submit; waiter visibility, claim/reassign; bill version/review/reject; owner summaries; role/location scope.
+Concurrency / idempotency
+Simultaneous claims; duplicate submits/events; retry after timeout; stale bill review; reassignment races.
+Integration
+Ordering UI/API/database; live notification and recovery; payment/closure; existing administration behavior.
+Security
+Unauthorized role/cross-location access; QR enumeration/rate abuse; revocation; audit integrity; sensitive log data; overrides.
+Migration / regression
+Upgrade legacy data; historical orders; non-QR channels; rollback and restore rehearsal.
+Performance / resilience
+Peak orders; network reconnect; notification delay; cashier backlog; reporting; event transport degradation; audit outage behavior.
+UAT / operations
+Waiter, cashier, owner scenarios at pilot; KPI validation; training; incident/manual fallback runbook.
+
+Targets for notification latency, dashboard freshness, availability, retention, and recovery are not present in available source material. Set measurable targets during baseline and requirements stages.
+14. Open decisions
+
+Decision
+Recommended owner / next action
+Which QR purposes beyond dine-in table ordering?
+Business owner confirms table, menu-only, pickup, or staff operations.
+When is waiter assigned: claim, acceptance, or manager dispatch?
+Operations lead selects policy; proposal default is first eligible claim with manager reassignment.
+Can waiter and cashier be the same person? Can cashier verify own work?
+Owner defines separation policy and audited exception.
+What exactly does cashier verify, and what permits overrides?
+Owner/cashier document checklist and approval boundary.
+Which KPIs define sales and service time?
+Owner approves formulas, timezone, currency, tax/refund/void treatment.
+What were original PRSD stages and architecture choices?
+Attach original PRSD/system design and current schema/API docs; map extension section by section.
+What role, identity, realtime, and hosting mechanisms already exist?
+Engineering confirms during baseline discovery before implementation decisions.
+
+Appendix A  Source and assumption register
+
+Item
+Status
+Use in this design
+Ornix Tech Neba Burger Commercial Proposal.docx
+Located locally; commercial proposal only.
+Supports limited baseline: website, customer ordering, administration/order management.
+Original Neba Burger PRSD/system design
+Not located in available files; absent from referenced conversation preview; no connected document sessions.
+Not used or claimed. Original stage labels, architecture, schema, endpoints remain unknown.
+Rekik feature requirements
+Supplied in referenced conversation/current request.
+Source for QR, shared waiter visibility with accountable waiter, cashier verification, owner monitoring.
+Architecture, schema, endpoints, states, rollout proposals
+Recommendations/assumptions pending discovery.
+Reviewable starting point; reconcile before implementation.
+
+Prepared as an editable design baseline for review. Replace assumptions with verified Neba Burger system details when the original PRSD or implementation documentation becomes available.

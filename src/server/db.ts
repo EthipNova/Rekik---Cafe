@@ -2588,3 +2588,5 @@ export async function deleteContactMessage(id: string, client: any = supabase): 
 
   return true;
 }
+
+export { getAvailableWaiters, type AvailableWaiterDTO as AvailableWaiter } from "./waiter";

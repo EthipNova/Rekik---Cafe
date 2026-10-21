@@ -123,13 +123,13 @@ export function MenuBrowser({
         <Link
           to="/menu"
           className={cn(
-            "rounded-full border px-4 py-2 text-sm font-medium transition-colors",
+            "rounded-full border px-4 py-2 text-sm font-medium transition-all shadow-2xs",
             !activeCategory
-              ? "border-primary bg-primary text-primary-foreground"
-              : "border-border hover:bg-secondary",
+              ? "border-primary bg-primary text-primary-foreground font-semibold shadow-xs"
+              : "border-border/80 bg-cream/30 text-foreground/85 hover:bg-cream hover:text-primary hover:border-gold/40",
           )}
         >
-          All
+          All Offerings
         </Link>
         {activeCategories.map((c) => (
           <Link
@@ -137,10 +137,10 @@ export function MenuBrowser({
             to="/menu/$category"
             params={{ category: c.slug }}
             className={cn(
-              "rounded-full border px-4 py-2 text-sm font-medium transition-colors",
+              "rounded-full border px-4 py-2 text-sm font-medium transition-all shadow-2xs",
               activeCategory === c.slug
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border hover:bg-secondary",
+                ? "border-primary bg-primary text-primary-foreground font-semibold shadow-xs"
+                : "border-border/80 bg-cream/30 text-foreground/85 hover:bg-cream hover:text-primary hover:border-gold/40",
             )}
           >
             {c.name}
@@ -154,15 +154,19 @@ export function MenuBrowser({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search menu..."
+            placeholder="Search our coffee, roasts, dishes and drinks..."
             aria-label="Search menu"
-            className="pl-9"
+            className="pl-9 bg-card border-border/80 focus-visible:ring-gold"
           />
         </div>
         <Button
           variant={availableOnly ? "default" : "outline"}
           onClick={() => setAvailableOnly((v) => !v)}
           aria-pressed={availableOnly}
+          className={cn(
+            "rounded-full",
+            availableOnly ? "bg-primary text-primary-foreground" : "border-border hover:bg-cream"
+          )}
         >
           Available only
         </Button>
