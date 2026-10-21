@@ -274,6 +274,31 @@ function AccountPage() {
     }
   };
 
+  const handleForgotPassword = async () => {
+    const email = signInForm.email.trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAuthError("Please enter your email address in the field above to reset your password.");
+      return;
+    }
+    setSubmittingAuth(true);
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email,
+        typeof window !== "undefined" ? { redirectTo: `${window.location.origin}/account` } : {},
+      );
+      if (error) {
+        setAuthError(error.message || "Failed to send password reset email.");
+      } else {
+        toast.success("Password reset instructions have been sent to your email.");
+      }
+    } catch {
+      setAuthError("An unexpected error occurred while requesting password reset.");
+    } finally {
+      setSubmittingAuth(false);
+    }
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -512,7 +537,16 @@ function AccountPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="signin-password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="signin-password">Password</Label>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="text-xs text-primary hover:underline font-medium"
+                >
+                  Forgot password?
+                </button>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input

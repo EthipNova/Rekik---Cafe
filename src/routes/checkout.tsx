@@ -413,6 +413,7 @@ function Checkout() {
   };
 
   const pay = async () => {
+    if (submitting) return;
     if (!validateCurrentStep()) return;
 
     setSubmitting(true);

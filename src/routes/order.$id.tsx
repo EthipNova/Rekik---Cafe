@@ -335,9 +335,9 @@ function OrderPage() {
           </h1>
           <p className="mt-3 max-w-xl mx-auto text-sm sm:text-base text-muted-foreground">
             {isRejectedByWaiter
-              ? `Your assigned server was unable to accept this order at Table #${order.customer.table || "—"}. Please browse our menu to place a new order.`
+              ? `Your assigned server was unable to accept this order${order.customer.table ? ` at Table #${order.customer.table}` : ""}. Please browse our menu to place a new order.`
               : isWaitingForWaiter
-                ? `Your order at Table #${order.customer.table || "—"} has been assigned to server ${order.waiterName || "assigned staff"}. Please wait for your server to confirm your items before proceeding to payment.`
+                ? `Your order${order.customer.table ? ` at Table #${order.customer.table}` : ""} has been assigned to server ${order.waiterName || "assigned staff"}. Please wait for your server to confirm your items before proceeding to payment.`
                 : isUnderCashierReview
                   ? "Your payment screenshot has been submitted and is currently in the cashier review queue. You will be notified once verified."
                   : isPaid
@@ -462,9 +462,9 @@ function OrderPage() {
                       <Utensils className="size-5" aria-hidden />
                     </span>
                     <div>
-                      <dt className="text-xs text-muted-foreground font-medium">Table assignment</dt>
+                      <dt className="text-xs text-muted-foreground font-medium">Service Type</dt>
                       <dd className="font-display text-base font-semibold text-foreground">
-                        Table #{order.customer.table || "Not specified"}
+                        {order.customer.table ? `Table #${order.customer.table}` : "Dine-in Floor Service"}
                       </dd>
                     </div>
                   </div>
@@ -684,7 +684,7 @@ function OrderPage() {
                   <div className="space-y-1.5 flex-1">
                     <p className="font-semibold text-sm">Order Rejected by Assigned Server</p>
                     <p className="text-muted-foreground leading-relaxed">
-                      Your server was unable to accept this order at Table #{order.customer.table || "—"}. Payment is disabled.
+                      Your server was unable to accept this order{order.customer.table ? ` at Table #${order.customer.table}` : ""}. Payment is disabled.
                     </p>
                     {order.waiterRejectionReason && (
                       <div className="mt-2 rounded-md bg-background/80 p-2.5 border border-destructive/20 text-xs">
@@ -711,10 +711,12 @@ function OrderPage() {
                     <strong className="text-foreground">{order.waiterName || "your assigned server"}</strong> for confirmation. Payment options will unlock here automatically as soon as your server approves.
                   </p>
                   <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Table:</span>
-                      <span className="font-semibold text-foreground">Table #{order.customer.table || "—"}</span>
-                    </div>
+                    {order.customer.table && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Table:</span>
+                        <span className="font-semibold text-foreground">Table #{order.customer.table}</span>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Assigned Server:</span>
                       <span className="font-semibold text-primary">{order.waiterName || "Pending floor assignment"}</span>
@@ -839,7 +841,7 @@ function OrderPage() {
                     <div>
                       <p className="font-semibold">Order Approved by {order.waiterName || "Server"}</p>
                       <p className="text-muted-foreground">
-                        Your server has confirmed your order at Table #{order.customer.table || "—"}. Please select your payment method below.
+                        Your server has confirmed your order{order.customer.table ? ` at Table #${order.customer.table}` : ""}. Please select your payment method below.
                       </p>
                     </div>
                   </div>
@@ -884,7 +886,7 @@ function OrderPage() {
                             ? "Cash on Delivery"
                             : "Pay at Pickup Counter",
                         info: isDineIn
-                          ? "Server will settle payment at Table #" + (order.customer.table || "")
+                          ? (order.customer.table ? `Server will settle payment at Table #${order.customer.table}` : "Server will settle payment at your table")
                           : "Pay in person upon receipt",
                         icon: Banknote,
                       },
@@ -998,7 +1000,7 @@ function OrderPage() {
                       <p className="font-semibold text-foreground">In-Person Settlement</p>
                       <p>
                         {isDineIn
-                          ? `Your server (${order.waiterName || "assigned staff"}) will collect cash or card directly at Table #${order.customer.table || ""}.`
+                          ? `Your server (${order.waiterName || "assigned staff"}) will collect cash or card directly at your table${order.customer.table ? ` (Table #${order.customer.table})` : ""}.`
                           : "Pay in person upon pickup or delivery."}
                       </p>
                     </div>

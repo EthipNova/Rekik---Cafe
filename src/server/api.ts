@@ -655,6 +655,22 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         const order = await getOrderById(orderId, scopedClient);
         if (!order) return notFound(`Order '${orderId}' not found`);
 
+        // If caller is unauthenticated, ensure this order does not belong to a private registered customer
+        if (!authUser) {
+          try {
+            const { data: orderRow } = await (serverSupabase.from("orders" as any) as any)
+              .select("customer_id, customers:customer_id ( user_id )")
+              .or(`id.eq.${order.id},order_number.eq.${order.number}`)
+              .maybeSingle();
+
+            if (orderRow?.customers?.user_id) {
+              return unauthorized("Authentication required to access this customer order");
+            }
+          } catch {
+            /* ignore check failure, proceed */
+          }
+        }
+
         // If caller is an authenticated CUSTOMER, verify they own this order
         if (authUser && authUser.role === "CUSTOMER") {
           const customerOrders = await getOrdersForCustomerUser(authUser.id, scopedClient);

@@ -1119,7 +1119,7 @@ export async function createOrder(
     // Pure INSERT without .select() to avoid anonymous SELECT RLS restriction (42501)
     try {
       const newCustId = crypto.randomUUID();
-      const guestPhone = normPhone || `09${Date.now().toString().slice(-8)}`;
+      const guestPhone = normPhone || customerPhone || null;
       const { error: custErr } = await (supabase.from("customers" as any) as any).insert({
         id: newCustId,
         name: customerName,
@@ -1232,10 +1232,6 @@ export async function createOrder(
     status: "pending",
     table_number: input.customer?.table || null,
     delivery_address: input.customer?.address || null,
-    delivery_latitude: deliveryLatitude,
-    delivery_longitude: deliveryLongitude,
-    delivery_distance_km: deliveryDistanceKm,
-    payment_method: paymentMethod,
     subtotal,
     discount_amount: discount,
     delivery_fee: delivery,
