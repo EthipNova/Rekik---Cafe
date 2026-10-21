@@ -1,4 +1,5 @@
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
 import {
   AlertCircle,
   Bell,
@@ -271,13 +272,17 @@ function WaiterLayout() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-cream px-4">
         <div className="surface-card w-full max-w-sm p-8">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-display font-bold">
-              N
+          <div className="flex items-center gap-3 mb-3">
+            <div className="size-11 overflow-hidden rounded-full border-2 border-gold/70 shrink-0 bg-white">
+              <img
+                src={rekikLogo}
+                alt="Rekik Coffee logo"
+                className="size-full object-contain"
+              />
             </div>
             <div>
-              <span className="font-display text-lg font-semibold">NEBA</span>
-              <span className="ml-2 text-[10px] uppercase tracking-[0.2em] opacity-70">
+              <span className="font-display text-lg font-bold text-foreground">Rekik Coffee</span>
+              <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-semibold">
                 Waiter Station
               </span>
             </div>
@@ -307,7 +312,7 @@ function WaiterLayout() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="waiter@nebacafe.com"
+                placeholder="waiter@rekikcafe.com"
                 autoComplete="email"
                 disabled={loading}
               />
@@ -355,11 +360,18 @@ function WaiterLayout() {
       <aside className="hidden w-64 shrink-0 flex-col bg-sidebar p-4 text-sidebar-foreground md:flex border-r border-sidebar-border">
         {/* Brand */}
         <div className="px-2 py-3 flex items-center justify-between">
-          <Link to="/waiter" className="flex items-center">
-            <span className="font-display text-lg font-semibold tracking-tight">NEBA</span>
-            <span className="ml-2 text-[10px] uppercase tracking-[0.2em] font-medium bg-primary/20 text-primary px-1.5 py-0.5 rounded">
-              Waiter
-            </span>
+          <Link to="/waiter" className="flex items-center gap-2.5 group">
+            <div className="size-9 overflow-hidden rounded-full border border-gold/70 shrink-0 bg-white">
+              <img
+                src={rekikLogo}
+                alt="Rekik Coffee logo"
+                className="size-full object-contain"
+              />
+            </div>
+            <div>
+              <span className="font-display text-base font-bold text-sidebar-foreground">Rekik Coffee</span>
+              <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-medium">Waiter Station</span>
+            </div>
           </Link>
         </div>
 
@@ -452,11 +464,15 @@ function WaiterLayout() {
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Mobile Header */}
         <header className="sticky top-0 z-40 flex h-14 w-full items-center justify-between border-b border-sidebar-border bg-sidebar px-4 text-sidebar-foreground md:hidden">
-          <Link to="/waiter" className="flex items-center">
-            <span className="font-display text-lg font-semibold">NEBA</span>
-            <span className="ml-2 text-[10px] uppercase tracking-[0.2em] bg-primary/20 text-primary px-1.5 py-0.5 rounded font-medium">
-              Waiter
-            </span>
+          <Link to="/waiter" className="flex items-center gap-2">
+            <div className="size-7 overflow-hidden rounded-full border border-gold/70 shrink-0 bg-white">
+              <img
+                src={rekikLogo}
+                alt="Rekik Coffee logo"
+                className="size-full object-contain"
+              />
+            </div>
+            <span className="font-display text-sm font-bold">Rekik Coffee Waiter</span>
           </Link>
 
           <div className="flex items-center gap-2">
@@ -482,11 +498,18 @@ function WaiterLayout() {
               >
                 <div>
                   <SheetHeader className="text-left pb-3 border-b border-sidebar-border">
-                    <SheetTitle className="font-display text-lg font-semibold text-sidebar-foreground flex items-center">
-                      <span>NEBA</span>
-                      <span className="ml-2 text-[10px] uppercase tracking-[0.2em] bg-primary/20 text-primary px-1.5 py-0.5 rounded font-medium">
-                        Waiter
-                      </span>
+                    <SheetTitle className="font-display text-lg font-semibold text-sidebar-foreground flex items-center gap-2.5">
+                      <div className="size-8 overflow-hidden rounded-full border border-gold/70 shrink-0 bg-white">
+                        <img
+                          src={rekikLogo}
+                          alt="Rekik Coffee logo"
+                          className="size-full object-contain"
+                        />
+                      </div>
+                      <div>
+                        <span className="font-display text-base font-bold">Rekik Coffee</span>
+                        <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-medium">Waiter Station</span>
+                      </div>
                     </SheetTitle>
                     <SheetDescription className="sr-only">Waiter navigation</SheetDescription>
                   </SheetHeader>

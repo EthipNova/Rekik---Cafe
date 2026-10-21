@@ -14,7 +14,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import heroFallback from "@/assets/rekik-hero.jpg";
-import rekikLogo from "@/assets/rekik-logo.jpg";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
 import rekikStory from "@/assets/rekik-story.jpg";
 import burgersImage from "@/assets/burgers.png";
 import clubSandwichImage from "@/assets/club-sandwich.png";
@@ -250,11 +250,11 @@ function Home() {
             {/* Left Column: Editorial Headline & Actions */}
             <div className="flex flex-col justify-center space-y-6 text-espresso-foreground lg:col-span-7">
               <div className="rise-in inline-flex items-center gap-3 rounded-full border border-gold/40 bg-espresso/80 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur-md w-fit">
-                <div className="overflow-hidden rounded-full border border-gold/50 size-9 sm:size-10 shrink-0 bg-warm-white">
+                <div className="overflow-hidden rounded-full border border-gold/70 size-10 sm:size-11 shrink-0 bg-white">
                   <img
                     src={rekikLogo}
-                    alt="Rekik Coffee Logo"
-                    className="size-full object-cover"
+                    alt="Rekik Coffee logo"
+                    className="size-full object-contain"
                   />
                 </div>
                 <div className="flex items-center gap-2 text-xs font-semibold tracking-wider uppercase text-gold">

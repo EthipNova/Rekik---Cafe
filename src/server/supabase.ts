@@ -1,4 +1,40 @@
+import fs from "node:fs";
+import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
+
+/**
+ * Ensures process.env contains server secrets even if the process was started
+ * without an explicit --env-file flag (e.g. standard 'vite dev' or SSR runner).
+ */
+function ensureServerEnvLoaded(): void {
+  if (typeof process === "undefined" || !process.cwd) return;
+  if (process.env["SUPABASE_SERVICE_ROLE_KEY"] && process.env["SUPABASE_URL"]) return;
+
+  const cwd = process.cwd();
+  const envFiles = [".env", ".env.local"];
+  for (const f of envFiles) {
+    const full = path.resolve(cwd, f);
+    if (!fs.existsSync(full)) continue;
+    try {
+      const content = fs.readFileSync(full, "utf-8");
+      for (const line of content.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx === -1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const rawVal = trimmed.slice(eqIdx + 1).trim();
+        const value = rawVal.replace(/^(['"])(.*)\1$/, "$2");
+        if (key && !process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    } catch {
+      /* ignore file read issues */
+    }
+  }
+}
+ensureServerEnvLoaded();
 
 /**
  * ============================================================================

@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
 import { fetchCashierMe } from "@/services/cashier";
 import {
   AlertCircle,
@@ -385,7 +386,8 @@ function AccountPage() {
       confirmPassword: "",
     });
     setAuthError(null);
-    toast.success("You have signed out");
+    toast.success("You have successfully signed out.");
+    void navigate({ to: "/" });
   };
 
   // Update payment method for pending order
@@ -458,11 +460,11 @@ function AccountPage() {
     return (
       <Section className="max-w-md py-12">
         <div className="text-center">
-          <div className="mx-auto size-16 overflow-hidden rounded-full border-2 border-gold shadow-sm">
+          <div className="mx-auto size-18 overflow-hidden rounded-full border-2 border-gold/70 shadow-sm bg-white">
             <img
-              src="/images/rekik-logo.jpg"
-              alt="Rekik Coffee Logo"
-              className="size-full object-cover"
+              src={rekikLogo}
+              alt="Rekik Coffee logo"
+              className="size-full object-contain"
             />
           </div>
           <h1 className="mt-4 text-3xl font-display font-semibold">Rekik Coffee Account</h1>

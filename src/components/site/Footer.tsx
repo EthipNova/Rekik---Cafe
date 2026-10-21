@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
 
 const columns = [
   {
@@ -27,11 +28,11 @@ export function Footer() {
       <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
           <div className="flex items-center gap-3">
-            <div className="size-12 overflow-hidden rounded-full border-2 border-gold shrink-0">
+            <div className="size-13 overflow-hidden rounded-full border-2 border-gold/70 shrink-0 bg-white">
               <img
-                src="/images/rekik-logo.jpg"
-                alt="Rekik Coffee Logo"
-                className="size-full object-cover"
+                src={rekikLogo}
+                alt="Rekik Coffee logo"
+                className="size-full object-contain"
               />
             </div>
             <div>

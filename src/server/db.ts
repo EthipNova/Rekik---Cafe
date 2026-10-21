@@ -1057,11 +1057,11 @@ export async function createOrder(
     : "";
 
   if (input.authUserId) {
-    // ── C0: Authenticated Customer: Resolve or create record linked to auth.users.id
-    // Must use token-scoped client to satisfy customer RLS (auth.uid() = user_id)
+    // ── C0: Authenticated Customer: Resolve or create record linked to verified auth.users.id
     try {
-      const { data: byUser } = await (dbClient.from("customers" as any) as any)
-        .select("id, name, phone")
+      // 1. Try to find existing customer linked to this auth user
+      const { data: byUser } = await (supabase.from("customers" as any) as any)
+        .select("id, name, phone, email")
         .eq("user_id", input.authUserId)
         .maybeSingle();
 
@@ -1071,13 +1071,15 @@ export async function createOrder(
         if (customerName && customerName !== byUser["name"]) updatePayload["name"] = customerName;
         if (customerPhone && customerPhone !== byUser["phone"])
           updatePayload["phone"] = customerPhone;
-        if (input.authUserEmail) updatePayload["email"] = input.authUserEmail;
+        if (input.authUserEmail && input.authUserEmail !== byUser["email"])
+          updatePayload["email"] = input.authUserEmail;
         if (Object.keys(updatePayload).length > 1) {
-          await (dbClient.from("customers" as any) as any)
+          await (supabase.from("customers" as any) as any)
             .update(updatePayload)
             .eq("id", customerId);
         }
       } else {
+        // 2. No customer record exists yet for this user: create one securely
         const newCustId = crypto.randomUUID();
         const insertPayload: Record<string, unknown> = {
           id: newCustId,
@@ -1089,12 +1091,19 @@ export async function createOrder(
           updated_at: nowIso,
         };
 
-        const { error: custErr } = await (dbClient.from("customers" as any) as any).insert(
+        const { error: custErr } = await (supabase.from("customers" as any) as any).insert(
           insertPayload,
         );
 
         if (!custErr) {
           customerId = newCustId;
+        } else if (custErr.code === "23505") {
+          // Concurrent order creation: fetch newly inserted customer record
+          const { data: retryUser } = await (supabase.from("customers" as any) as any)
+            .select("id")
+            .eq("user_id", input.authUserId)
+            .maybeSingle();
+          customerId = retryUser?.id || null;
         } else {
           console.error(
             `[db] Authenticated customer create failed (code ${custErr.code}): ${custErr.message}`,
@@ -1116,12 +1125,12 @@ export async function createOrder(
     }
   } else {
     // ── C1 & C2: Guest Checkout (no auth user): Create guest customer with known UUID
-    // Pure INSERT without .select() to avoid anonymous SELECT RLS restriction (42501)
     try {
       const newCustId = crypto.randomUUID();
       const guestPhone = normPhone || customerPhone || null;
       const { error: custErr } = await (supabase.from("customers" as any) as any).insert({
         id: newCustId,
+        user_id: null,
         name: customerName,
         phone: guestPhone,
         created_at: nowIso,
@@ -1136,22 +1145,14 @@ export async function createOrder(
         );
         customerId = null;
       } else {
-        console.error(
-          `[db] Guest customer create failed (code ${custErr.code}): ${custErr.message}`,
+        console.warn(
+          `[db] Guest customer create warning (code ${custErr.code}): ${custErr.message}. Proceeding with order-level guest contact info.`,
         );
-        throw new Error(`Failed to create customer record: ${custErr.message}`);
+        customerId = null;
       }
     } catch (custEx) {
-      console.error("[db] Guest customer creation error:", custEx);
-      if (
-        custEx instanceof Error &&
-        custEx.message.startsWith("Failed to create customer record")
-      ) {
-        throw custEx;
-      }
-      throw new Error(
-        `Failed to create customer record: ${custEx instanceof Error ? custEx.message : "Unknown error"}`,
-      );
+      console.warn("[db] Guest customer creation non-fatal exception:", custEx);
+      customerId = null;
     }
   }
 

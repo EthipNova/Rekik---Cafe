@@ -1,5 +1,6 @@
 import { Home, Layers, Clock, LogOut, User, X, CreditCard } from "lucide-react";
 import type { CashierStaffProfile } from "@/lib/cashier";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
 
 interface CashierSidebarProps {
   activeTab: string;
@@ -49,66 +50,20 @@ export function CashierSidebar({
     <div className="flex flex-col h-full justify-between p-5 select-none bg-[#1A110D] text-white">
       {/* Top Branding & Navigation */}
       <div className="space-y-8">
-        {/* Rekik Café Coffee Cup Logo & Name */}
+        {/* Rekik Coffee Logo & Name */}
         <div className="flex flex-col items-center justify-center pt-3 pb-2 text-center">
-          {/* Stylized Steam & Coffee Cup Icon */}
-          <div className="relative mb-2.5 flex items-center justify-center text-[#D4A373]">
-            <svg
-              className="w-12 h-12"
-              viewBox="0 0 48 48"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              {/* Rising steam lines */}
-              <path
-                d="M17 11C16 9 17.5 7.5 18 6.5"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity="0.85"
-              />
-              <path
-                d="M24 10C23 8 24.5 6.5 25 5"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity="0.95"
-              />
-              <path
-                d="M31 11C30 9 31.5 7.5 32 6.5"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity="0.85"
-              />
-              {/* Coffee Cup Body */}
-              <path
-                d="M10 16H38C38 27.5 29.5 32 24 32C18.5 32 10 27.5 10 16Z"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinejoin="round"
-              />
-              {/* Cup Handle */}
-              <path
-                d="M37 20C40.5 20 42 22 42 24C42 26 40 28 36.5 28"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              {/* Saucer */}
-              <path
-                d="M7 35C13 38 35 38 41 35"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
+          <div className="size-16 overflow-hidden rounded-full border-2 border-gold/70 shadow-md bg-white mb-2.5">
+            <img
+              src={rekikLogo}
+              alt="Rekik Coffee logo"
+              className="size-full object-contain"
+            />
           </div>
-          <span className="font-display text-lg font-semibold tracking-wide text-[#F5EFE6]">
-            Rekik Café
+          <span className="font-display text-lg font-bold tracking-tight text-white">
+            Rekik Coffee
+          </span>
+          <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-gold mt-0.5">
+            Cashier Station
           </span>
         </div>
 

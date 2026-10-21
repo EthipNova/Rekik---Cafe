@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import type { CashierStaffProfile, CashierNotification } from "@/lib/cashier";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
 
 interface CashierHeaderProps {
   profile: CashierStaffProfile;
@@ -67,15 +68,19 @@ export function CashierHeader({
         </Button>
 
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#2A1810] text-[#E8A87C] shadow-sm">
-            <Coffee className="h-5 w-5" />
+          <div className="size-9 overflow-hidden rounded-full border border-gold/70 shrink-0 bg-white shadow-xs">
+            <img
+              src={rekikLogo}
+              alt="Rekik Coffee logo"
+              className="size-full object-contain"
+            />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-base tracking-tight font-display text-[#2A1810]">
-                Rekik Café
+              <span className="font-bold text-base tracking-tight font-display text-primary">
+                Rekik Coffee
               </span>
-              <Badge className="bg-[#C8102E] text-white text-[10px] font-semibold px-2 py-0 border-none">
+              <Badge className="bg-gold text-espresso text-[10px] font-semibold px-2 py-0 border-none">
                 Cashier Portal
               </Badge>
             </div>
