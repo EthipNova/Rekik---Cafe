@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Coffee, HeartHandshake, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import about from "@/assets/about.jpg";
+import aboutFallback from "@/assets/rekik-story.jpg";
+import heroFallback from "@/assets/rekik-hero.jpg";
 import { Button } from "@/components/ui/button";
 import { Section, SectionHeading } from "@/components/site/Section";
 import { DEFAULT_ABOUT_CONTENT, type AboutContent } from "@/lib/content";
@@ -19,14 +20,14 @@ export const Route = createFileRoute("/about")({
   },
   head: () => ({
     meta: [
-      { title: "About NEBA Café — Our Story" },
+      { title: "About Rekik Coffee — Ethiopian Heritage & Craft Roastery" },
       {
         name: "description",
         content:
-          "NEBA Café brings warm hospitality, fresh food and a modern digital ordering experience together in one place.",
+          "Rekik Coffee honours generations of Ethiopian coffee heritage with specialty single-origin roasts, authentic ceremony tradition, and warm hospitality.",
       },
-      { property: "og:title", content: "About NEBA Café" },
-      { property: "og:description", content: "Warm hospitality, fresh food, modern ordering." },
+      { property: "og:title", content: "About Rekik Coffee" },
+      { property: "og:description", content: "Authentic Ethiopian coffee heritage and modern roasting craft." },
     ],
   }),
   component: AboutPage,
@@ -38,17 +39,17 @@ function AboutPage() {
     loaderData?.content || DEFAULT_ABOUT_CONTENT,
   );
   const [heroImgSrc, setHeroImgSrc] = useState<string>(
-    loaderData?.content?.about_hero_image?.trim() || about,
+    loaderData?.content?.about_hero_image?.trim() || aboutFallback,
   );
   const [storyImgSrc, setStoryImgSrc] = useState<string | null>(
-    loaderData?.content?.story_image?.trim() || null,
+    loaderData?.content?.story_image?.trim() || heroFallback,
   );
 
   useEffect(() => {
     if (content?.about_hero_image?.trim()) {
       setHeroImgSrc(content.about_hero_image.trim());
     } else {
-      setHeroImgSrc(about);
+      setHeroImgSrc(aboutFallback);
     }
   }, [content?.about_hero_image]);
 
@@ -56,7 +57,7 @@ function AboutPage() {
     if (content?.story_image?.trim()) {
       setStoryImgSrc(content.story_image.trim());
     } else {
-      setStoryImgSrc(null);
+      setStoryImgSrc(heroFallback);
     }
   }, [content?.story_image]);
 
@@ -119,9 +120,9 @@ function AboutPage() {
           <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-16">
             {/* Left Column: Editorial Copy */}
             <div className="flex flex-col justify-center space-y-6 lg:col-span-6 xl:col-span-7">
-              <div className="rise-in inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-primary w-fit shadow-xs">
-                <span className="size-1.5 rounded-full bg-primary animate-pulse" aria-hidden />
-                About NEBA Café
+              <div className="rise-in inline-flex items-center gap-2 rounded-full border border-gold/40 bg-gold/10 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-gold w-fit shadow-xs">
+                <span className="size-1.5 rounded-full bg-gold animate-pulse" aria-hidden />
+                About Rekik Coffee
               </div>
 
               <h1 className="rise-in [animation-delay:100ms] font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl lg:text-6xl leading-[1.08] max-w-xl">
@@ -136,7 +137,7 @@ function AboutPage() {
                 <Button
                   asChild
                   size="lg"
-                  className="group gap-2 rounded-full px-7 shadow-[var(--shadow-soft)] hover:shadow-[var(--shadow-lift)] transition-all duration-300"
+                  className="group gap-2 rounded-full bg-gold hover:bg-gold-light text-espresso font-semibold px-8 shadow-md hover:shadow-lg transition-all duration-300"
                 >
                   <Link to="/menu">
                     Explore the menu
@@ -154,7 +155,7 @@ function AboutPage() {
               <div className="group relative [perspective:1000px]">
                 {/* Subtle offset background accent layer */}
                 <div
-                  className="pointer-events-none absolute -inset-2 sm:-inset-3 rounded-3xl border border-primary/15 bg-gradient-to-tr from-primary/10 via-primary/5 to-transparent -rotate-1 sm:-rotate-2 transition-transform duration-700 ease-out group-hover:rotate-0 motion-reduce:transform-none -z-10"
+                  className="pointer-events-none absolute -inset-2 sm:-inset-3 rounded-3xl border border-gold/25 bg-gradient-to-tr from-gold/15 via-gold/5 to-transparent -rotate-1 sm:-rotate-2 transition-transform duration-700 ease-out group-hover:rotate-0 motion-reduce:transform-none -z-10"
                   aria-hidden
                 />
 
@@ -162,19 +163,19 @@ function AboutPage() {
                 <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl surface-card shadow-[var(--shadow-lift)] border border-border/80 transition-all duration-700 ease-out [transform-style:preserve-3d] group-hover:[transform:rotateX(2deg)_rotateY(-2deg)_translateY(-4px)] motion-reduce:transform-none">
                   <img
                     src={heroImgSrc}
-                    alt={content.about_title || "Guests enjoying coffee inside NEBA Café"}
+                    alt={content.about_title || "Rekik Coffee Roasting & Café Experience"}
                     loading="lazy"
                     width={1200}
                     height={900}
                     className="size-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.03] motion-reduce:transform-none"
-                    onError={() => setHeroImgSrc(about)}
+                    onError={() => setHeroImgSrc(aboutFallback)}
                   />
 
                   {/* Floating Detail Pill */}
-                  <div className="absolute bottom-4 left-4 sm:bottom-5 sm:left-5 z-10 flex items-center gap-2 rounded-full border border-border/80 bg-background/90 px-3.5 py-1.5 text-xs font-medium text-foreground shadow-md backdrop-blur-md transition-transform duration-500 group-hover:translate-y-[-2px]">
-                    <span className="size-2 rounded-full bg-primary" aria-hidden />
-                    <span className="font-display tracking-wider uppercase text-[10px] sm:text-[11px] font-semibold text-foreground">
-                      Crafted with Care · Hawassa
+                  <div className="absolute bottom-4 left-4 sm:bottom-5 sm:left-5 z-10 flex items-center gap-2 rounded-full border border-gold/30 bg-espresso/90 px-3.5 py-1.5 text-xs font-medium text-warm-white shadow-md backdrop-blur-md transition-transform duration-500 group-hover:translate-y-[-2px]">
+                    <span className="size-2 rounded-full bg-gold" aria-hidden />
+                    <span className="font-display tracking-wider uppercase text-[10px] sm:text-[11px] font-semibold text-warm-white">
+                      Crafted with Care · Addis Ababa
                     </span>
                   </div>
                 </div>
@@ -332,33 +333,32 @@ function AboutPage() {
           />
 
           <div className="relative z-10 mx-auto max-w-2xl text-center space-y-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-espresso-foreground/70">
-              Experience NEBA Café
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gold">
+              Experience Rekik Coffee
             </p>
 
-            <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl text-espresso-foreground">
-              Good food is meant to be shared.
+            <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl text-warm-white">
+              Exceptional coffee is meant to be shared.
             </h2>
 
-            <p className="mx-auto max-w-xl text-sm leading-relaxed text-espresso-foreground/80 sm:text-base">
-              Take a seat, explore the menu, and enjoy the NEBA experience — whether dining in with
-              us in Hawassa or ordering ahead for quick pickup.
+            <p className="mx-auto max-w-xl text-sm leading-relaxed text-cream/80 sm:text-base">
+              Take a seat, savor the aroma of freshly roasted Ethiopian beans, and enjoy authentic buna warmth — in our Bole Atlas café or delivered directly to your doorstep.
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-4 pt-3">
               <Button
                 asChild
                 size="lg"
-                className="rounded-full bg-primary px-8 text-primary-foreground shadow-md transition-all duration-300 hover:bg-primary/90 hover:shadow-lg"
+                className="rounded-full bg-gold hover:bg-gold-light text-espresso font-semibold px-8 shadow-md transition-all duration-300 hover:shadow-lg"
               >
-                <Link to="/menu">Explore Menu</Link>
+                <Link to="/menu">Explore Coffee & Menu</Link>
               </Button>
 
               <Button
                 asChild
                 size="lg"
                 variant="secondary"
-                className="rounded-full border border-espresso-foreground/20 bg-espresso-foreground/10 px-8 text-espresso-foreground transition-all duration-300 hover:bg-espresso-foreground/20"
+                className="rounded-full border border-gold/30 bg-white/10 px-8 text-warm-white transition-all duration-300 hover:bg-white/20 hover:text-gold"
               >
                 <Link to="/contact">Find Our Location</Link>
               </Button>

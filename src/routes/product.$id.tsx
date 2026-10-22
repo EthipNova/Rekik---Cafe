@@ -28,13 +28,13 @@ export const Route = createFileRoute("/product/$id")({
     if (!loaderData) {
       return {
         meta: [
-          { title: "Product unavailable — NEBA Café" },
+          { title: "Product unavailable — Rekik Café" },
           { name: "robots", content: "noindex" },
         ],
       };
     }
     const { product } = loaderData;
-    const title = `${product.name} — NEBA Café`;
+    const title = `${product.name} — Rekik Café`;
     return {
       meta: [
         { title },
@@ -97,7 +97,7 @@ function ProductPage() {
             <div className="mt-6">
               <h2 className="font-display text-base font-semibold">Ingredients</h2>
               <ul className="mt-2 flex flex-wrap gap-2">
-                {product.ingredients.map((i) => (
+                {product.ingredients.map((i: string) => (
                   <li key={i} className="rounded-full bg-secondary px-3 py-1 text-sm">
                     {i}
                   </li>

@@ -8,7 +8,7 @@ import {
 } from "../src/lib/distance";
 
 console.log("==================================================");
-console.log("RUNNING NEBA CAFÉ DISTANCE & PRICING VERIFICATION");
+console.log("RUNNING REKIK CAFÉ DISTANCE & PRICING VERIFICATION");
 console.log("==================================================");
 
 // ── Test 1: Coordinate Validation ───────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
 import {
   AlertCircle,
   Boxes,
@@ -35,6 +35,7 @@ import {
 import { applyTheme, readSettings } from "@/lib/settings";
 import { supabase, type UserRole } from "@/lib/supabase";
 import { getInitials, type AdminUserData } from "@/lib/admin-account";
+import { fetchCashierMe } from "@/services/cashier";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -60,6 +61,7 @@ const nav = [
   { to: "/admin/customers", label: "Customers", icon: Users, exact: false },
   { to: "/admin/products", label: "Products", icon: Package, exact: false },
   { to: "/admin/categories", label: "Categories", icon: FolderTree, exact: false },
+  { to: "/admin/availability", label: "Availability", icon: ToggleLeft, exact: false },
   { to: "/admin/content", label: "Website Content", icon: Globe, exact: false },
   { to: "/admin/contact-messages", label: "Messages", icon: Mail, exact: false },
   { to: "/admin/settings", label: "Settings", icon: Settings, exact: false },
@@ -217,6 +219,7 @@ async function verifyAdminUser(userId: string): Promise<VerifyAdminResult> {
 }
 
 function AdminLayout() {
+  const navigate = useNavigate();
   const [role, setRole] = useState<UserRole | null>(null);
   const [adminUser, setAdminUser] = useState<AdminUserData | null>(null);
   const [ready, setReady] = useState(false);
@@ -253,6 +256,16 @@ function AdminLayout() {
           setAdminUser(result.user);
           setErrorMsg(null);
         } else if (result.reason === "unauthorized") {
+          try {
+            const cashierCheck = await fetchCashierMe();
+            if (cashierCheck.success && cashierCheck.role === "cashier") {
+              void navigate({ to: "/casher", replace: true });
+              return;
+            }
+          } catch {
+            // Not a cashier
+          }
+
           await supabase.auth.signOut();
           setRole(null);
           setAdminUser(null);
@@ -327,6 +340,19 @@ function AdminLayout() {
           setErrorMsg(null);
           toast.success(`Signed in as ${result.user.role}`);
         } else if (result.reason === "unauthorized") {
+          try {
+            const cashierCheck = await fetchCashierMe();
+            if (cashierCheck.success && cashierCheck.role === "cashier") {
+              toast.success(
+                `Welcome back, ${cashierCheck.profile.full_name}! Redirecting to Cashier Dashboard...`,
+              );
+              void navigate({ to: "/casher" });
+              return;
+            }
+          } catch {
+            // Not a cashier
+          }
+
           await supabase.auth.signOut();
           setRole(null);
           setAdminUser(null);

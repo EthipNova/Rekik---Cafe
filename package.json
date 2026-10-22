@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "tsx tests/delivery.test.ts && tsx --env-file=.env tests/owner_dashboard.test.ts && tsx --env-file=.env tests/financial_monitoring.test.ts && tsx --env-file=.env tests/staff_monitoring.test.ts && tsx --env-file=.env tests/inventory_monitoring.test.ts && tsx --env-file=.env tests/business_growth.test.ts && tsx --env-file=.env tests/categories_verification.test.ts && tsx --env-file=.env tests/product_image_upload.test.ts && tsx --env-file=.env tests/staff_authorization_phase1.test.ts && tsx --env-file=.env tests/product_validation_phase2.test.ts && tsx --env-file=.env tests/cashier_sales_and_payments.test.ts && tsx --env-file=.env tests/staff_registration_security.test.ts && tsx --env-file=.env tests/receiving_accounts_and_staff_theme.test.ts && tsx --env-file=.env tests/account_and_settings_dashboard.test.ts"
+    "test": "tsx tests/delivery.test.ts",
+    "test:all": "tsx tests/delivery.test.ts && tsx --env-file=.env tests/owner_dashboard.test.ts && tsx --env-file=.env tests/financial_monitoring.test.ts && tsx --env-file=.env tests/staff_monitoring.test.ts && tsx --env-file=.env tests/inventory_monitoring.test.ts && tsx --env-file=.env tests/business_growth.test.ts && tsx --env-file=.env tests/categories_verification.test.ts && tsx --env-file=.env tests/product_image_upload.test.ts && tsx --env-file=.env tests/staff_authorization_phase1.test.ts && tsx --env-file=.env tests/product_validation_phase2.test.ts && tsx --env-file=.env tests/cashier_sales_and_payments.test.ts && tsx --env-file=.env tests/staff_registration_security.test.ts && tsx --env-file=.env tests/receiving_accounts_and_staff_theme.test.ts && tsx --env-file=.env tests/account_and_settings_dashboard.test.ts"
   },
   "overrides": {
     "rolldown": "1.2.1"

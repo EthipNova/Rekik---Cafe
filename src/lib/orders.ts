@@ -44,11 +44,23 @@ export type Order = {
   total: number;
   waiterId?: string | null;
   waiterName?: string | null;
-  waiterDecision?: string | null;
+  waiterDecision?: "pending" | "approved" | "rejected" | string | null;
   waiterRejectionReason?: string | null;
+  transactionReference?: string | null;
+  paymentProof?: {
+    id: string;
+    paymentId?: string;
+    screenshotPath: string;
+    submittedAmount: number;
+    transactionReference?: string | null;
+    status: "pending" | "approved" | "rejected";
+    rejectionReason?: string | null;
+    submittedAt: string;
+  } | null;
 };
 
-const STORAGE_KEY = "neba.orders.v1";
+const STORAGE_KEY = "rekik.orders.v1";
+const LEGACY_STORAGE_KEY = "neba.orders.v1";
 
 export const dineInFlow: OrderStatus[] = [
   "received",
@@ -97,7 +109,7 @@ export function flowFor(method: OrderMethod) {
 export function readOrders(): Order[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as Order[]) : [];

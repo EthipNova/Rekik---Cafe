@@ -88,8 +88,8 @@
   "products": [
     {
       "id": "p-mtzkb8y0",
-      "name": "Neba Jambo Burger",
-      "slug": "neba-jambo-burger",
+      "name": "Rekik Jambo Burger",
+      "slug": "rekik-jambo-burger",
       "categorySlug": "burgers",
       "description": "sidkjgvhuarpi",
       "ingredients": [],
@@ -305,9 +305,9 @@
     }
   ],
   "settings": {
-    "cafeName": "Rekik Café Live",
+    "cafeName": "Rekik Café",
     "phone": "+251911999888",
-    "email": "hello@nebacafe.com",
+    "email": "hello@rekikcafe.com",
     "address": "Piassa, Next to Kibru Hospital, Hawassa, Ethiopia.",
     "openingHours": "Mon - Sun: 8:00 AM - 11:00 PM",
     "theme": "light",
@@ -641,16 +641,16 @@
     "homepage_hero_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/site-images/homepage/33bd43c8-9595-49d3-9a4c-492446ad7110.jpg",
     "about_hero_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/site-images/about/ede63380-dd32-446e-ac85-f12e5f3bfa6a.jpg",
     "about_title": "More Than a Café. A Place to Enjoy.",
-    "about_description": "At NEBA Café, we believe great food should bring people together. From freshly prepared burgers and stone-baked pizza to crisp sides and refreshing drinks, we create simple, satisfying moments with a modern touch.",
+    "about_description": "At Rekik Café, we believe great food should bring people together. From freshly prepared burgers and stone-baked pizza to crisp sides and refreshing drinks, we create simple, satisfying moments with a modern touch.",
     "story_title": "Made Fresh. Served with Heart.",
-    "story_content": "NEBA Café was created around a simple idea: good food, genuine hospitality, and an experience that feels effortless. We prepare every order with care, bringing together the comfort of a neighbourhood café with the convenience of modern ordering.\n\nWhether you are stopping by for a quick meal, meeting friends over coffee, or ordering from home, we want every NEBA moment to feel fresh, welcoming, and worth coming back for.",
+    "story_content": "Rekik Café was created around a simple idea: good food, genuine hospitality, and an experience that feels effortless. We prepare every order with care, bringing together the comfort of a neighbourhood café with the convenience of modern ordering.\n\nWhether you are stopping by for a quick meal, meeting friends over coffee, or ordering from home, we want every Rekik moment to feel fresh, welcoming, and worth coming back for.",
     "story_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/site-images/story/cc07e200-e1e3-40bf-b56c-f7001258cd3c.jpg",
     "value_1_title": "Food We're Proud Of",
     "value_1_description": "Freshly prepared with quality ingredients and served with the care every good meal deserves.",
     "value_2_title": "Genuine Hospitality",
     "value_2_description": "Every guest matters. Whether you dine in, pick up, or order from home, we want you to feel welcome.",
     "value_3_title": "Modern by Design",
-    "value_3_description": "From ordering to payment and delivery, we use simple technology to make your NEBA experience easier.",
+    "value_3_description": "From ordering to payment and delivery, we use simple technology to make your Rekik experience easier.",
     "updated_at": "2026-09-14T14:29:12.893Z"
   }
 }

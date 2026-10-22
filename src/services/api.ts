@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * ============================================================================
- * NEBA Café — Frontend Data-Fetching Service Layer (src/services/api.ts)
+ * Rekik Café — Frontend Data-Fetching Service Layer (src/services/api.ts)
  * ============================================================================
- * Provides typed helper functions to interact with NEBA Café API endpoints
+ * Provides typed helper functions to interact with Rekik Café API endpoints
  * and live Supabase database tables with automatic cart product registry sync.
  */
 
@@ -152,10 +152,12 @@ function getFallbackImage(name: string, categorySlug?: string): string {
   if (n.includes("chicken") && n.includes("burger")) return "/images/chicken-burger.jpg";
   if (n.includes("cheese") && n.includes("burger")) return "/images/cheese-burger.jpg";
   if (n.includes("burger") || cat.includes("burger")) return "/images/classic-burger.jpg";
-  if (n.includes("fries") || n.includes("chip") || cat.includes("side")) return "/images/fries.jpg";
+  if (n.includes("fries") || n.includes("chip") || cat.includes("side"))
+    return "/images/fries.jpg";
   if (n.includes("sprite")) return "/images/sprite.jpg";
   if (n.includes("water")) return "/images/water.jpg";
-  if (n.includes("drink") || n.includes("cola") || cat.includes("drink")) return "/images/cola.jpg";
+  if (n.includes("drink") || n.includes("cola") || cat.includes("drink"))
+    return "/images/cola.jpg";
   return "/images/hero.jpg";
 }
 
@@ -249,6 +251,7 @@ export async function fetchProducts(options?: FetchProductsOptions): Promise<Pro
           id,
           slug,
           name,
+          description,
           is_active
         )
       `,
@@ -327,6 +330,7 @@ export async function fetchProductById(id: string): Promise<Product> {
           id,
           slug,
           name,
+          description,
           is_active
         )
       `,
@@ -659,6 +663,25 @@ function normalizeServiceOrder(raw: any): Order {
         ? Number(raw.delivery_distance_km)
         : null,
     total: Number(raw.total_amount) || 0,
+    waiterId: raw.waiter_id || null,
+    waiterName:
+      (Array.isArray(raw.staff_profiles)
+        ? raw.staff_profiles[0]?.full_name
+        : raw.staff_profiles?.full_name) || null,
+    waiterDecision: raw.waiter_decision || "pending",
+    waiterRejectionReason: raw.waiter_rejection_reason || null,
+    paymentProof: Array.isArray(raw.payment_proofs) && raw.payment_proofs[0]
+      ? {
+          id: raw.payment_proofs[0].id,
+          paymentId: raw.payment_proofs[0].payment_id,
+          screenshotPath: raw.payment_proofs[0].screenshot_path,
+          submittedAmount: Number(raw.payment_proofs[0].submitted_amount) || 0,
+          transactionReference: raw.payment_proofs[0].transaction_reference || null,
+          status: raw.payment_proofs[0].status || "pending",
+          rejectionReason: raw.payment_proofs[0].rejection_reason || null,
+          submittedAt: raw.payment_proofs[0].submitted_at || new Date().toISOString(),
+        }
+      : null,
   };
 }
 
@@ -679,6 +702,8 @@ export interface CreateOrderPayload {
   paymentStatus?: "paid" | "pending" | "failed" | undefined;
   delivery?: number | undefined;
   discount?: number | undefined;
+  waiterId?: string | undefined;
+  customerNotes?: string | undefined;
 }
 
 /**
@@ -745,6 +770,9 @@ export async function fetchOrderById(id: string): Promise<Order> {
         status,
         table_number,
         delivery_address,
+        delivery_latitude,
+        delivery_longitude,
+        delivery_distance_km,
         subtotal,
         discount_amount,
         delivery_fee,
@@ -1103,3 +1131,178 @@ export async function deleteContactMessage(
     },
   );
 }
+
+/**
+ * Submits a payment proof screenshot and transaction reference for cashier review.
+ */
+export async function submitPaymentProof(
+  orderId: string,
+  payload: {
+    screenshotPath?: string | undefined;
+    imageBase64?: string | undefined;
+    mimeType?: string | undefined;
+    submittedAmount?: number | undefined;
+    transactionReference?: string | undefined;
+    paymentMethod?: string | undefined;
+  },
+): Promise<Order> {
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const updated = await request<Order>(`/api/orders/${encodeURIComponent(orderId)}/payment-proof`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (updated) {
+    saveOrder(updated);
+    return updated;
+  }
+
+  throw new ApiError("Failed to submit payment proof", 500);
+}
+
+/* ==========================================================================
+   Waiters & Floor Staff
+   ========================================================================== */
+
+export interface AvailableWaiter {
+  id: string;
+  name: string;
+  role: string;
+  phone?: string | null;
+  isAvailable?: boolean;
+  isActive?: boolean;
+  userId?: string;
+  fullName?: string;
+}
+
+/**
+ * Fetches the list of active and available floor waiters from the server.
+ */
+export async function fetchAvailableWaiters(): Promise<AvailableWaiter[]> {
+  return request<AvailableWaiter[]>("/api/waiters/available");
+}
+
+/**
+ * Records a waiter's approval or rejection decision on an assigned order.
+ */
+export async function recordWaiterDecision(
+  orderIdOrParams: string | { orderId: string; decision: "approved" | "rejected"; reason?: string | undefined; comments?: string | undefined },
+  decisionArg?: "approved" | "rejected",
+  commentsArg?: string,
+): Promise<Order> {
+  const orderId = typeof orderIdOrParams === "string" ? orderIdOrParams : orderIdOrParams.orderId;
+  const decision = typeof orderIdOrParams === "string" ? decisionArg! : orderIdOrParams.decision;
+  const comments = typeof orderIdOrParams === "string" ? commentsArg : (orderIdOrParams.reason || orderIdOrParams.comments);
+
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const updated = await request<Order>(
+    `/api/orders/${encodeURIComponent(orderId)}/waiter-decision`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ decision, comments }),
+    },
+  );
+  if (updated) {
+    saveOrder(updated);
+  }
+  return updated;
+}
+
+/**
+ * Records payment details collected on the floor by an assigned waiter.
+ */
+export async function recordWaiterPaymentCollection(
+  orderIdOrParams: string | { orderId: string; transactionReference: string; notes?: string | undefined },
+  transactionReferenceArg?: string,
+  notesArg?: string,
+): Promise<Order> {
+  const orderId = typeof orderIdOrParams === "string" ? orderIdOrParams : orderIdOrParams.orderId;
+  const transactionReference =
+    typeof orderIdOrParams === "string"
+      ? transactionReferenceArg!
+      : orderIdOrParams.transactionReference;
+  const notes = typeof orderIdOrParams === "string" ? notesArg : orderIdOrParams.notes;
+
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const updated = await request<Order>(
+    `/api/orders/${encodeURIComponent(orderId)}/waiter-payment-collection`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ transactionReference, notes }),
+    },
+  );
+  if (updated) {
+    saveOrder(updated);
+  }
+  return updated;
+}
+
+/**
+ * Updates the customer's selected payment method on an existing order.
+ */
+export async function updateOrderPaymentMethod(
+  orderIdOrParams: string | { orderId: string; paymentMethod: string },
+  paymentMethodArg?: string,
+): Promise<Order> {
+  const orderId = typeof orderIdOrParams === "string" ? orderIdOrParams : orderIdOrParams.orderId;
+  const paymentMethod =
+    typeof orderIdOrParams === "string" ? paymentMethodArg! : orderIdOrParams.paymentMethod;
+
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const updated = await request<Order>(
+    `/api/orders/${encodeURIComponent(orderId)}/payment-method`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ paymentMethod }),
+    },
+  );
+  if (updated) {
+    saveOrder(updated);
+  }
+  return updated;
+}
+

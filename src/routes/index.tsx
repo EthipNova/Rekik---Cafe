@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import hero from "@/assets/grilled-beef-hero.png";
+import heroFallback from "@/assets/rekik-hero.jpg";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
+import rekikStory from "@/assets/rekik-story.jpg";
 import burgersImage from "@/assets/burgers.png";
 import clubSandwichImage from "@/assets/club-sandwich.png";
 import easyOrderingImage from "@/assets/easy-ordering.png";
@@ -52,16 +54,16 @@ export const Route = createFileRoute("/")({
   },
   head: () => ({
     meta: [
-      { title: "NEBA CafÃ© â€” Good Food. Great Moments. Simply NEBA." },
+      { title: "Rekik Coffee — Rooted in Tradition. Crafted for the Modern Palate." },
       {
         name: "description",
         content:
-          "Order burgers, pizza, sides and drinks from NEBA CafÃ©. Browse the menu, pay securely and track your order in real time.",
+          "Experience authentic Ethiopian specialty coffee, artisanal single-origin roasts, pastries and modern café ordering from Rekik Coffee.",
       },
-      { property: "og:title", content: "NEBA CafÃ© â€” Good Food. Great Moments." },
+      { property: "og:title", content: "Rekik Coffee — Rooted in Tradition. Crafted for the Modern Palate." },
       {
         property: "og:description",
-        content: "A modern cafÃ© ordering experience, powered by ORNIX-TECH.",
+        content: "Authentic Ethiopian specialty coffee and seamless modern ordering at Rekik Coffee.",
       },
     ],
   }),
@@ -71,37 +73,37 @@ export const Route = createFileRoute("/")({
 const benefits = [
   {
     image: easyOrderingImage,
-    imageAlt: "Easy online food ordering",
-    title: "Easy Ordering",
-    text: "Browse and order without unnecessary steps.",
+    imageAlt: "Easy online coffee ordering",
+    title: "Effortless Ordering",
+    text: "Browse single-origin beans, drinks, and bites in seconds.",
     highlight: false,
   },
   {
     image: freshMenuImage,
-    imageAlt: "Fresh food ingredients",
-    title: "Fresh Menu",
-    text: "See products and availability in real time.",
+    imageAlt: "Specialty Ethiopian single origin roast",
+    title: "Specialty Roasts",
+    text: "Hand-selected highland beans roasted fresh every week.",
     highlight: false,
   },
   {
     image: simpleCheckoutImage,
     imageAlt: "Simple checkout",
     title: "Simple Checkout",
-    text: "A clear and convenient ordering process.",
+    text: "Fast and convenient ordering with Telebirr or CBE.",
     highlight: false,
   },
   {
     image: orderTrackingImage,
     imageAlt: "Order tracking and delivery",
-    title: "Order Tracking",
-    text: "Know what is happening with your order.",
+    title: "Live Order Tracking",
+    text: "Follow your order status in real time from brewing to delivery.",
     highlight: true,
   },
   {
     image: securePaymentsImage,
     imageAlt: "Secure payments",
     title: "Secure Payments",
-    text: "Handled through secure payment infrastructure.",
+    text: "Protected checkout with instant verification and receipts.",
     highlight: false,
   },
 ];
@@ -169,14 +171,14 @@ function Home() {
     loaderData?.content || DEFAULT_ABOUT_CONTENT,
   );
   const [heroImgSrc, setHeroImgSrc] = useState<string>(
-    loaderData?.content?.homepage_hero_image?.trim() || hero,
+    loaderData?.content?.homepage_hero_image?.trim() || heroFallback,
   );
 
   useEffect(() => {
     if (content?.homepage_hero_image?.trim()) {
       setHeroImgSrc(content.homepage_hero_image.trim());
     } else {
-      setHeroImgSrc(hero);
+      setHeroImgSrc(heroFallback);
     }
   }, [content?.homepage_hero_image]);
 
@@ -229,55 +231,56 @@ function Home() {
   return (
     <>
       {/* ----------------------------------------------------------------------
-          SECTION 1 â€” EDITORIAL HERO
-          Asymmetric desktop layout with 3D showcase card and glass pill badge
+          SECTION 1 — EDITORIAL HERO
+          Authentic Rekik Coffee brand showcase with logo badge & golden accents
          ---------------------------------------------------------------------- */}
-      <section className="relative isolate overflow-hidden">
+      <section className="relative isolate overflow-hidden bg-espresso">
         <img
           src={heroImgSrc}
-          alt="Freshly prepared burger meal at NEBA CafÃ©"
+          alt="Rekik Coffee Ethiopian Single Origin Coffee Experience"
           width={1440}
           height={1800}
-          className="absolute inset-0 size-full object-cover"
-          onError={() => setHeroImgSrc(hero)}
+          className="absolute inset-0 size-full object-cover opacity-35 mix-blend-luminosity filter contrast-125"
+          onError={() => setHeroImgSrc(heroFallback)}
         />
-        <div className="overlay-hero absolute inset-0" />
+        <div className="overlay-hero absolute inset-0 bg-gradient-to-r from-espresso via-espresso/90 to-espresso/60" />
 
-        <div className="relative mx-auto w-full max-w-7xl px-4 py-20 sm:px-6 md:py-32 lg:py-36">
+        <div className="relative mx-auto w-full max-w-7xl px-4 py-20 sm:px-6 md:py-28 lg:py-36">
           <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-16">
             {/* Left Column: Editorial Headline & Actions */}
             <div className="flex flex-col justify-center space-y-6 text-espresso-foreground lg:col-span-7">
-              <div className="rise-in inline-flex items-center gap-2.5 rounded-full border border-espresso-foreground/20 bg-espresso/60 py-1 pl-1 pr-3.5 shadow-xs backdrop-blur-md w-fit">
-                <div className="overflow-hidden rounded-full border border-espresso-foreground/20 size-8 sm:size-9 shrink-0">
+              <div className="rise-in inline-flex items-center gap-3 rounded-full border border-gold/40 bg-espresso/80 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur-md w-fit">
+                <div className="overflow-hidden rounded-full border border-gold/70 size-10 sm:size-11 shrink-0 bg-white">
                   <img
-                    src={hero}
-                    alt="Freshly prepared burger at NEBA CafÃ©"
-                    className="size-full object-cover"
+                    src={rekikLogo}
+                    alt="Rekik Coffee logo"
+                    className="size-full object-contain"
                   />
                 </div>
-                <div className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-espresso-foreground/90">
-                  <span className="size-1.5 rounded-full bg-primary animate-pulse" aria-hidden />
-                  <span>Freshly Prepared Daily</span>
+                <div className="flex items-center gap-2 text-xs font-semibold tracking-wider uppercase text-gold">
+                  <span className="size-2 rounded-full bg-gold animate-pulse" aria-hidden />
+                  <span>Ethiopian Single-Origin & Roastery</span>
                 </div>
               </div>
 
-              <h1 className="rise-in [animation-delay:100ms] font-display text-4xl font-semibold leading-[1.12] sm:leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl text-espresso-foreground max-w-2xl">
-                Good Food. Great Moments. Simply NEBA.
+              <h1 className="rise-in [animation-delay:100ms] font-display text-4xl font-bold leading-[1.12] sm:leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl text-warm-white max-w-2xl">
+                Rooted in Tradition. <br />
+                <span className="text-gold italic font-normal">Crafted for the Modern Palate.</span>
               </h1>
 
-              <p className="rise-in [animation-delay:200ms] max-w-xl text-base leading-relaxed opacity-90 sm:text-lg">
-                Discover your favorite meals, order with ease, and enjoy a seamless cafÃ© experience
-                powered by modern technology.
+              <p className="rise-in [animation-delay:200ms] max-w-xl text-base leading-relaxed text-cream/90 sm:text-lg">
+                Discover the pure elegance of Ethiopian highland coffees, small-batch roasted to perfection. 
+                Experience seamless ordering, whether dining in, picking up, or delivered to your door.
               </p>
 
               <div className="rise-in [animation-delay:300ms] flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 pt-2 w-full sm:w-auto">
                 <Button
                   asChild
                   size="lg"
-                  className="group w-full sm:w-auto rounded-full bg-primary px-8 text-primary-foreground shadow-lg shadow-primary/25 transition-all duration-300 hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-primary/40"
+                  className="group w-full sm:w-auto rounded-full bg-gold hover:bg-gold-light text-espresso font-semibold px-8 shadow-lg shadow-gold/20 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-gold/40 border border-gold-light/40"
                 >
                   <Link to="/menu">
-                    Order Now
+                    Order Coffee Now
                     <ArrowRight
                       className="size-4 transition-transform duration-300 group-hover:translate-x-1"
                       aria-hidden
@@ -289,37 +292,53 @@ function Home() {
                   asChild
                   size="lg"
                   variant="secondary"
-                  className="w-full sm:w-auto rounded-full border border-espresso-foreground/20 bg-espresso-foreground/15 px-8 text-espresso-foreground backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:bg-espresso-foreground/25"
+                  className="w-full sm:w-auto rounded-full border border-gold/30 bg-white/10 text-warm-white backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/20 hover:text-gold"
                 >
-                  <a href="#categories">Explore Menu</a>
+                  <a href="#categories">Explore Roasts & Menu</a>
                 </Button>
               </div>
             </div>
 
             {/* Right Column: Layered 3D Visual Showcase */}
             <div className="hidden lg:col-span-5 lg:flex lg:justify-end">
-              <div className="rise-in [animation-delay:400ms] group relative w-full max-w-sm [perspective:1000px]">
-                {/* Offset decorative backdrop frame */}
+              <div className="rise-in [animation-delay:400ms] group relative w-full max-w-md [perspective:1000px]">
+                {/* Offset decorative golden backdrop frame */}
                 <div
-                  className="pointer-events-none absolute -inset-3 -rotate-2 rounded-3xl border border-primary/30 bg-gradient-to-tr from-primary/20 via-primary/5 to-transparent transition-transform duration-700 ease-out group-hover:rotate-0 motion-reduce:transform-none -z-10"
+                  className="pointer-events-none absolute -inset-3 -rotate-2 rounded-3xl border border-gold/40 bg-gradient-to-tr from-gold/20 via-gold/5 to-transparent transition-transform duration-700 ease-out group-hover:rotate-0 motion-reduce:transform-none -z-10"
                   aria-hidden
                 />
 
                 {/* 3D Showcase Card */}
-                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-espresso-foreground/20 bg-espresso/60 shadow-[var(--shadow-lift)] backdrop-blur-md transition-all duration-700 ease-out [transform-style:preserve-3d] group-hover:[transform:rotateX(2deg)_rotateY(-2deg)_translateY(-4px)] motion-reduce:transform-none">
+                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border-2 border-gold/30 bg-espresso/80 shadow-[var(--shadow-lift)] backdrop-blur-md transition-all duration-700 ease-out [transform-style:preserve-3d] group-hover:[transform:rotateX(2deg)_rotateY(-2deg)_translateY(-4px)] motion-reduce:transform-none">
                   <img
                     src={heroImgSrc}
-                    alt="Freshly prepared culinary dishes at NEBA Café"
+                    alt="Authentic Rekik Coffee Experience"
                     width={800}
                     height={600}
                     className="size-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.04] motion-reduce:transform-none"
-                    onError={() => setHeroImgSrc(hero)}
+                    onError={() => setHeroImgSrc(heroFallback)}
                   />
 
                   <div
-                    className="pointer-events-none absolute inset-0 bg-gradient-to-t from-espresso/80 via-transparent to-transparent"
+                    className="pointer-events-none absolute inset-0 bg-gradient-to-t from-espresso via-transparent to-transparent opacity-70"
                     aria-hidden
                   />
+                  
+                  {/* Floating Gold Quality Seal Badge */}
+                  <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between p-3 rounded-xl bg-espresso/90 border border-gold/40 backdrop-blur-md">
+                    <div className="flex items-center gap-2.5">
+                      <div className="size-8 rounded-full bg-gold/20 border border-gold/50 flex items-center justify-center text-gold">
+                        <Coffee className="size-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-warm-white">Rekik Specialty Roastery</p>
+                        <p className="text-[10px] text-gold/80">Yirgacheffe • Sidama • Guji</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gold bg-gold/15 px-2 py-0.5 rounded-full border border-gold/30">
+                      100% Arabica
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -509,16 +528,16 @@ function Home() {
       )}
 
       {/* ----------------------------------------------------------------------
-          SECTION 5 â€” WHY NEBA
+          SECTION 5 — WHY REKIK COFFEE
           Editorial feature matrix with watermark numerals and tracking highlight
          ---------------------------------------------------------------------- */}
       <div className="border-y border-border/60 bg-cream py-10 sm:py-16 sm:py-20 md:py-24">
         <Section>
           <SectionHeading
-            eyebrow="Why NEBA"
-            title="Built around the way you order"
+            eyebrow="Why Rekik Coffee"
+            title="The Soul of Ethiopian Coffee, Modernised"
             align="center"
-            description="A thoughtfully designed digital ordering experience built for speed, transparency, and delight."
+            description="From highland terroir to small-batch roasting and live tracking, we celebrate the world's finest coffee culture."
           />
           <div className="mt-8 sm:mt-12 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-5">
             {benefits.map((b, idx) => {
@@ -568,15 +587,15 @@ function Home() {
       </div>
 
       {/* ----------------------------------------------------------------------
-          SECTION 6 â€” ORDERING PROCESS
+          SECTION 6 — ORDERING PROCESS
           Connected journey with progressive timeline nodes
          ---------------------------------------------------------------------- */}
       <Section className="py-10 sm:py-16 sm:py-20 md:py-24">
         <SectionHeading
-          eyebrow="Ordering process"
-          title="Six simple steps"
+          eyebrow="Ordering Process"
+          title="Six Simple Steps"
           align="center"
-          description="From your first tap to your final bite, here is how effortless ordering is at NEBA."
+          description="From selecting your preferred roast to your first warm sip, ordering at Rekik Coffee is effortless."
         />
 
         <div className="relative mt-8 sm:mt-14">
@@ -661,14 +680,14 @@ function Home() {
       </Section>
 
       {/* ----------------------------------------------------------------------
-          SECTION 7 â€” ORDERING METHODS
+          SECTION 7 — ORDERING METHODS
           Elevated service cards with experience badges
          ---------------------------------------------------------------------- */}
       <Section className="pt-0 pb-10 sm:pb-16 sm:pb-20">
         <SectionHeading
-          eyebrow="Ordering methods"
-          title="However you like to eat"
-          description="Choose the way that best fits your schedule and lifestyle."
+          eyebrow="Ordering Methods"
+          title="However You Like to Enjoy"
+          description="Choose the experience that fits your day best."
         />
 
         <div className="mt-6 sm:mt-10 grid gap-3 sm:gap-6 md:grid-cols-3">
@@ -700,7 +719,7 @@ function Home() {
       </Section>
 
       {/* ----------------------------------------------------------------------
-          SECTION 8 â€” VISIT NEBA & ORNIX-TECH PLATFORM
+          SECTION 8 — VISIT REKIK COFFEE
           Atmospheric espresso flagship experience with technology highlights
          ---------------------------------------------------------------------- */}
       <Section className="py-10 sm:py-16 sm:py-20 md:py-24">
@@ -716,79 +735,77 @@ function Home() {
           />
 
           <div className="relative z-10 grid items-center gap-8 lg:grid-cols-12 lg:gap-10">
-            {/* Left Side: Physical CafÃ© Experience */}
+            {/* Left Side: Physical Café Experience */}
             <div className="space-y-4 sm:space-y-6 lg:col-span-7">
-              <div className="inline-flex items-center gap-2 rounded-full border border-espresso-foreground/20 bg-espresso-foreground/10 px-3.5 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-espresso-foreground/80">
-                <MapPin className="size-3.5 text-primary" aria-hidden />
-                Visit NEBA CafÃ©
+              <div className="inline-flex items-center gap-2 rounded-full border border-gold/40 bg-gold/10 px-3.5 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-gold">
+                <MapPin className="size-3.5 text-gold" aria-hidden />
+                Visit Rekik Coffee
               </div>
 
-              <h2 className="font-display text-2xl sm:text-3xl lg:text-5xl font-semibold tracking-tight text-espresso-foreground">
-                Good Food. Great Moments.
+              <h2 className="font-display text-2xl sm:text-3xl lg:text-5xl font-semibold tracking-tight text-warm-white">
+                Authentic Buna Heritage. <br />
+                <span className="text-gold italic font-normal">Modern Café Comfort.</span>
               </h2>
 
-              <p className="max-w-xl text-sm leading-relaxed text-espresso-foreground/80 sm:text-base">
-                Address, phone and opening hours are placeholders until official details are
-                provided. Drop by our Piassa location or get in touch for reservations and
-                enquiries.
+              <p className="max-w-xl text-sm leading-relaxed text-cream/80 sm:text-base">
+                Join us at our Bole Atlas location in Addis Ababa for an authentic Ethiopian coffee experience, or order ahead on our digital platform for instant bar pickup and speedy delivery.
               </p>
 
               <div className="pt-2">
                 <Button
                   asChild
                   size="lg"
-                  variant="secondary"
-                  className="w-full sm:w-auto rounded-full border border-espresso-foreground/20 bg-espresso-foreground/15 px-8 text-espresso-foreground transition-all duration-300 hover:bg-espresso-foreground/25 hover:shadow-md"
+                  className="w-full sm:w-auto rounded-full bg-gold hover:bg-gold-light text-espresso font-semibold px-8 shadow-md transition-all duration-300 hover:shadow-lg"
                 >
                   <Link to="/contact">
-                    Contact us
+                    Get in Touch
                     <ArrowRight className="ml-2 size-4" aria-hidden />
                   </Link>
                 </Button>
               </div>
             </div>
 
-            {/* Right Side: ORNIX-TECH Digital Ordering Platform */}
+            {/* Right Side: Digital Ordering Platform */}
             <div className="lg:col-span-5">
-              <div className="space-y-3.5 sm:space-y-4 rounded-xl sm:rounded-2xl border border-espresso-foreground/15 bg-espresso-foreground/[0.06] p-4 sm:p-6 backdrop-blur-md sm:p-7">
+              <div className="space-y-3.5 sm:space-y-4 rounded-xl sm:rounded-2xl border border-gold/20 bg-white/[0.04] p-4 sm:p-6 backdrop-blur-md sm:p-7">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-widest text-espresso-foreground/70">
-                    Digital Platform
+                  <span className="text-xs font-semibold uppercase tracking-widest text-gold">
+                    Rekik Digital
                   </span>
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
                     <span
                       className="size-1.5 rounded-full bg-emerald-400 animate-pulse"
                       aria-hidden
                     />
-                    ORNIX-TECH Active
+                    Live Ordering Active
                   </span>
                 </div>
 
-                <h3 className="font-display text-lg font-semibold text-espresso-foreground">
-                  Modern Ordering Architecture
+                <h3 className="font-display text-lg font-semibold text-warm-white">
+                  Seamless Coffee Experience
                 </h3>
 
-                <ul className="space-y-2.5 text-xs text-espresso-foreground/75 sm:text-sm">
+                <ul className="space-y-2.5 text-xs text-cream/80 sm:text-sm">
                   <li className="flex items-center gap-2">
-                    <CheckCircle2 className="size-4 shrink-0 text-primary" aria-hidden />
-                    Real-time menu availability & pricing
+                    <CheckCircle2 className="size-4 shrink-0 text-gold" aria-hidden />
+                    Real-time single-origin roast availability
                   </li>
                   <li className="flex items-center gap-2">
-                    <CheckCircle2 className="size-4 shrink-0 text-primary" aria-hidden />
-                    Live kitchen tracking from order to table
+                    <CheckCircle2 className="size-4 shrink-0 text-gold" aria-hidden />
+                    Live barista status from grind to cup
                   </li>
                   <li className="flex items-center gap-2">
-                    <CheckCircle2 className="size-4 shrink-0 text-primary" aria-hidden />
-                    Secure payments with instant receipt verification
+                    <CheckCircle2 className="size-4 shrink-0 text-gold" aria-hidden />
+                    Instant Telebirr & CBE digital payment
                   </li>
                 </ul>
 
                 <div className="border-t border-espresso-foreground/10 pt-2">
                   <Button
                     asChild
-                    className="w-full rounded-full bg-primary text-primary-foreground shadow-md transition-all duration-300 hover:bg-primary/90 hover:shadow-lg"
+                    className="w-full rounded-full bg-coffee hover:bg-coffee/90 text-warm-white border border-gold/30 shadow-md transition-all duration-300 hover:shadow-lg"
                   >
-                    <Link to="/menu">Explore Digital Menu</Link>
+                    <Link to="/menu">Explore Coffee & Menu</Link>
                   </Button>
                 </div>
               </div>

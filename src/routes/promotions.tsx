@@ -31,17 +31,17 @@ export const Route = createFileRoute("/promotions")({
   },
   head: () => ({
     meta: [
-      { title: "Promotions & Specials — NEBA Café" },
+      { title: "Promotions & Specials — Rekik Coffee" },
       {
         name: "description",
         content:
-          "Browse all active special promotions, limited-time discounts, and combo deals at NEBA Café.",
+          "Browse all active special promotions, limited-time single-origin discounts, and roastery combo deals at Rekik Coffee.",
       },
-      { property: "og:title", content: "Promotions & Specials — NEBA Café" },
+      { property: "og:title", content: "Promotions & Specials — Rekik Coffee" },
       {
         property: "og:description",
         content:
-          "Enjoy handcrafted burgers, stone-baked pizza, sides, and drinks with exclusive active discounts.",
+          "Enjoy handcrafted Ethiopian roasts, signature drinks, and fresh pastries with exclusive active discounts.",
       },
     ],
   }),
@@ -104,7 +104,11 @@ function PromotionProductCard({
 }
 
 function PromotionsPage() {
-  const { promotions, products, categories } = Route.useLoaderData();
+  const { promotions, products, categories } = Route.useLoaderData() as {
+    promotions: Promotion[];
+    products: Product[];
+    categories: Category[];
+  };
 
   // 1. Build lookup map for products
   const productById = useMemo(() => {

@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
 
 const columns = [
   {
@@ -23,20 +24,38 @@ const columns = [
 
 export function Footer() {
   return (
-    <footer className="mt-12 sm:mt-20 md:mt-24 bg-espresso text-espresso-foreground">
+    <footer className="mt-12 sm:mt-20 md:mt-24 bg-espresso text-espresso-foreground border-t border-gold/20">
       <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
-          <p className="font-display text-2xl font-semibold">NEBA CAFÉ</p>
-          <p className="mt-2 text-sm opacity-80">Good Food. Great Moments.</p>
-          <p className="mt-6 max-w-sm text-sm opacity-70">
-            A modern café ordering experience — browse, order, pay and track your food from any
-            device.
+          <div className="flex items-center gap-3">
+            <div className="size-13 overflow-hidden rounded-full border-2 border-gold/70 shrink-0 bg-white">
+              <img
+                src={rekikLogo}
+                alt="Rekik Coffee logo"
+                className="size-full object-contain"
+              />
+            </div>
+            <div>
+              <p className="font-display text-2xl font-bold tracking-tight text-espresso-foreground">
+                Rekik Coffee
+              </p>
+              <p className="text-xs uppercase tracking-[0.24em] font-semibold text-gold">
+                Authentic Ethiopian Roastery
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-sm text-[#F4EBDD]/90 italic font-display">
+            "Taste the Heritage of Ethiopian Coffee."
+          </p>
+          <p className="mt-4 max-w-sm text-sm text-[#F4EBDD]/75 leading-relaxed">
+            From single-origin Yirgacheffe and Sidama beans to freshly prepared meals and pastries,
+            Rekik Coffee brings warmth, authentic hospitality, and seamless digital ordering to your day.
           </p>
         </div>
 
         {columns.map((col) => (
           <div key={col.title}>
-            <h2 className="font-display text-sm uppercase tracking-[0.18em] opacity-70">
+            <h2 className="font-display text-sm font-semibold uppercase tracking-[0.18em] text-gold">
               {col.title}
             </h2>
             <ul className="mt-4 space-y-2.5">
@@ -44,7 +63,7 @@ export function Footer() {
                 <li key={`${col.title}-${l.label}`}>
                   <Link
                     to={l.to}
-                    className="text-sm opacity-85 transition-opacity hover:opacity-100"
+                    className="text-sm text-[#F4EBDD]/80 transition-colors hover:text-gold"
                   >
                     {l.label}
                   </Link>
@@ -55,10 +74,10 @@ export function Footer() {
         ))}
       </div>
 
-      <div className="border-t border-espresso-foreground/15">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-6 text-xs opacity-70 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p>© {new Date().getFullYear()} NEBA Café. All rights reserved.</p>
-          <p>Powered by ORNIX-TECH — from business requirements to real-world software.</p>
+      <div className="border-t border-gold/15">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-6 text-xs text-[#F4EBDD]/70 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <p>© {new Date().getFullYear()} Rekik Coffee. All rights reserved.</p>
+          <p className="text-gold/90 font-medium">Bole, Addis Ababa, Ethiopia • Mon – Sun: 7:00 AM – 10:00 PM</p>
         </div>
       </div>
     </footer>

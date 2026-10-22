@@ -48,9 +48,9 @@ export type StoreSettingsRow = {
 export const SETTINGS_STORAGE_KEY = "neba.settings.v1";
 
 export const DEFAULT_SETTINGS: NebaSettings = {
-  cafeName: "NEBA Café",
+  cafeName: "Rekik Café",
   phone: "+251 91 123 4567",
-  email: "hello@nebacafe.com",
+  email: "hello@rekikcafe.com",
   address: "Piassa, Next to Kibru Hospital, Hawassa, Ethiopia.",
   openingHours: "Mon – Sun: 7:00 AM – 10:00 PM",
   deliveryFee: 90, // Legacy fallback

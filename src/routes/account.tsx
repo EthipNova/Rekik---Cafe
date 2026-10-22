@@ -1,4 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import rekikLogo from "@/assets/rekik-coffee-logo.png";
+import { fetchCashierMe } from "@/services/cashier";
 import {
   AlertCircle,
   Banknote,
@@ -44,20 +46,20 @@ import {
   type OrderMethod,
   type OrderStatus,
 } from "@/lib/orders";
-import { fetchCustomerProfile, fetchOrders, updateOrderPayment } from "@/services/api";
+import { fetchCustomerProfile, fetchOrders, updateOrderPaymentMethod } from "@/services/api";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/account")({
   head: () => ({
     meta: [
-      { title: "Customer Dashboard & Orders — NEBA Café" },
+      { title: "Customer Dashboard & Orders — Rekik Coffee" },
       {
         name: "description",
         content:
-          "Track live orders, view your complete order history, and manage your NEBA Café account.",
+          "Track live orders, view your complete order history, and manage your Rekik Coffee account.",
       },
-      { property: "og:title", content: "Customer Dashboard — NEBA Café" },
+      { property: "og:title", content: "Customer Dashboard — Rekik Coffee" },
       { property: "og:description", content: "Real-time order tracking and customer history." },
     ],
   }),
@@ -71,6 +73,8 @@ function MethodIcon({ method }: { method: OrderMethod }) {
 }
 
 function AccountPage() {
+  const navigate = useNavigate();
+
   // Session & customer profile state
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -96,40 +100,10 @@ function AccountPage() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [submittingAuth, setSubmittingAuth] = useState(false);
 
-  // Inline payment modal / settlement state
+  // Inline payment modal state
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<"telebirr" | "cbe" | "cash">("telebirr");
-  const [payTxRef, setPayTxRef] = useState("");
   const [submittingPayment, setSubmittingPayment] = useState(false);
-  const [receivingAccounts, setReceivingAccounts] = useState<
-    Record<string, { accountNumber: string; ownerName: string }>
-  >({
-    telebirr: { accountNumber: "0911 234 567", ownerName: "Rekik Coffee" },
-    cbe: { accountNumber: "1000 2345 67890", ownerName: "Rekik Coffee" },
-  });
-
-  useEffect(() => {
-    fetch("/api/payment-accounts")
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          const map: Record<string, { accountNumber: string; ownerName: string }> = {
-            telebirr: { accountNumber: "0911 234 567", ownerName: "Rekik Coffee" },
-            cbe: { accountNumber: "1000 2345 67890", ownerName: "Rekik Coffee" },
-          };
-          data.forEach((acc: any) => {
-            if (acc.payment_method && acc.is_active) {
-              map[acc.payment_method] = {
-                accountNumber: acc.account_number,
-                ownerName: acc.account_owner_name,
-              };
-            }
-          });
-          setReceivingAccounts(map);
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   // Load customer profile and orders using verified Bearer session token
   const loadProfileAndOrders = async (token?: string, isManual = false) => {
@@ -168,11 +142,20 @@ function AccountPage() {
     // Check existing active session
     supabase.auth
       .getSession()
-      .then(({ data: { session: currentSession } }) => {
+      .then(async ({ data: { session: currentSession } }) => {
         if (!mounted) return;
         setSession(currentSession);
         setAuthLoading(false);
         if (currentSession) {
+          try {
+            const cashierCheck = await fetchCashierMe();
+            if (cashierCheck.success && cashierCheck.role === "cashier") {
+              void navigate({ to: "/casher", replace: true });
+              return;
+            }
+          } catch {
+            // Standard customer
+          }
           void loadProfileAndOrders(currentSession.access_token);
         }
       })
@@ -189,6 +172,15 @@ function AccountPage() {
       setAuthLoading(false);
 
       if (nextSession) {
+        try {
+          const cashierCheck = await fetchCashierMe();
+          if (cashierCheck.success && cashierCheck.role === "cashier") {
+            void navigate({ to: "/casher", replace: true });
+            return;
+          }
+        } catch {
+          // Standard customer
+        }
         void loadProfileAndOrders(nextSession.access_token);
       } else {
         setOrders([]);
@@ -200,7 +192,7 @@ function AccountPage() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [navigate]);
 
   // Realtime subscription for customer's live orders & payment changes
   useEffect(() => {
@@ -258,11 +250,51 @@ function AccountPage() {
 
       if (data.session) {
         setSession(data.session);
+
+        // Check if the authenticated account is a cashier staff member
+        try {
+          const cashierCheck = await fetchCashierMe();
+          if (cashierCheck.success && cashierCheck.role === "cashier") {
+            toast.success(
+              `Welcome back, ${cashierCheck.profile.full_name}! Redirecting to Cashier Dashboard...`,
+            );
+            void navigate({ to: "/casher" });
+            return;
+          }
+        } catch {
+          // Standard customer account
+        }
+
         toast.success("Welcome back!");
         void loadProfileAndOrders(data.session.access_token);
       }
     } catch {
       setAuthError("An unexpected network error occurred. Please try again.");
+    } finally {
+      setSubmittingAuth(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const email = signInForm.email.trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAuthError("Please enter your email address in the field above to reset your password.");
+      return;
+    }
+    setSubmittingAuth(true);
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email,
+        typeof window !== "undefined" ? { redirectTo: `${window.location.origin}/account` } : {},
+      );
+      if (error) {
+        setAuthError(error.message || "Failed to send password reset email.");
+      } else {
+        toast.success("Password reset instructions have been sent to your email.");
+      }
+    } catch {
+      setAuthError("An unexpected error occurred while requesting password reset.");
     } finally {
       setSubmittingAuth(false);
     }
@@ -320,7 +352,7 @@ function AccountPage() {
 
       if (data.session) {
         setSession(data.session);
-        toast.success("Welcome to NEBA Café! Your account is created.");
+        toast.success("Welcome to Rekik Coffee! Your account is created.");
         void loadProfileAndOrders(data.session.access_token);
       } else if (data.user) {
         toast.info(
@@ -354,34 +386,33 @@ function AccountPage() {
       confirmPassword: "",
     });
     setAuthError(null);
-    toast.success("You have signed out");
+    toast.success("You have successfully signed out.");
+    void navigate({ to: "/" });
   };
 
-  // Immediate payment settlement action
-  const handleSettlePayment = async (order: Order) => {
+  // Update payment method for pending order
+  const handleUpdatePaymentMethod = async (order: Order) => {
     setSubmittingPayment(true);
     try {
       const methodName =
         payMethod === "telebirr"
           ? "Telebirr Mobile"
           : payMethod === "cbe"
-            ? "CBE Birr"
+            ? "Bank Transfer (CBE)"
             : "Cash / In-Person";
 
-      const updated = await updateOrderPayment(order.id, {
-        paymentStatus: "paid",
+      const updated = await updateOrderPaymentMethod({
+        orderId: order.id,
         paymentMethod: methodName,
-        transactionReference: payTxRef.trim() || undefined,
       });
 
       saveOrder(updated);
       setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
       setPayingOrderId(null);
-      setPayTxRef("");
-      toast.success(`Payment confirmed for Order ${order.number}! Kitchen notified.`);
+      toast.success(`Payment method updated to ${methodName} for Order ${order.number}!`);
     } catch (err) {
       console.error(err);
-      toast.error("Failed to complete payment. Please try again.");
+      toast.error("Failed to update payment method. Please try again.");
     } finally {
       setSubmittingPayment(false);
     }
@@ -429,13 +460,17 @@ function AccountPage() {
     return (
       <Section className="max-w-md py-12">
         <div className="text-center">
-          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <User className="size-7" />
+          <div className="mx-auto size-18 overflow-hidden rounded-full border-2 border-gold/70 shadow-sm bg-white">
+            <img
+              src={rekikLogo}
+              alt="Rekik Coffee logo"
+              className="size-full object-contain"
+            />
           </div>
-          <h1 className="mt-4 text-3xl font-display font-semibold">Customer Account</h1>
+          <h1 className="mt-4 text-3xl font-display font-semibold">Rekik Coffee Account</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Sign in to track active orders in real time, view your order history, and manage your
-            account.
+            Rekik Coffee account.
           </p>
         </div>
 
@@ -504,7 +539,16 @@ function AccountPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="signin-password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="signin-password">Password</Label>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="text-xs text-primary hover:underline font-medium"
+                >
+                  Forgot password?
+                </button>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -902,20 +946,37 @@ function AccountPage() {
                 </div>
               </div>
 
-              {/* Instant Pay Now button if payment is pending */}
+              {/* Payment status and actions */}
               {primaryActiveOrder.paymentStatus !== "paid" ? (
                 <div className="space-y-2 pt-2 border-t border-border/60">
                   <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 font-medium">
                     <AlertCircle className="size-3.5" />
-                    <span>Payment pending settlement</span>
+                    <span>
+                      {primaryActiveOrder.transactionReference
+                        ? "Details collected — awaiting cashier verification"
+                        : "Payment awaiting settlement"}
+                    </span>
                   </div>
-                  <Button
-                    onClick={() => setPayingOrderId(primaryActiveOrder.id)}
-                    className="w-full text-xs font-semibold gap-1.5"
-                  >
-                    <CreditCard className="size-3.5" />
-                    <span>Pay {formatETB(primaryActiveOrder.total)} Now</span>
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      onClick={() => setPayingOrderId(primaryActiveOrder.id)}
+                      className="flex-1 text-xs font-semibold gap-1.5"
+                    >
+                      <CreditCard className="size-3.5" />
+                      <span>Pay {formatETB(primaryActiveOrder.total)} Now</span>
+                    </Button>
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="text-xs font-medium gap-1.5"
+                    >
+                      <Link to="/order/$id" params={{ id: primaryActiveOrder.id }}>
+                        <span>Instructions</span>
+                        <ExternalLink className="size-3" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 text-xs text-success font-medium pt-2 border-t border-border/60">
@@ -928,7 +989,7 @@ function AccountPage() {
         </section>
       )}
 
-      {/* MODAL / DRAWER FOR INSTANT DASHBOARD PAYMENT */}
+      {/* MODAL / DRAWER FOR DASHBOARD PAYMENT SELECTION */}
       {payingOrderId &&
         (() => {
           const targetOrder = orders.find((o) => o.id === payingOrderId);
@@ -940,7 +1001,7 @@ function AccountPage() {
                   <div className="flex items-center gap-2">
                     <CreditCard className="size-5 text-primary" />
                     <h3 className="font-display text-lg font-bold">
-                      Settle Order {targetOrder.number}
+                      Payment for Order #{targetOrder.number}
                     </h3>
                   </div>
                   <button
@@ -953,7 +1014,7 @@ function AccountPage() {
                 </div>
 
                 <div className="flex items-center justify-between bg-secondary/40 p-3 rounded-xl text-sm">
-                  <span className="text-muted-foreground">Amount to pay:</span>
+                  <span className="text-muted-foreground">Amount due:</span>
                   <span className="font-display text-xl font-bold text-primary">
                     {formatETB(targetOrder.total)}
                   </span>
@@ -966,13 +1027,13 @@ function AccountPage() {
                       {
                         id: "telebirr" as const,
                         name: "Telebirr Mobile",
-                        detail: `Till / Phone: ${receivingAccounts["telebirr"]?.accountNumber || "0911 234 567"} (${receivingAccounts["telebirr"]?.ownerName || "Rekik Coffee"})`,
+                        detail: "Till: 0911 234 567 (Rekik Coffee Lounge)",
                         icon: Smartphone,
                       },
                       {
                         id: "cbe" as const,
-                        name: "CBE Birr",
-                        detail: `Account: ${receivingAccounts["cbe"]?.accountNumber || "1000 2345 67890"} (${receivingAccounts["cbe"]?.ownerName || "Rekik Coffee"})`,
+                        name: "Bank Transfer (CBE)",
+                        detail: "Account: 1000 2345 67890 (Rekik Coffee)",
                         icon: CreditCard,
                       },
                       {
@@ -1010,33 +1071,25 @@ function AccountPage() {
                   </div>
                 </div>
 
-                {payMethod !== "cash" && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="dash-tx" className="text-xs">
-                      Transaction Reference / Code (Optional)
-                    </Label>
-                    <Input
-                      id="dash-tx"
-                      value={payTxRef}
-                      onChange={(e) => setPayTxRef(e.target.value)}
-                      placeholder="e.g. TXN-10293847"
-                      className="h-8 text-xs font-mono"
-                    />
-                  </div>
-                )}
+                <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-xs text-muted-foreground space-y-1">
+                  <p className="font-semibold text-foreground">Waiter & Cashier Settlement</p>
+                  <p className="text-[11px] leading-relaxed">
+                    Your assigned waiter ({targetOrder.waiterName || "Floor Staff"}) will collect and verify your payment reference on floor / upon delivery to submit to the cashier.
+                  </p>
+                </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
                   <Button variant="ghost" size="sm" onClick={() => setPayingOrderId(null)}>
-                    Cancel
+                    Close
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => void handleSettlePayment(targetOrder)}
+                    onClick={() => void handleUpdatePaymentMethod(targetOrder)}
                     disabled={submittingPayment}
                     className="font-semibold"
                   >
                     <CheckCircle2 className="size-3.5 mr-1.5" />
-                    {submittingPayment ? "Confirming…" : `Confirm ${formatETB(targetOrder.total)}`}
+                    {submittingPayment ? "Saving…" : "Save Payment Preference"}
                   </Button>
                 </div>
               </div>
@@ -1052,7 +1105,7 @@ function AccountPage() {
               Order History
             </h2>
             <p className="text-xs text-muted-foreground">
-              Complete log of all orders placed with NEBA Café.
+              Complete log of all orders placed with Rekik Coffee.
             </p>
           </div>
 

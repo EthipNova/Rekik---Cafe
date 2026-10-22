@@ -534,9 +534,9 @@ function AdminSettings() {
                         <Check className="size-4 text-primary" aria-hidden />
                       )}
                     </div>
-                    <span className="font-medium text-sm mt-3 text-foreground">Daylight</span>
+                    <span className="font-medium text-sm mt-3 text-foreground">Rekik Light</span>
                     <span className="text-xs text-muted-foreground mt-1">
-                      Clean daylight palette with warm café accents.
+                      Clean white and charcoal daylight palette with Rekik red accents.
                     </span>
                   </button>
 
@@ -558,7 +558,7 @@ function AdminSettings() {
                     </div>
                     <span className="font-medium text-sm mt-3 text-foreground">Charcoal Dark</span>
                     <span className="text-xs text-muted-foreground mt-1">
-                      Deep charcoal background with rich warm accents.
+                      Deep charcoal background with bold Rekik red accents.
                     </span>
                   </button>
 

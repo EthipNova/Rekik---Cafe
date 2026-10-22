@@ -8,6 +8,8 @@ import path from "node:path";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import type { Plugin } from "vite";
 
+process.env["NITRO_PRESET"] = process.env["NITRO_PRESET"] || "vercel";
+
 /**
  * Reads .env (and .env.local) files and injects every variable into process.env so
  * that server-side SSR modules loaded via ssrLoadModule() — in particular
@@ -51,7 +53,7 @@ function loadEnvIntoProcess(root: string): void {
  */
 function apiDevMiddleware(): Plugin {
   return {
-    name: "neba-api-dev-middleware",
+    name: "rekik-api-dev-middleware",
     configureServer(server) {
       // Inject .env variables into process.env before any SSR module is loaded.
       // This makes SUPABASE_SERVICE_ROLE_KEY available to src/server/supabase.ts.
@@ -72,7 +74,15 @@ function apiDevMiddleware(): Plugin {
           // Invalidate module graph entries for server modules so changes take effect immediately
           if (server.moduleGraph) {
             for (const [, mod] of server.moduleGraph.idToModuleMap) {
-              if (mod.id && (mod.id.includes("src/server") || mod.id.includes("src\\server") || mod.id.includes("server/api") || mod.id.includes("server/staff"))) {
+              if (
+                mod.id &&
+                (mod.id.includes("src/server") ||
+                  mod.id.includes("src\\server") ||
+                  mod.id.includes("server/api") ||
+                  mod.id.includes("server/staff") ||
+                  mod.id.includes("server/cashier") ||
+                  mod.id.includes("server/waiter"))
+              ) {
                 server.moduleGraph.invalidateModule(mod);
               }
             }

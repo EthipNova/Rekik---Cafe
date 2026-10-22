@@ -1,5 +1,5 @@
 /**
- * NEBA Café — Distance & Delivery Pricing Engine
+ * Rekik Café — Distance & Delivery Pricing Engine
  * Pure, deterministic functions for coordinate validation, Haversine distance,
  * and admin-configurable delivery fee calculation.
  */

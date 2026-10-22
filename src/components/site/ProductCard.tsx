@@ -10,11 +10,11 @@ export function ProductCard({ product }: { product: Product }) {
   const { add } = useCart();
 
   return (
-    <article className="group surface-card hover-lift flex flex-col overflow-hidden">
+    <article className="group surface-card hover-lift flex flex-col overflow-hidden border border-border/80 bg-card rounded-2xl transition-all duration-300 hover:border-gold/50 hover:shadow-md">
       <Link
         to="/product/$id"
         params={{ id: product.id }}
-        className="relative block aspect-4/3 overflow-hidden bg-muted"
+        className="relative block aspect-4/3 overflow-hidden bg-cream/40"
       >
         <img
           src={product.image}
@@ -24,19 +24,24 @@ export function ProductCard({ product }: { product: Product }) {
           height={768}
           className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
         />
+        {product.featured && (
+          <span className="absolute top-2.5 left-2.5 rounded-full bg-gold/95 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-espresso shadow-xs">
+            Signature
+          </span>
+        )}
         {!product.available && (
-          <span className="absolute inset-0 flex items-center justify-center bg-espresso/60">
-            <Badge variant="secondary" className="text-xs uppercase tracking-widest">
-              Unavailable
+          <span className="absolute inset-0 flex items-center justify-center bg-espresso/70 backdrop-blur-xs">
+            <Badge variant="secondary" className="text-xs uppercase tracking-widest font-semibold bg-cream text-espresso">
+              Sold Out
             </Badge>
           </span>
         )}
       </Link>
 
-      <div className="flex flex-1 flex-col justify-between gap-2 p-3 sm:p-4">
+      <div className="flex flex-1 flex-col justify-between gap-2.5 p-3.5 sm:p-4">
         <div>
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-            <h3 className="font-display text-sm font-semibold leading-tight sm:text-lg">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-2">
+            <h3 className="font-display text-base font-bold leading-tight sm:text-lg text-primary group-hover:text-gold transition-colors">
               <Link
                 to="/product/$id"
                 params={{ id: product.id }}
@@ -45,25 +50,25 @@ export function ProductCard({ product }: { product: Product }) {
                 {product.name}
               </Link>
             </h3>
-            <span className="whitespace-nowrap text-xs font-bold text-primary sm:text-sm sm:font-semibold">
+            <span className="whitespace-nowrap text-sm font-bold text-primary font-display sm:text-base">
               {formatETB(product.price)}
             </span>
           </div>
-          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground sm:mt-1.5 sm:text-sm">
+          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground sm:mt-1.5 sm:text-sm leading-relaxed">
             {product.description}
           </p>
         </div>
 
         <Button
           size="sm"
-          className="mt-2.5 w-full h-8 text-xs sm:mt-3 sm:h-9 sm:text-sm"
+          className="mt-2.5 w-full h-9 rounded-xl text-xs sm:mt-3 sm:h-9.5 sm:text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 border border-gold/25 transition-all shadow-xs"
           disabled={!product.available}
           onClick={() => {
             add(product.id);
             toast.success(`${product.name} added to cart`);
           }}
         >
-          <Plus className="size-3.5 sm:size-4" />
+          <Plus className="size-3.5 sm:size-4 text-gold" />
           <span className="truncate">{product.available ? "Add to Cart" : "Unavailable"}</span>
         </Button>
       </div>

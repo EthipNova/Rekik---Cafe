@@ -26,6 +26,11 @@ import {
   getContactMessages,
   updateContactMessageReadStatus,
   deleteContactMessage,
+  createPaymentProof,
+  testCashierReview,
+  recordWaiterDecision,
+  recordWaiterPaymentCollection,
+  updateOrderPaymentMethod,
 } from "./db";
 import { validateContactInput } from "@/lib/contact";
 import type { AboutContent } from "@/lib/content";
@@ -1295,6 +1300,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       return json({ error: "Method Not Allowed" }, 405);
     }
 
+
     const orderMatch = pathname.match(/^\/api\/orders\/([^/]+)$/);
     if (orderMatch) {
       const orderId = decodeURIComponent(orderMatch[1]!);
@@ -1728,3 +1734,4 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     return serverError(error);
   }
 }
+

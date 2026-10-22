@@ -78,13 +78,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "NEBA Café — Order Online" },
+      { title: "Rekik Coffee — Authentic Ethiopian Coffee & Roastery" },
       {
         name: "description",
         content:
-          "NEBA Café digital ordering: browse the menu, order, pay and track your food. Powered by ORNIX-TECH.",
+          "Rekik Coffee: Artisanal Ethiopian single-origin coffee, traditional roasts, pastries, and digital ordering experience.",
       },
-      { name: "author", content: "ORNIX-TECH" },
+      { name: "author", content: "Rekik Coffee" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -94,10 +94,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Serif+Ethiopic:wght@400;600;700&family=Playfair+Display:ital,wght@0,500;0,600;0,700;0,800;1,500;1,600;1,700&display=swap",
       },
-      { rel: "icon", href: "/favicon.ico", sizes: "32x32" },
-      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "icon", type: "image/png", href: "/favicon.png?v=20261021" },
+      { rel: "apple-touch-icon", href: "/images/rekik-coffee-logo.png?v=20261021" },
     ],
   }),
   shellComponent: RootShell,
@@ -123,18 +123,22 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isAdmin = pathname.startsWith("/admin");
+  const isPortal =
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/casher") ||
+    pathname.startsWith("/cashier") ||
+    pathname.startsWith("/waiter");
 
   return (
     <QueryClientProvider client={queryClient}>
       <CartProvider>
         <div className="flex min-h-screen flex-col">
-          {!isAdmin && <Navbar />}
+          {!isPortal && <Navbar />}
           <main className="flex-1">
             {/* Required: nested routes render here. */}
             <Outlet />
           </main>
-          {!isAdmin && <Footer />}
+          {!isPortal && <Footer />}
         </div>
         <Toaster position="top-center" />
       </CartProvider>
