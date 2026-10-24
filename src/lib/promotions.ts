@@ -20,12 +20,15 @@ export type Promotion = {
   id: string;
   name: string;
   description: string;
+  imageUrl?: string | null | undefined;
   discountType: DiscountType;
   discountValue: number;
   appliesToAll?: boolean | undefined;
   applicableProductIds: string[]; // ["*"] denotes all products in legacy records
   applicableCategorySlug?: string | undefined;
   categoryId?: string | null | undefined;
+  applicableCategories?: string[] | undefined;
+  applicableProducts?: string[] | undefined;
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   status?: PromotionStatus | undefined;
@@ -37,6 +40,7 @@ export type Promotion = {
 export type CreatePromotionInput = {
   name: string;
   description?: string | undefined;
+  imageUrl?: string | null | undefined;
   discountType: DiscountType;
   discountValue: number;
   startDate: string; // YYYY-MM-DD
@@ -131,10 +135,13 @@ export function derivePromotionStatus(promo: Promotion): PromotionStatus {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0]!;
 
-  if (promo.startDate && promo.startDate > todayStr) {
+  const startDay = promo.startDate ? promo.startDate.split("T")[0] : null;
+  const endDay = promo.endDate ? promo.endDate.split("T")[0] : null;
+
+  if (startDay && startDay > todayStr) {
     return "scheduled";
   }
-  if (promo.endDate && promo.endDate < todayStr) {
+  if (endDay && endDay < todayStr) {
     return "expired";
   }
   return "active";
@@ -357,40 +364,68 @@ export function resolveTodaySpecial(
 /**
  * Normalizes a raw Supabase promotion record into the frontend Promotion type.
  */
-function normalizePromotionRecord(raw: any): Promotion {
+export function normalizePromotionRecord(raw: any): Promotion {
+  if (!raw) {
+    return {
+      id: "",
+      name: "Untitled Promotion",
+      description: "",
+      discountType: "percentage",
+      discountValue: 0,
+      appliesToAll: true,
+      applicableProductIds: [],
+      startDate: "",
+      endDate: "",
+      status: "draft",
+      createdAt: new Date().toISOString(),
+      products: [],
+    };
+  }
+
   const categoryRaw = Array.isArray(raw.categories) ? raw.categories[0] : raw.categories;
-  const promoProductsRaw = Array.isArray(raw.promotion_products) ? raw.promotion_products : [];
+  const promoProductsRaw = Array.isArray(raw.promotion_products)
+    ? raw.promotion_products
+    : Array.isArray(raw.products)
+      ? raw.products
+      : [];
 
   const normalizedProducts: PromotionProductItem[] = [];
-  const applicableProductIds: string[] = [];
+  const applicableProductIds: string[] = Array.isArray(raw.applicableProductIds)
+    ? [...raw.applicableProductIds]
+    : [];
 
   if (promoProductsRaw.length > 0) {
     for (const item of promoProductsRaw) {
-      if (item && item.product_id) {
-        applicableProductIds.push(item.product_id);
-        const prod = Array.isArray(item.products) ? item.products[0] : item.products;
+      if (item && (item.product_id || item.id)) {
+        const prodId = item.product_id || item.id;
+        if (!applicableProductIds.includes(prodId)) {
+          applicableProductIds.push(prodId);
+        }
+        const prod = Array.isArray(item.products) ? item.products[0] : item.products || item;
         if (prod) {
           normalizedProducts.push({
-            id: prod.id,
+            id: prod.id || prodId,
             name: prod.name || "Menu item",
             slug: prod.slug || "",
             price: Number(prod.price) || 0,
-            imageUrl: prod.image_url ?? null,
-            isAvailable: prod.is_available ?? true,
-            categoryId: prod.category_id ?? null,
+            imageUrl: prod.imageUrl ?? prod.image_url ?? null,
+            isAvailable: prod.isAvailable ?? prod.is_available ?? true,
+            categoryId: prod.categoryId ?? prod.category_id ?? null,
           });
         }
       }
     }
   }
 
-  const categoryId = raw.category_id ?? categoryRaw?.id ?? null;
+  const categoryId = raw.categoryId ?? raw.category_id ?? categoryRaw?.id ?? null;
   const isCategory = Boolean(categoryId);
   const isLegacyAll =
     !isCategory &&
     Array.isArray(raw.applicableProductIds) &&
     raw.applicableProductIds.includes("*");
-  const appliesToAll = isCategory ? false : Boolean(raw.applies_to_all) || isLegacyAll;
+  const appliesToAll = isCategory
+    ? false
+    : Boolean(raw.appliesToAll ?? raw.applies_to_all) || isLegacyAll;
 
   let resolvedProductIds: string[] = [];
   if (isCategory) {
@@ -402,21 +437,36 @@ function normalizePromotionRecord(raw: any): Promotion {
   }
 
   return {
-    id: raw.id,
+    id: raw.id || "",
     name: raw.name || "Untitled Promotion",
     description: raw.description || "",
-    discountType: (raw.discount_type as DiscountType) || "percentage",
-    discountValue: Number(raw.discount_value) || 0,
+    discountType: (raw.discountType || raw.discount_type as DiscountType) || "percentage",
+    discountValue: Number(raw.discountValue ?? raw.discount_value) || 0,
     appliesToAll,
     applicableProductIds: resolvedProductIds,
-    applicableCategorySlug: categoryRaw?.slug ?? undefined,
+    applicableCategorySlug: raw.applicableCategorySlug ?? categoryRaw?.slug ?? undefined,
     categoryId,
-    startDate: raw.start_date || "",
-    endDate: raw.end_date || "",
+    applicableCategories:
+      raw.applicableCategories ??
+      raw.applicable_categories ??
+      (categoryId ? [categoryId] : undefined),
+    applicableProducts: raw.applicableProducts ?? raw.applicable_products ?? resolvedProductIds,
+    startDate: raw.startDate || raw.start_date || "",
+    endDate: raw.endDate || raw.end_date || "",
     status: (raw.status as PromotionStatus) || "draft",
-    minOrderAmount: raw.min_order_amount ? Number(raw.min_order_amount) : undefined,
-    createdAt: raw.created_at || new Date().toISOString(),
-    products: normalizedProducts,
+    minOrderAmount:
+      raw.minOrderAmount != null
+        ? Number(raw.minOrderAmount)
+        : raw.min_order_amount != null
+          ? Number(raw.min_order_amount)
+          : undefined,
+    createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
+    products:
+      normalizedProducts.length > 0
+        ? normalizedProducts
+        : Array.isArray(raw.products)
+          ? raw.products
+          : [],
   };
 }
 
@@ -427,6 +477,27 @@ export async function fetchAdminPromotions(): Promise<{
   data: Promotion[] | null;
   error: Error | null;
 }> {
+  // 1. Try authorized backend endpoint first (bypasses browser client RLS)
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (session?.access_token) {
+      headers["Authorization"] = `Bearer ${session.access_token}`;
+    }
+    const res = await fetch("/api/promotions", { headers });
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json)) {
+        return { data: json.map(normalizePromotionRecord), error: null };
+      }
+    }
+  } catch (apiErr) {
+    console.warn("[promotions] API fetch fallback to Supabase client:", apiErr);
+  }
+
+  // 2. Direct Supabase client query fallback
   try {
     const { data, error } = await (supabase.from("promotions" as any) as any)
       .select(
@@ -519,7 +590,7 @@ export async function fetchPromotionProductsList(): Promise<{
  * Uses crypto.randomUUID() when available (secure contexts/modern environments),
  * and falls back to crypto.getRandomValues() in non-secure HTTP contexts or older engines.
  */
-function generatePromotionId(): string {
+export function generatePromotionId(): string {
   const cryptoObj =
     typeof globalThis !== "undefined" && globalThis.crypto
       ? globalThis.crypto
@@ -577,7 +648,77 @@ export async function createAdminPromotion(
       targetProductIds,
     );
 
-    // 1. Construct insert payload with generated UUID
+    // 1. Attempt creation via authorized server API endpoint /api/promotions
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
+      const apiRes = await fetch("/api/promotions", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          id: promotionId,
+          name: input.name.trim(),
+          description: input.description?.trim() || null,
+          imageUrl: input.imageUrl || null,
+          discountType: input.discountType,
+          discountValue: input.discountValue,
+          applicableProductIds: targeting.targetProductIds,
+          applicableCategorySlug: targeting.categoryId,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          status: input.status,
+          minOrderAmount: input.minOrderAmount ?? null,
+        }),
+      });
+
+      if (apiRes.ok) {
+        const created = await apiRes.json();
+        return {
+          data: {
+            id: created.id || promotionId,
+            name: created.name || input.name.trim(),
+            description: created.description || input.description?.trim() || "",
+            imageUrl: created.imageUrl || input.imageUrl || null,
+            discountType: created.discountType || input.discountType,
+            discountValue: Number(created.discountValue ?? input.discountValue),
+            appliesToAll: targeting.appliesToAll,
+            applicableProductIds: targeting.targetProductIds,
+            categoryId: targeting.categoryId,
+            startDate: created.startDate || input.startDate,
+            endDate: created.endDate || input.endDate,
+            status: (created.status || input.status) as PromotionStatus,
+            minOrderAmount: input.minOrderAmount ?? undefined,
+            createdAt: created.createdAt || new Date().toISOString(),
+          },
+          error: null,
+        };
+      }
+
+      if (apiRes.status === 401 || apiRes.status === 403) {
+        const errJson = await apiRes.json().catch(() => ({}));
+        return {
+          data: null,
+          error: new Error(
+            errJson.error || "Administrative authorization required to create promotions.",
+          ),
+        };
+      }
+    } catch (fetchErr) {
+      console.warn("[promotions] /api/promotions endpoint failed, attempting direct client:", fetchErr);
+    }
+
+    // 2. Fallback to direct client insert if server endpoint is unreachable
+    // Embed imageUrl into description comment if present to preserve without schema change
+    const clientDesc = input.imageUrl
+      ? `${input.description?.trim() || ""}<!--promo_img:${input.imageUrl}-->`
+      : input.description?.trim() || null;
+
     const insertPayload: {
       id: string;
       name: string;
@@ -593,7 +734,7 @@ export async function createAdminPromotion(
     } = {
       id: promotionId,
       name: input.name.trim(),
-      description: input.description?.trim() || null,
+      description: clientDesc,
       discount_type: input.discountType,
       discount_value: input.discountValue,
       applies_to_all: targeting.appliesToAll,
@@ -610,13 +751,17 @@ export async function createAdminPromotion(
       .single();
 
     if (promoError || !promo) {
+      const msg =
+        promoError?.code === "42501" || promoError?.message?.includes("row-level security")
+          ? "Database authorization policy restricts direct client promotion creation. Please ensure an active administrator session is present."
+          : promoError?.message || "Failed to insert promotion";
       return {
         data: null,
-        error: new Error(promoError?.message || "Failed to insert promotion"),
+        error: new Error(msg),
       };
     }
 
-    // 2. If targeting specific products, insert junction rows
+    // 3. If targeting specific products, insert junction rows
     if (inferredTargetType === "products" && targeting.targetProductIds.length > 0) {
       const junctionRows = targeting.targetProductIds.map((pid) => ({
         promotion_id: promotionId,
@@ -683,7 +828,52 @@ export async function updateAdminPromotion(
       targetProductIds,
     );
 
-    // 1. Update promotion terms
+    // 1. Attempt update via authorized server API endpoint /api/promotions
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
+      const apiRes = await fetch("/api/promotions", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          id,
+          name: input.name.trim(),
+          description: input.description?.trim() || null,
+          imageUrl: input.imageUrl || null,
+          discountType: input.discountType,
+          discountValue: input.discountValue,
+          applicableProductIds: targeting.targetProductIds,
+          applicableCategorySlug: targeting.categoryId,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          status: input.status,
+          minOrderAmount: input.minOrderAmount ?? null,
+        }),
+      });
+
+      if (apiRes.ok) {
+        return { error: null };
+      }
+
+      if (apiRes.status === 401 || apiRes.status === 403) {
+        const errJson = await apiRes.json().catch(() => ({}));
+        return {
+          error: new Error(
+            errJson.error || "Administrative authorization required to update promotions.",
+          ),
+        };
+      }
+    } catch (fetchErr) {
+      console.warn("[promotions] /api/promotions PUT failed, attempting direct client:", fetchErr);
+    }
+
+    // 2. Direct client fallback
     const updatePayload: {
       name: string;
       description: string | null;
@@ -713,10 +903,14 @@ export async function updateAdminPromotion(
       .eq("id", id);
 
     if (promoError) {
-      return { error: new Error(promoError.message) };
+      const msg =
+        promoError.code === "42501" || promoError.message?.includes("row-level security")
+          ? "Database authorization policy restricts direct client promotion modification. Please ensure an active administrator session is present."
+          : promoError.message;
+      return { error: new Error(msg) };
     }
 
-    // 2. Synchronize junction rows: remove existing associations
+    // 3. Synchronize junction rows: remove existing associations
     const { error: deleteError } = await (supabase.from("promotion_products" as any) as any)
       .delete()
       .eq("promotion_id", id);
@@ -729,7 +923,7 @@ export async function updateAdminPromotion(
       };
     }
 
-    // 3. Insert new junction rows ONLY if target type is "products"
+    // 4. Insert new junction rows ONLY if target type is "products"
     if (inferredTargetType === "products" && targeting.targetProductIds.length > 0) {
       const junctionRows = targeting.targetProductIds.map((pid) => ({
         promotion_id: id,
@@ -763,14 +957,49 @@ export async function updateAdminPromotion(
  */
 export async function deleteAdminPromotion(id: string): Promise<{ error: Error | null }> {
   try {
-    // 1. Clear any dependent junction records
+    // 1. Attempt delete via authorized server API endpoint
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
+      const apiRes = await fetch(`/api/promotions/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers,
+      });
+
+      if (apiRes.ok) {
+        return { error: null };
+      }
+
+      if (apiRes.status === 401 || apiRes.status === 403) {
+        const errJson = await apiRes.json().catch(() => ({}));
+        return {
+          error: new Error(
+            errJson.error || "Administrative authorization required to delete promotions.",
+          ),
+        };
+      }
+    } catch (fetchErr) {
+      console.warn("[promotions] /api/promotions DELETE failed, attempting direct client:", fetchErr);
+    }
+
+    // 2. Direct client fallback: clear dependent junction records
     await (supabase.from("promotion_products" as any) as any).delete().eq("promotion_id", id);
 
-    // 2. Delete promotion
+    // 3. Delete promotion
     const { error } = await (supabase.from("promotions" as any) as any).delete().eq("id", id);
 
     if (error) {
-      return { error: new Error(error.message) };
+      const msg =
+        error.code === "42501" || error.message?.includes("row-level security")
+          ? "Database authorization policy restricts direct client promotion deletion. Please ensure an active administrator session is present."
+          : error.message;
+      return { error: new Error(msg) };
     }
 
     return { error: null };
@@ -779,4 +1008,53 @@ export async function deleteAdminPromotion(id: string): Promise<{ error: Error |
       error: err instanceof Error ? err : new Error("An unexpected error occurred during deletion"),
     };
   }
+}
+
+/**
+ * Finds the applicable promotion for a product given its ID, category, and list of active promotions.
+ */
+export function findApplicablePromotion(
+  productOrId: string | { id: string; categoryId?: string | undefined; categorySlug?: string | undefined; category?: string | undefined } | any,
+  categoryOrPromos: string | Promotion[],
+  promosList?: Promotion[],
+): Promotion | null {
+  const productId = typeof productOrId === "string" ? productOrId : productOrId.id;
+  const productCat =
+    typeof productOrId === "object"
+      ? (productOrId.categorySlug || productOrId.categoryId || productOrId.category || "")
+      : (typeof categoryOrPromos === "string" ? categoryOrPromos : "");
+  const activePromos: Promotion[] = Array.isArray(categoryOrPromos)
+    ? categoryOrPromos
+    : (promosList || []);
+
+  let storewidePromo: Promotion | null = null;
+  let categoryPromo: Promotion | null = null;
+
+  for (const promo of activePromos) {
+    const targetType = resolvePromotionTargetType(promo);
+    if (targetType === "products") {
+      if (
+        promo.applicableProductIds?.includes(productId) ||
+        promo.applicableProducts?.includes(productId)
+      ) {
+        return promo; // Highest priority: item-specific promotion
+      }
+    } else if (targetType === "category") {
+      const targetCat = promo.applicableCategorySlug || promo.categoryId;
+      if (
+        targetCat &&
+        productCat &&
+        (targetCat.toLowerCase() === productCat.toLowerCase() ||
+          promo.applicableCategories?.includes(productCat))
+      ) {
+        if (!categoryPromo) categoryPromo = promo;
+      } else if (promo.applicableCategories?.includes(productCat)) {
+        if (!categoryPromo) categoryPromo = promo;
+      }
+    } else if (targetType === "all" || promo.appliesToAll) {
+      if (!storewidePromo) storewidePromo = promo;
+    }
+  }
+
+  return categoryPromo || storewidePromo;
 }

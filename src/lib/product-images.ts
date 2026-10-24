@@ -260,6 +260,71 @@ export async function uploadProductImage(
 }
 
 /**
+ * Uploads an optional promotion image file to the product-images bucket in Supabase Storage.
+ * Generates path: promotions/{promotionId}/{unique-id}.{ext}
+ */
+export async function uploadPromotionImage(
+  promotionId: string,
+  file: File,
+): Promise<{
+  url: string | null;
+  path: string | null;
+  error: Error | null;
+}> {
+  try {
+    const validation = validateProductImageFile(file);
+    if (!validation.valid) {
+      return { url: null, path: null, error: new Error(validation.error) };
+    }
+
+    await ensureProductImagesBucket();
+
+    let extension = file.name.split(".").pop()?.toLowerCase() || "";
+    if (extension === "jpeg") extension = "jpg";
+    if (!["jpg", "png", "webp"].includes(extension)) {
+      if (file.type === "image/png") extension = "png";
+      else if (file.type === "image/webp") extension = "webp";
+      else extension = "jpg";
+    }
+
+    const uniqueId = generateUUID();
+    const sanitizedId = promotionId.replace(/[^a-zA-Z0-9_-]/g, "") || "new";
+    const storagePath = `promotions/${sanitizedId}/${uniqueId}.${extension}`;
+
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(PRODUCT_IMAGES_BUCKET)
+      .upload(storagePath, file, {
+        contentType: file.type || `image/${extension === "jpg" ? "jpeg" : extension}`,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return {
+        url: null,
+        path: null,
+        error: new Error(`Promotion image upload failed: ${uploadError.message}`),
+      };
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from(PRODUCT_IMAGES_BUCKET)
+      .getPublicUrl(uploadData.path || storagePath);
+
+    return {
+      url: publicUrlData.publicUrl,
+      path: uploadData.path || storagePath,
+      error: null,
+    };
+  } catch (err: any) {
+    return {
+      url: null,
+      path: null,
+      error: err instanceof Error ? err : new Error("Failed to upload promotion image file."),
+    };
+  }
+}
+
+/**
  * Safely removes a product image object from the product-images bucket.
  *
  * Safety constraints:

@@ -1,5 +1,15 @@
+export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Validates that an ID is a valid RFC 4122 UUID string.
+ */
+export function isValidUUID(id?: string | null): boolean {
+  if (!id || typeof id !== "string") return false;
+  return UUID_REGEX.test(id.trim());
+}
+
 export interface AboutContent {
-  id: number;
+  id: string;
   homepage_hero_image: string | null;
   about_hero_image: string | null;
   about_title: string;
@@ -19,7 +29,7 @@ export interface AboutContent {
 export type AboutContentRow = Partial<AboutContent>;
 
 export const DEFAULT_ABOUT_CONTENT: AboutContent = {
-  id: 1,
+  id: "028a78ee-094c-4334-8512-8697b747a674",
   homepage_hero_image: null,
   about_hero_image: null,
   about_title: "A neighbourhood café, thoughtfully modernised",
@@ -41,13 +51,18 @@ export const DEFAULT_ABOUT_CONTENT: AboutContent = {
 /**
  * Normalizes a raw database record into a fully-typed AboutContent object with fallback defaults.
  */
-export function normalizeAboutContent(row?: Partial<AboutContent> | null): AboutContent {
+export function normalizeAboutContent(row?: Partial<AboutContent> | Record<string, any> | null): AboutContent {
   if (!row || typeof row !== "object") {
     return { ...DEFAULT_ABOUT_CONTENT };
   }
 
+  const rowId =
+    typeof row.id === "string" && row.id.trim()
+      ? row.id.trim()
+      : DEFAULT_ABOUT_CONTENT.id;
+
   return {
-    id: 1,
+    id: rowId,
     homepage_hero_image:
       typeof row.homepage_hero_image === "string" && row.homepage_hero_image.trim()
         ? row.homepage_hero_image.trim()

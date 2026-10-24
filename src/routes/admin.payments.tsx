@@ -26,48 +26,33 @@ import {
   Clock,
   CreditCard,
   DollarSign,
+  Download,
+  ExternalLink,
   Eye,
   FileCheck2,
   Filter,
-  HelpCircle,
-  Info,
-  Layers,
+  Lock,
   Package,
+  Receipt,
   RefreshCw,
   RotateCcw,
   Search,
   ShieldCheck,
   ShoppingBag,
+  ShoppingCart,
   TrendingDown,
   TrendingUp,
   Truck,
   UserCheck,
-  UtensilsCrossed,
-  Wallet,
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { toast } from "sonner";
+import { fetchProofSignedUrl } from "@/services/cashier";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -94,9 +79,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/site/Section";
 import {
   loadSalesMonitoringData,
+  classifyPaymentMethod,
+  orderMatchesPaymentMethod,
+  type CanonicalPaymentMethod,
   type FinancialDatePreset,
   type OrderSalesRow,
-  type PaymentProofAuditItem,
   type PeriodComparisonMetric,
   type SalesMonitoringData,
 } from "@/lib/financial-monitoring";
@@ -120,17 +107,35 @@ export const Route = createFileRoute("/admin/payments")({
   component: RekikSalesMonitoringPage,
 });
 
-// Chart theme configuration using Rekik Café visual palette
-const revenueChartConfig: ChartConfig = {
-  verifiedRevenue: {
-    label: "Verified Sales (ETB)",
-    color: "#4E342E", // Primary Dark Brown
-  },
-  paidOrdersCount: {
-    label: "Paid Orders",
-    color: "#16a34a", // Success Green
-  },
-};
+export {
+  classifyPaymentMethod,
+  orderMatchesPaymentMethod,
+  type CanonicalPaymentMethod,
+} from "@/lib/financial-monitoring";
+
+/**
+ * Formats timestamps for review and order inspections in EAT (UTC+3)
+ */
+function formatReviewDate(dateStr?: string | null): string {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const dateFormatted = d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    const timeFormatted = d.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+    return `${dateFormatted} · ${timeFormatted}`;
+  } catch {
+    return dateStr;
+  }
+}
 
 /**
  * Status Badge for Rekik 5-Stage Workflow
@@ -330,7 +335,7 @@ function RekikSalesMonitoringPage() {
   const [, startTransition] = useTransition();
 
   // Active Workspace Tab
-  const [activeTab, setActiveTab] = useState<"orders" | "proofs" | "governance">("orders");
+  const [activeTab, setActiveTab] = useState<"orders">("orders");
 
   // Filters for Order Sales Table
   const [searchQuery, setSearchQuery] = useState("");
@@ -392,16 +397,6 @@ function RekikSalesMonitoringPage() {
     });
   };
 
-  // Distinct payment methods from loaded data
-  const availableMethods = useMemo(() => {
-    if (!data) return [];
-    const set = new Set<string>();
-    data.orderSalesRows.forEach((r) => {
-      if (r.paymentMethod) set.add(r.paymentMethod);
-    });
-    return Array.from(set);
-  }, [data]);
-
   // Filtered Orders for the Ledger
   const filteredOrderSalesRows = useMemo(() => {
     if (!data) return [];
@@ -415,8 +410,8 @@ function RekikSalesMonitoringPage() {
       if (paymentStatusFilter !== "all" && r.paymentStatus !== paymentStatusFilter) {
         return false;
       }
-      // Payment Method
-      if (paymentMethodFilter !== "all" && r.paymentMethod !== paymentMethodFilter) {
+      // Payment Method (CBE, Telebirr, Cash)
+      if (paymentMethodFilter !== "all" && !orderMatchesPaymentMethod(r, paymentMethodFilter)) {
         return false;
       }
       // Order Method (Dine-in, Takeaway, Delivery)
@@ -472,6 +467,53 @@ function RekikSalesMonitoringPage() {
     if (!selectedOrderId || !data) return null;
     return data.orderSalesRows.find((r) => r.orderId === selectedOrderId) || null;
   }, [selectedOrderId, data]);
+
+  // Linked Payment Proof for Selected Order
+  const selectedOrderProof = useMemo(() => {
+    if (!selectedOrderId || !data) return null;
+    return data.paymentProofAudits?.find((p) => p.orderId === selectedOrderId) || null;
+  }, [selectedOrderId, data]);
+
+  const [proofSignedUrl, setProofSignedUrl] = useState<string | null>(null);
+  const [loadingProofUrl, setLoadingProofUrl] = useState(false);
+  const [proofUrlError, setProofUrlError] = useState<string | null>(null);
+
+  const loadProofUrl = useCallback(async (proof: typeof selectedOrderProof) => {
+    if (!proof) {
+      setProofSignedUrl(null);
+      setProofUrlError(null);
+      setLoadingProofUrl(false);
+      return;
+    }
+    const target = proof.screenshotPath || proof.id;
+    if (!target) {
+      setProofSignedUrl(null);
+      setProofUrlError(null);
+      setLoadingProofUrl(false);
+      return;
+    }
+    setLoadingProofUrl(true);
+    setProofUrlError(null);
+    try {
+      const url = await fetchProofSignedUrl(target);
+      setProofSignedUrl(url);
+    } catch (err: unknown) {
+      console.warn("[admin.payments] Could not fetch proof signed URL:", err);
+      setProofUrlError("Unable to load private receipt image.");
+    } finally {
+      setLoadingProofUrl(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedOrderId && selectedOrderProof) {
+      void loadProofUrl(selectedOrderProof);
+    } else {
+      setProofSignedUrl(null);
+      setProofUrlError(null);
+      setLoadingProofUrl(false);
+    }
+  }, [selectedOrderId, selectedOrderProof, loadProofUrl]);
 
   const resetFilters = () => {
     setSearchQuery("");
@@ -753,191 +795,19 @@ function RekikSalesMonitoringPage() {
                 <span className="text-[10px] text-muted-foreground">
                   Awaiting cashier audit & decisions
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("proofs")}
-                  className="text-[10px] font-semibold text-primary hover:underline cursor-pointer"
-                >
-                  Audit queue →
-                </button>
+                <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                  Cashier review queue
+                </span>
               </div>
             </CardContent>
           </Card>
         </div>
       </section>
 
-      {/* ── 3. VISUAL REPORTS & TRENDS (PHASE 3A & 3B) ──────────────────────── */}
-      <section className="grid gap-6 lg:grid-cols-3">
-        {/* 3A. Revenue Trend Chart (2 columns on large screens) */}
-        <Card className="lg:col-span-2 shadow-xs">
-          <CardHeader className="p-5 pb-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <CardTitle className="font-display text-base font-semibold">
-                  Verified Revenue & Settlement Trend
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Daily verified sales (ETB) and settled orders across the selected period (
-                  {data?.window.label}).
-                </CardDescription>
-              </div>
-              <Badge variant="outline" className="text-xs gap-1 font-mono">
-                <Calendar className="size-3" /> {data?.dailySalesTrend.length || 0} Days
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="p-5 pt-2">
-            {data && data.dailySalesTrend.length > 0 ? (
-              <ChartContainer config={revenueChartConfig} className="h-[260px] w-full">
-                <AreaChart
-                  data={data.dailySalesTrend}
-                  margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#4E342E" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#4E342E" stopOpacity={0.0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    vertical={false}
-                    stroke="hsl(var(--border))"
-                  />
-                  <XAxis
-                    dataKey="label"
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v) => `${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
-                  />
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        formatter={(value, name) => {
-                          if (name === "verifiedRevenue") {
-                            return (
-                              <span className="font-display font-bold text-primary">
-                                {formatETB(Number(value))}
-                              </span>
-                            );
-                          }
-                          return (
-                            <span className="font-medium text-foreground">{value} orders</span>
-                          );
-                        }}
-                      />
-                    }
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="verifiedRevenue"
-                    stroke="#4E342E"
-                    strokeWidth={2.5}
-                    fillOpacity={1}
-                    fill="url(#revenueGrad)"
-                    name="verifiedRevenue"
-                  />
-                </AreaChart>
-              </ChartContainer>
-            ) : (
-              <div className="flex h-[260px] items-center justify-center text-xs text-muted-foreground">
-                No verified sales recorded for this date window.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* 3B. Channels & Payment Methods Distribution (1 column) */}
-        <div className="space-y-6">
-          {/* Payment Methods */}
-          <Card className="shadow-xs">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="font-display text-sm font-semibold flex items-center justify-between">
-                <span>Payment Channels</span>
-                <Wallet className="size-4 text-muted-foreground" />
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Verified revenue distribution by payment method
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-4 pt-2 space-y-3">
-              {data && data.paymentMethodBreakdown.length > 0 ? (
-                data.paymentMethodBreakdown.map((m) => (
-                  <div key={m.method} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-foreground">{m.method}</span>
-                      <span className="font-semibold text-primary">
-                        {formatETB(m.amount)}{" "}
-                        <span className="text-muted-foreground font-normal">({m.percentage}%)</span>
-                      </span>
-                    </div>
-                    <Progress value={m.percentage} className="h-1.5" />
-                    <p className="text-[10px] text-muted-foreground">
-                      {m.count} settled {m.count === 1 ? "order" : "orders"}
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground py-2 text-center">
-                  No settled payments in this period.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Fulfillment Channels */}
-          <Card className="shadow-xs">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="font-display text-sm font-semibold flex items-center justify-between">
-                <span>Fulfillment Channels</span>
-                <UtensilsCrossed className="size-4 text-muted-foreground" />
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Sales by dining preference (Dine-in, Takeaway, Delivery)
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-4 pt-2 space-y-3">
-              {data && data.orderMethodBreakdown.length > 0 ? (
-                data.orderMethodBreakdown.map((m) => (
-                  <div key={m.method} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-foreground capitalize">
-                        {m.method === "dine-in"
-                          ? "🍽️ Dine-in"
-                          : m.method === "takeaway"
-                            ? "🛍️ Takeaway"
-                            : "🛵 Delivery"}
-                      </span>
-                      <span className="font-semibold text-foreground">
-                        {formatETB(m.amount)}{" "}
-                        <span className="text-muted-foreground font-normal">({m.percentage}%)</span>
-                      </span>
-                    </div>
-                    <Progress value={m.percentage} className="h-1.5 bg-secondary" />
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground py-2 text-center">
-                  No orders recorded for this period.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </section>
-
-      {/* ── 4. MAIN WORKSPACE TABS (LEDGER, PROOF AUDIT, GOVERNANCE) ───────── */}
+      {/* ── 4. ORDER SALES LEDGER TAB ─────────────────────────────────────── */}
       <Tabs
         value={activeTab}
-        onValueChange={(v) => setActiveTab(v as "orders" | "proofs" | "governance")}
+        onValueChange={(v) => setActiveTab(v as "orders")}
         className="space-y-4"
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/60 pb-2">
@@ -950,19 +820,6 @@ function RekikSalesMonitoringPage() {
                   {sortedOrderSalesRows.length}
                 </Badge>
               )}
-            </TabsTrigger>
-            <TabsTrigger value="proofs" className="text-xs gap-1.5">
-              <FileCheck2 className="size-3.5" />
-              <span>Payment Review Workload</span>
-              {data && data.pendingPaymentReviewsCount > 0 && (
-                <Badge variant="destructive" className="text-[10px] ml-1 px-1.5 py-0">
-                  {data.pendingPaymentReviewsCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="governance" className="text-xs gap-1.5">
-              <Info className="size-3.5" />
-              <span>Accounting Rules & KPIs</span>
             </TabsTrigger>
           </TabsList>
 
@@ -1033,11 +890,9 @@ function RekikSalesMonitoringPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All methods</SelectItem>
-                  {availableMethods.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="cbe">CBE</SelectItem>
+                  <SelectItem value="telebirr">Telebirr</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -1242,200 +1097,6 @@ function RekikSalesMonitoringPage() {
           )}
         </TabsContent>
 
-        {/* ── TAB 2: PAYMENT REVIEW WORKLOAD (PHASE 3D) ────────────────────── */}
-        <TabsContent value="proofs" className="space-y-4 m-0">
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-muted-foreground flex items-start gap-3">
-            <Info className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="font-semibold text-foreground">
-                Monitoring View Only — Payment Proof Review Queue
-              </p>
-              <p>
-                This monitoring interface provides business owners with full visibility into cashier
-                review workloads and customer payment proof submissions. Cashier approvals and
-                rejections are strictly managed through authorized cashier stations to uphold
-                operational segregation of duties.
-              </p>
-            </div>
-          </div>
-
-          {data && data.paymentProofAudits.length === 0 ? (
-            <EmptyState
-              icon={<FileCheck2 className="size-8 text-muted-foreground" />}
-              title="No payment proofs submitted yet"
-              description="Customer mobile payment proof uploads will appear here for audit and cashier review."
-            />
-          ) : (
-            <div className="surface-card overflow-hidden rounded-xl border border-border/80">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40 hover:bg-muted/40 text-xs">
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Order #
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Customer
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Submitted Amount
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Transaction Ref
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Review Status
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Cashier Decision / Reason
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Submitted At
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody className="text-xs">
-                    {data?.paymentProofAudits.map((proof: PaymentProofAuditItem) => (
-                      <TableRow key={proof.id} className="hover:bg-muted/30">
-                        <TableCell className="font-display font-semibold text-foreground">
-                          {proof.orderNumber}
-                        </TableCell>
-                        <TableCell className="font-medium text-foreground">
-                          {proof.customerName}
-                        </TableCell>
-                        <TableCell className="font-display font-semibold text-primary">
-                          {formatETB(proof.submittedAmount)}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {proof.transactionReference || "—"}
-                        </TableCell>
-                        <TableCell>
-                          {proof.status === "approved" ? (
-                            <Badge
-                              variant="outline"
-                              className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 gap-1 text-[11px]"
-                            >
-                              <CheckCircle2 className="size-3" /> Approved
-                            </Badge>
-                          ) : proof.status === "rejected" ? (
-                            <Badge variant="destructive" className="gap-1 text-[11px]">
-                              <XCircle className="size-3" /> Rejected
-                            </Badge>
-                          ) : (
-                            <Badge
-                              variant="outline"
-                              className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 gap-1 text-[11px]"
-                            >
-                              <Clock className="size-3" /> Pending Review
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="max-w-[240px]">
-                          {proof.rejectionReason || proof.cashierReason ? (
-                            <span className="text-destructive font-medium block truncate">
-                              ⚠️ {proof.rejectionReason || proof.cashierReason}
-                            </span>
-                          ) : proof.status === "approved" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                              Verified by Cashier
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground italic">
-                              Awaiting cashier review
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground whitespace-nowrap">
-                          {new Date(proof.submittedAt).toLocaleString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-        </TabsContent>
-
-        {/* ── TAB 3: ACCOUNTING RULES & KPI DEFINITIONS ─────────────────────── */}
-        <TabsContent value="governance" className="space-y-4 m-0">
-          <Card className="shadow-xs">
-            <CardHeader className="p-5 pb-3">
-              <CardTitle className="font-display text-base font-semibold flex items-center gap-2">
-                <ShieldCheck className="size-5 text-primary" />
-                Financial Calculation Rules & Accounting Integrity
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Authoritative definitions and database-backed rules implemented for Rekik Café
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-5 pt-0 space-y-4 text-xs leading-relaxed text-muted-foreground divide-y divide-border/60">
-              <div className="pt-2 space-y-1">
-                <h4 className="font-semibold text-foreground text-sm">
-                  1. Verified Net Revenue Definition
-                </h4>
-                <p>
-                  Revenue is computed strictly from payments identified by the database as
-                  successfully settled (`status IN ('paid', 'payment_verified', 'verified')`).
-                  Payment proof uploads and screenshot submissions are <strong>never</strong>{" "}
-                  counted as received cash until formally approved by an authorized cashier.
-                </p>
-              </div>
-
-              <div className="pt-3 space-y-1">
-                <h4 className="font-semibold text-foreground text-sm">
-                  2. Payment Attempt Deduplication
-                </h4>
-                <p>
-                  If an order has multiple payment attempts (e.g., initial failed mobile payment
-                  followed by a successful CBE Birr retry), only the single verified settlement
-                  amount is counted. The order is never counted multiple times in revenue or order
-                  volume metrics.
-                </p>
-              </div>
-
-              <div className="pt-3 space-y-1">
-                <h4 className="font-semibold text-foreground text-sm">
-                  3. Order Gross Total vs Verified Payment Separation
-                </h4>
-                <p>
-                  The gross order total (`orders.total_amount`) represents customer cart billing.
-                  The verified payment amount (`payments.amount`) represents actual collected funds.
-                  These values are maintained distinctly across all tables to prevent phantom
-                  balances.
-                </p>
-              </div>
-
-              <div className="pt-3 space-y-1">
-                <h4 className="font-semibold text-foreground text-sm">
-                  4. Historical Price Snapshot Integrity
-                </h4>
-                <p>
-                  Historical item-level reporting utilizes snapshot fields from `order_items`
-                  (`unit_price` and `line_total` captured at checkout time). Future café menu price
-                  updates will never rewrite or distort past accounting records.
-                </p>
-              </div>
-
-              <div className="pt-3 space-y-1">
-                <h4 className="font-semibold text-foreground text-sm">
-                  5. Preceding Period Comparison & Timezone Standard
-                </h4>
-                <p>
-                  All date filters and aggregations operate strictly under East Africa Time (EAT /
-                  UTC+3, Hawassa, Ethiopia). Preceding comparison periods are computed using exact
-                  identical time durations (e.g., 7 Days compares against the preceding 7 Days)
-                  rather than naive calendar offsets.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
 
       {/* ── 5. ORDER & FINANCIAL SETTLEMENT INSPECTION SHEET (DRAWER) ───────── */}
@@ -1445,7 +1106,7 @@ function RekikSalesMonitoringPage() {
       >
         <SheetContent
           side="right"
-          className="w-full sm:max-w-md md:max-w-lg overflow-y-auto p-6 flex flex-col gap-6"
+          className="w-full sm:max-w-lg md:max-w-xl lg:max-w-2xl overflow-y-auto p-6 flex flex-col gap-6"
         >
           {selectedOrder ? (
             <>
@@ -1458,71 +1119,372 @@ function RekikSalesMonitoringPage() {
                   <OrderStatusBadge status={selectedOrder.orderStatus} />
                 </div>
                 <SheetDescription className="text-xs text-muted-foreground">
-                  Recorded on{" "}
-                  {new Date(selectedOrder.orderCreatedAt).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}{" "}
-                  at{" "}
-                  {new Date(selectedOrder.orderCreatedAt).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}{" "}
-                  EAT
+                  Recorded on {formatReviewDate(selectedOrder.orderCreatedAt)} EAT
                 </SheetDescription>
               </SheetHeader>
 
-              {/* Financial Settlement Overview */}
-              <section aria-labelledby="drawer-financial" className="space-y-3">
-                <h3
-                  id="drawer-financial"
-                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Financial Settlement Breakdown
-                </h3>
-                <div className="rounded-xl border border-border bg-card/60 p-4 space-y-2.5 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Order Subtotal</span>
-                    <span className="font-medium text-foreground">
-                      {formatETB(selectedOrder.orderSubtotal)}
+              {/* Customer & Dining Details */}
+              <section aria-labelledby="drawer-customer" className="space-y-3">
+                <div className="rounded-xl border border-border bg-card/60 p-4 space-y-2 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Customer Name</span>
+                    <span className="font-semibold text-foreground">
+                      {selectedOrder.customerName}
                     </span>
                   </div>
-                  {selectedOrder.deliveryFee > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Delivery Fee</span>
-                      <span className="font-medium text-foreground">
-                        {formatETB(selectedOrder.deliveryFee)}
+                  {selectedOrder.customerPhone && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Contact Phone</span>
+                      <span className="font-mono text-foreground">
+                        {selectedOrder.customerPhone}
                       </span>
                     </div>
                   )}
-                  {selectedOrder.discountAmount > 0 && (
-                    <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                      <span>Discount</span>
-                      <span>-{formatETB(selectedOrder.discountAmount)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between border-t border-border/60 pt-2 font-semibold text-sm">
-                    <span>Order Total</span>
-                    <span className="text-foreground">{formatETB(selectedOrder.orderTotal)}</span>
-                  </div>
-                  <div className="flex justify-between border-t border-border/60 pt-2 items-center">
-                    <span className="font-medium text-muted-foreground">Verified Received</span>
-                    <span className="font-display text-lg font-bold text-primary">
-                      {formatETB(selectedOrder.verifiedPaymentAmount)}
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Fulfillment Method</span>
+                    <span className="font-medium text-foreground capitalize">
+                      {methodLabels[selectedOrder.orderMethod] || selectedOrder.orderMethod}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center text-[11px] pt-1 text-muted-foreground">
-                    <span>Settlement Status</span>
+                  {selectedOrder.tableNumber && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Table Assignment</span>
+                      <span className="font-semibold text-primary">
+                        Table #{selectedOrder.tableNumber}
+                      </span>
+                    </div>
+                  )}
+                  {selectedOrder.deliveryAddress && (
+                    <div className="border-t border-border/60 pt-2 text-xs">
+                      <span className="text-muted-foreground block mb-0.5">Delivery Address</span>
+                      <span className="font-medium text-foreground">
+                        📍 {selectedOrder.deliveryAddress}
+                      </span>
+                    </div>
+                  )}
+                  {selectedOrder.assignedWaiterName && (
+                    <div className="flex justify-between items-center border-t border-border/60 pt-2">
+                      <span className="text-muted-foreground">Assigned Waiter</span>
+                      <span className="font-semibold text-foreground">
+                        {selectedOrder.assignedWaiterName}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* 1. Ordered Items Table (Matching Cashier Financial Breakdown) */}
+              <section aria-labelledby="drawer-items" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3
+                    id="drawer-items"
+                    className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+                  >
+                    <ShoppingCart className="size-3.5 text-primary" />
+                    <span>Ordered Items ({selectedOrder.items.length})</span>
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    Historical prices
+                  </span>
+                </div>
+
+                <div className="rounded-xl border border-border bg-card/60 overflow-hidden">
+                  {selectedOrder.items.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/40 border-b border-border/80 text-muted-foreground">
+                            <th className="text-left font-medium p-2.5">Item</th>
+                            <th className="text-center font-medium p-2.5">Qty</th>
+                            <th className="text-right font-medium p-2.5">Price</th>
+                            <th className="text-right font-medium p-2.5">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/60">
+                          {selectedOrder.items.map((item) => (
+                            <tr key={item.id} className="hover:bg-muted/20 transition-colors">
+                              <td className="p-2.5 font-medium text-foreground">{item.name}</td>
+                              <td className="p-2.5 text-center text-muted-foreground font-mono">
+                                {item.quantity}
+                              </td>
+                              <td className="p-2.5 text-right font-mono text-muted-foreground">
+                                {formatETB(item.unitPrice)}
+                              </td>
+                              <td className="p-2.5 text-right font-mono font-semibold text-foreground">
+                                {formatETB(item.lineTotal)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic p-4">
+                      No item lines recorded for this order.
+                    </p>
+                  )}
+
+                  {/* Financial Breakdown Summary Rows */}
+                  <div className="border-t border-border/80 bg-muted/20 p-3 space-y-1.5 text-xs">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Order Subtotal</span>
+                      <span className="font-mono font-medium text-foreground">
+                        {formatETB(selectedOrder.orderSubtotal)}
+                      </span>
+                    </div>
+                    {selectedOrder.deliveryFee > 0 && (
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Delivery Fee</span>
+                        <span className="font-mono font-medium text-foreground">
+                          +{formatETB(selectedOrder.deliveryFee)}
+                        </span>
+                      </div>
+                    )}
+                    {selectedOrder.discountAmount > 0 && (
+                      <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+                        <span>Discount / Promotion</span>
+                        <span className="font-mono font-medium">
+                          -{formatETB(selectedOrder.discountAmount)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-border/60 pt-2 font-bold text-sm">
+                      <span className="text-foreground">Final Order Total</span>
+                      <span className="font-mono font-display text-primary text-base">
+                        {formatETB(selectedOrder.orderTotal)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* 2. Financial Settlement & Verification */}
+              <section aria-labelledby="drawer-financial" className="space-y-3">
+                <h3
+                  id="drawer-financial"
+                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+                >
+                  <CreditCard className="size-3.5 text-primary" />
+                  <span>Financial Settlement Breakdown</span>
+                </h3>
+                <div className="rounded-xl border border-border bg-card/60 p-4 space-y-2.5 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Payment Method</span>
+                    <span className="font-semibold text-foreground">
+                      {selectedOrder.paymentMethod || "Pending / Not Selected"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Settlement Status</span>
                     <PaymentStatusBadge
                       status={selectedOrder.paymentStatus}
                       attemptsCount={selectedOrder.paymentAttemptsCount}
                     />
                   </div>
+                  <div className="flex justify-between items-center border-t border-border/60 pt-2">
+                    <span className="text-muted-foreground font-medium">Verified Amount Paid</span>
+                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                      {formatETB(selectedOrder.verifiedPaymentAmount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground font-medium">Outstanding Balance</span>
+                    <span
+                      className={cn(
+                        "font-mono font-semibold text-sm",
+                        selectedOrder.orderTotal - selectedOrder.verifiedPaymentAmount > 0
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {selectedOrder.orderTotal - selectedOrder.verifiedPaymentAmount > 0
+                        ? formatETB(selectedOrder.orderTotal - selectedOrder.verifiedPaymentAmount)
+                        : "ETB 0.00 (Fully Settled)"}
+                    </span>
+                  </div>
+                  {selectedOrder.transactionReference && (
+                    <div className="flex justify-between items-center border-t border-border/60 pt-2 text-[11px]">
+                      <span className="text-muted-foreground">Transaction Reference</span>
+                      <span className="font-mono font-semibold bg-muted px-2 py-0.5 rounded text-foreground">
+                        {selectedOrder.transactionReference}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </section>
 
-              {/* Payment Attempts History (Deduplication Audit) */}
+              {/* 3. Review & Lifecycle Timestamps */}
+              <section aria-labelledby="drawer-timestamps" className="space-y-3">
+                <h3
+                  id="drawer-timestamps"
+                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+                >
+                  <Clock className="size-3.5 text-primary" />
+                  <span>Review & Lifecycle Timestamps</span>
+                </h3>
+                <div className="rounded-xl border border-border bg-card/60 p-4 space-y-2.5 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">Order Placed</span>
+                    <span className="font-medium text-foreground">
+                      {formatReviewDate(selectedOrder.orderCreatedAt)}
+                    </span>
+                  </div>
+                  {selectedOrderProof?.submittedAt && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Payment Proof Submitted</span>
+                      <span className="font-medium text-foreground">
+                        {formatReviewDate(selectedOrderProof.submittedAt)}
+                      </span>
+                    </div>
+                  )}
+                  {selectedOrderProof?.reviewedAt && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground">Cashier Review Completed</span>
+                      <span className="font-medium text-foreground">
+                        {formatReviewDate(selectedOrderProof.reviewedAt)}
+                      </span>
+                    </div>
+                  )}
+                  {selectedOrderProof?.cashierDecision && (
+                    <div className="border-t border-border/60 pt-2 space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <span className="text-muted-foreground">Cashier Decision</span>
+                        {selectedOrderProof.cashierDecision === "approved" ? (
+                          <Badge
+                            variant="outline"
+                            className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[10px] gap-1"
+                          >
+                            <CheckCircle2 className="size-3" /> Approved
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="bg-destructive/10 text-destructive border-destructive/30 text-[10px] gap-1"
+                          >
+                            <XCircle className="size-3" /> Rejected
+                          </Badge>
+                        )}
+                      </div>
+                      {(selectedOrderProof.cashierReason || selectedOrderProof.rejectionReason) && (
+                        <p className="text-[11px] text-muted-foreground italic bg-muted/40 p-2 rounded">
+                          &quot;{selectedOrderProof.cashierReason || selectedOrderProof.rejectionReason}&quot;
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* 4. Payment Receipt Image (Secure Preview matching Cashier PaymentProofModal) */}
+              <section aria-labelledby="drawer-receipt" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3
+                    id="drawer-receipt"
+                    className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+                  >
+                    <Receipt className="size-3.5 text-primary" />
+                    <span>Payment Receipt Screenshot</span>
+                  </h3>
+                  {selectedOrderProof && (
+                    <Badge variant="outline" className="text-[10px] capitalize font-mono">
+                      {selectedOrderProof.status}
+                    </Badge>
+                  )}
+                </div>
+
+                {selectedOrderProof ? (
+                  <div className="space-y-3">
+                    {/* Phone Screen Mockup / Receipt Viewport */}
+                    <div className="relative bg-muted/40 dark:bg-muted/20 rounded-2xl p-4 flex items-center justify-center overflow-hidden min-h-[280px] border border-border/80">
+                      {loadingProofUrl ? (
+                        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                          <RefreshCw className="h-6 w-6 animate-spin text-primary" />
+                          <span className="text-xs font-medium">Loading receipt preview…</span>
+                        </div>
+                      ) : proofUrlError ? (
+                        <div className="flex flex-col items-center gap-2 text-destructive text-center p-4">
+                          <AlertCircle className="h-6 w-6" />
+                          <span className="text-xs font-medium">{proofUrlError}</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void loadProofUrl(selectedOrderProof)}
+                            className="h-7 text-xs gap-1 mt-1"
+                          >
+                            <RotateCcw className="size-3" /> Retry
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="relative max-w-[280px] w-full flex items-center justify-center">
+                          <img
+                            src={proofSignedUrl || "/images/cbe-receipt-mockup.png"}
+                            alt={`Payment proof for ${selectedOrder.orderNumber}`}
+                            className="max-h-[340px] w-auto max-w-full object-contain rounded-xl shadow-lg border border-border/60"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "/images/cbe-receipt-mockup.png";
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action buttons (Open in new tab & Download) */}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const url = proofSignedUrl || "/images/cbe-receipt-mockup.png";
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        }}
+                        className="flex-1 h-8 text-xs gap-1.5"
+                        disabled={loadingProofUrl}
+                      >
+                        <ExternalLink className="size-3.5 text-muted-foreground" />
+                        <span>Open Receipt in New Tab</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const url = proofSignedUrl || "/images/cbe-receipt-mockup.png";
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `payment-proof-${selectedOrder.orderNumber.replace(/[^a-zA-Z0-9_-]/g, "")}.png`;
+                          a.target = "_blank";
+                          a.click();
+                        }}
+                        className="h-8 w-8 p-0"
+                        title="Download Receipt"
+                        aria-label="Download Receipt"
+                        disabled={loadingProofUrl}
+                      >
+                        <Download className="size-3.5 text-muted-foreground" />
+                      </Button>
+                    </div>
+
+                    {/* Private Storage Security Note */}
+                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-start gap-2.5 text-xs text-blue-700 dark:text-blue-300">
+                      <Lock className="size-4 shrink-0 mt-0.5 text-blue-600 dark:text-blue-400" />
+                      <p className="leading-relaxed text-[11px]">
+                        This payment receipt is stored securely in private Supabase Storage and accessible only by authorized staff.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border/80 bg-muted/10 p-6 text-center space-y-2">
+                    <Receipt className="size-6 text-muted-foreground mx-auto stroke-[1.5]" />
+                    <p className="text-xs font-medium text-foreground">No Payment Receipt Uploaded</p>
+                    <p className="text-[11px] text-muted-foreground max-w-xs mx-auto leading-relaxed">
+                      No payment receipt screenshot was uploaded for this order (e.g. cash settlement, pay at counter, or direct in-person verification).
+                    </p>
+                  </div>
+                )}
+              </section>
+
+              {/* 5. Payment Attempts History (Deduplication Audit) */}
               <section aria-labelledby="drawer-attempts" className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3
@@ -1559,100 +1521,6 @@ function RekikSalesMonitoringPage() {
                 ) : (
                   <p className="text-xs text-muted-foreground italic">
                     No direct payment transaction records attached.
-                  </p>
-                )}
-              </section>
-
-              {/* Customer & Dining Details */}
-              <section aria-labelledby="drawer-customer" className="space-y-3">
-                <h3
-                  id="drawer-customer"
-                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Dining & Customer Details
-                </h3>
-                <div className="rounded-xl border border-border bg-card/60 p-4 space-y-2 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Customer Name</span>
-                    <span className="font-medium text-foreground">
-                      {selectedOrder.customerName}
-                    </span>
-                  </div>
-                  {selectedOrder.customerPhone && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Phone</span>
-                      <span className="font-medium text-foreground">
-                        {selectedOrder.customerPhone}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Fulfillment</span>
-                    <span className="font-medium text-foreground capitalize">
-                      {selectedOrder.orderMethod}
-                    </span>
-                  </div>
-                  {selectedOrder.tableNumber && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Table</span>
-                      <span className="font-semibold text-primary">
-                        Table #{selectedOrder.tableNumber}
-                      </span>
-                    </div>
-                  )}
-                  {selectedOrder.deliveryAddress && (
-                    <div className="border-t border-border/60 pt-2 text-xs">
-                      <span className="text-muted-foreground block mb-0.5">Delivery Address</span>
-                      <span className="font-medium text-foreground">
-                        📍 {selectedOrder.deliveryAddress}
-                      </span>
-                    </div>
-                  )}
-                  {selectedOrder.assignedWaiterName && (
-                    <div className="flex justify-between border-t border-border/60 pt-2">
-                      <span className="text-muted-foreground">Assigned Waiter</span>
-                      <span className="font-semibold text-foreground">
-                        {selectedOrder.assignedWaiterName}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              {/* Historical Order Items Snapshot */}
-              <section aria-labelledby="drawer-items" className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3
-                    id="drawer-items"
-                    className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                  >
-                    Historical Items Snapshot ({selectedOrder.items.length})
-                  </h3>
-                  <span className="text-[10px] text-muted-foreground">Price at order time</span>
-                </div>
-
-                {selectedOrder.items.length > 0 ? (
-                  <div className="rounded-xl border border-border/80 bg-card/60 divide-y divide-border/60 overflow-hidden">
-                    {selectedOrder.items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="p-3 text-xs flex items-center justify-between gap-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium text-foreground truncate">{item.name}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {item.quantity} × {formatETB(item.unitPrice)}
-                          </p>
-                        </div>
-                        <span className="font-display font-semibold text-foreground shrink-0">
-                          {formatETB(item.lineTotal)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground italic">
-                    No historical items recorded for this order.
                   </p>
                 )}
               </section>

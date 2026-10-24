@@ -108,6 +108,9 @@ function Checkout() {
   const [waitersLoading, setWaitersLoading] = useState(true);
   const [waitersError, setWaitersError] = useState<string | null>(null);
   const [selectedWaiterId, setSelectedWaiterId] = useState<string>("");
+  const [checkoutReferenceId] = useState(
+    () => `chk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+  );
 
   useEffect(() => {
     fetchSettings()
@@ -458,6 +461,7 @@ function Checkout() {
             ? { latitude: deliveryLocation.latitude, longitude: deliveryLocation.longitude }
             : {}),
         },
+        clientReferenceId: checkoutReferenceId,
       };
 
       const order = await apiCreateOrder(orderData);

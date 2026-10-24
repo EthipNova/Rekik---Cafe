@@ -28,7 +28,7 @@ import {
   Utensils,
   Wallet,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { Session } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
@@ -104,6 +104,18 @@ function AccountPage() {
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<"telebirr" | "cbe" | "cash">("telebirr");
   const [submittingPayment, setSubmittingPayment] = useState(false);
+
+  // Receiving accounts state (dynamically fetched from public.payment_account_settings)
+  const [receivingAccounts, setReceivingAccounts] = useState<
+    Array<{
+      id: string;
+      payment_method: "telebirr" | "cbe";
+      account_number: string;
+      account_owner_name: string;
+      is_active: boolean;
+    }>
+  >([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
 
   // Load customer profile and orders using verified Bearer session token
   const loadProfileAndOrders = async (token?: string, isManual = false) => {
@@ -193,6 +205,96 @@ function AccountPage() {
       subscription.unsubscribe();
     };
   }, [navigate]);
+
+  // Load active receiving accounts configured by admin in Supabase payment_account_settings
+  const loadReceivingAccounts = useCallback(async () => {
+    setLoadingAccounts(true);
+    try {
+      // 1. Fetch active receiving accounts from public API endpoint
+      const res = await fetch("/api/payment-accounts");
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const activeOnly = data.filter((a: any) => Boolean(a.is_active));
+          setReceivingAccounts(activeOnly);
+          return;
+        }
+      }
+    } catch {
+      // API call failed, continue to fallback
+    }
+
+    try {
+      // 2. Direct Supabase client query fallback
+      const { data, error } = await supabase
+        .from("payment_account_settings")
+        .select("id, payment_method, account_number, account_owner_name, is_active")
+        .eq("is_active", true)
+        .order("payment_method", { ascending: true });
+
+      if (!error && Array.isArray(data)) {
+        setReceivingAccounts(data as any);
+      }
+    } catch (err) {
+      console.error("[account] Failed to load receiving accounts from Supabase:", err);
+    } finally {
+      setLoadingAccounts(false);
+    }
+  }, []);
+
+  // Supabase Realtime subscription on public.payment_account_settings + safe refetch mechanism
+  useEffect(() => {
+    void loadReceivingAccounts();
+
+    // Supabase Realtime channel listening for admin changes in payment_account_settings
+    const paymentAccountChannel = supabase
+      .channel("customer-payment-account-settings-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "payment_account_settings" },
+        () => {
+          void loadReceivingAccounts();
+        },
+      )
+      .subscribe();
+
+    // Safe periodic refetch (every 10s) to guarantee fresh account details
+    const refetchInterval = setInterval(() => {
+      void loadReceivingAccounts();
+    }, 10000);
+
+    // Refetch on window focus / tab visibility change
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === "visible") {
+        void loadReceivingAccounts();
+      }
+    };
+    window.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+
+    return () => {
+      void supabase.removeChannel(paymentAccountChannel);
+      clearInterval(refetchInterval);
+      window.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+    };
+  }, [loadReceivingAccounts]);
+
+  // Keep payMethod aligned with currently active accounts
+  useEffect(() => {
+    if (payMethod === "cash") return;
+    const isCurrentActive = receivingAccounts.some(
+      (a) => a.payment_method === payMethod && a.is_active,
+    );
+    if (!isCurrentActive && receivingAccounts.length > 0) {
+      const firstActive = receivingAccounts.find((a) => a.is_active);
+      if (firstActive) {
+        setPayMethod(firstActive.payment_method);
+      } else {
+        setPayMethod("cash");
+      }
+    }
+  }, [receivingAccounts, payMethod]);
 
   // Realtime subscription for customer's live orders & payment changes
   useEffect(() => {
@@ -394,11 +496,19 @@ function AccountPage() {
   const handleUpdatePaymentMethod = async (order: Order) => {
     setSubmittingPayment(true);
     try {
+      const matchedAccount = receivingAccounts.find(
+        (a) => a.payment_method === payMethod && a.is_active,
+      );
+
       const methodName =
         payMethod === "telebirr"
-          ? "Telebirr Mobile"
+          ? matchedAccount
+            ? `Telebirr (${matchedAccount.account_number})`
+            : "Telebirr Mobile"
           : payMethod === "cbe"
-            ? "Bank Transfer (CBE)"
+            ? matchedAccount
+              ? `CBE (${matchedAccount.account_number})`
+              : "Bank Transfer (CBE)"
             : "Cash / In-Person";
 
       const updated = await updateOrderPaymentMethod({
@@ -775,7 +885,10 @@ function AccountPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void loadProfileAndOrders(session?.access_token, true)}
+            onClick={() => {
+              void loadProfileAndOrders(session?.access_token, true);
+              void loadReceivingAccounts();
+            }}
             disabled={refreshing}
             className="gap-1.5"
           >
@@ -948,7 +1061,7 @@ function AccountPage() {
 
               {/* Payment status and actions */}
               {primaryActiveOrder.paymentStatus !== "paid" ? (
-                <div className="space-y-2 pt-2 border-t border-border/60">
+                <div className="space-y-2.5 pt-2 border-t border-border/60">
                   <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 font-medium">
                     <AlertCircle className="size-3.5" />
                     <span>
@@ -957,6 +1070,58 @@ function AccountPage() {
                         : "Payment awaiting settlement"}
                     </span>
                   </div>
+
+                  {/* Active Admin Payment Accounts Quick Summary */}
+                  {receivingAccounts.length > 0 && (
+                    <div className="rounded-lg bg-card/60 border border-border p-2.5 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                        <span>Authorized Receiving Accounts</span>
+                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium normal-case">
+                          <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+                        </span>
+                      </div>
+                      <div className="grid gap-1.5">
+                        {receivingAccounts.map((acc) => (
+                          <div
+                            key={acc.id || acc.payment_method}
+                            className="flex items-center justify-between bg-secondary/40 px-2.5 py-1.5 rounded-md text-[11px]"
+                          >
+                            <div className="flex items-center gap-2">
+                              {acc.payment_method === "telebirr" ? (
+                                <Smartphone className="size-3.5 text-primary shrink-0" />
+                              ) : (
+                                <CreditCard className="size-3.5 text-primary shrink-0" />
+                              )}
+                              <div>
+                                <span className="font-semibold text-foreground">
+                                  {acc.payment_method === "telebirr" ? "Telebirr: " : "CBE: "}
+                                </span>
+                                <span className="font-mono font-bold text-primary">
+                                  {acc.account_number}
+                                </span>
+                                <span className="text-muted-foreground ml-1">
+                                  ({acc.account_owner_name})
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void navigator.clipboard?.writeText(acc.account_number);
+                                toast.success(
+                                  `${acc.payment_method === "telebirr" ? "Telebirr" : "CBE"} account number copied!`,
+                                );
+                              }}
+                              className="text-[10px] text-muted-foreground hover:text-foreground underline ml-2 shrink-0 cursor-pointer"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex flex-col sm:flex-row gap-2">
                     <Button
                       onClick={() => setPayingOrderId(primaryActiveOrder.id)}
@@ -1021,55 +1186,134 @@ function AccountPage() {
                 </div>
 
                 <div className="space-y-2.5">
-                  <Label className="text-xs font-semibold">Select Payment Method</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold">Select Payment Method</Label>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+                      <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live Admin Config
+                    </span>
+                  </div>
+
                   <div className="grid gap-2">
-                    {[
-                      {
-                        id: "telebirr" as const,
-                        name: "Telebirr Mobile",
-                        detail: "Till: 0911 234 567 (Rekik Coffee Lounge)",
-                        icon: Smartphone,
-                      },
-                      {
-                        id: "cbe" as const,
-                        name: "Bank Transfer (CBE)",
-                        detail: "Account: 1000 2345 67890 (Rekik Coffee)",
-                        icon: CreditCard,
-                      },
-                      {
-                        id: "cash" as const,
+                    {(() => {
+                      const telebirrAcc = receivingAccounts.find(
+                        (a) => a.payment_method === "telebirr" && a.is_active,
+                      );
+                      const cbeAcc = receivingAccounts.find(
+                        (a) => a.payment_method === "cbe" && a.is_active,
+                      );
+
+                      const options: Array<{
+                        id: "telebirr" | "cbe" | "cash";
+                        name: string;
+                        detail: string;
+                        icon: any;
+                        accountNumber?: string;
+                        ownerName?: string;
+                      }> = [];
+
+                      if (telebirrAcc) {
+                        options.push({
+                          id: "telebirr",
+                          name: "Telebirr Mobile",
+                          detail: `Till / Phone: ${telebirrAcc.account_number} (${telebirrAcc.account_owner_name})`,
+                          icon: Smartphone,
+                          accountNumber: telebirrAcc.account_number,
+                          ownerName: telebirrAcc.account_owner_name,
+                        });
+                      }
+
+                      if (cbeAcc) {
+                        options.push({
+                          id: "cbe",
+                          name: "Bank Transfer (CBE)",
+                          detail: `Account: ${cbeAcc.account_number} (${cbeAcc.account_owner_name})`,
+                          icon: CreditCard,
+                          accountNumber: cbeAcc.account_number,
+                          ownerName: cbeAcc.account_owner_name,
+                        });
+                      }
+
+                      // Cash / In-Person is always available
+                      options.push({
+                        id: "cash",
                         name: "Cash / In-Person",
                         detail: "Pay with server or delivery courier",
                         icon: Banknote,
-                      },
-                    ].map((m) => (
-                      <label
-                        key={m.id}
-                        className={cn(
-                          "flex items-center justify-between p-3 rounded-xl border text-xs cursor-pointer transition-all",
-                          payMethod === m.id
-                            ? "border-primary bg-accent/60 ring-1 ring-primary"
-                            : "border-border hover:bg-secondary/40",
-                        )}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <input
-                            type="radio"
-                            name="dash-pay"
-                            checked={payMethod === m.id}
-                            onChange={() => setPayMethod(m.id)}
-                            className="accent-[var(--primary)]"
-                          />
-                          <div>
-                            <p className="font-semibold text-foreground">{m.name}</p>
-                            <p className="text-[11px] text-muted-foreground">{m.detail}</p>
+                      });
+
+                      return options.map((m) => (
+                        <label
+                          key={m.id}
+                          className={cn(
+                            "flex items-center justify-between p-3 rounded-xl border text-xs cursor-pointer transition-all",
+                            payMethod === m.id
+                              ? "border-primary bg-accent/60 ring-1 ring-primary"
+                              : "border-border hover:bg-secondary/40",
+                          )}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <input
+                              type="radio"
+                              name="dash-pay"
+                              checked={payMethod === m.id}
+                              onChange={() => setPayMethod(m.id)}
+                              className="accent-[var(--primary)]"
+                            />
+                            <div>
+                              <p className="font-semibold text-foreground">{m.name}</p>
+                              <p className="text-[11px] text-muted-foreground">{m.detail}</p>
+                            </div>
                           </div>
-                        </div>
-                        <m.icon className="size-4 text-primary" />
-                      </label>
-                    ))}
+                          <m.icon className="size-4 text-primary" />
+                        </label>
+                      ));
+                    })()}
                   </div>
                 </div>
+
+                {/* Active receiving details & quick copy helper */}
+                {(() => {
+                  const selectedAccount = receivingAccounts.find(
+                    (a) => a.payment_method === payMethod && a.is_active,
+                  );
+                  if (!selectedAccount) return null;
+                  return (
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs space-y-1.5 animate-in fade-in">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-foreground">
+                          {selectedAccount.payment_method === "telebirr"
+                            ? "Telebirr Till / Phone"
+                            : "CBE Account Number"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void navigator.clipboard?.writeText(selectedAccount.account_number);
+                            toast.success("Account number copied to clipboard!");
+                          }}
+                          className="text-[11px] font-semibold text-primary hover:underline cursor-pointer"
+                        >
+                          Copy Number
+                        </button>
+                      </div>
+                      <p className="font-mono text-base font-bold text-primary tracking-wide">
+                        {selectedAccount.account_number}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Account Holder: <strong className="text-foreground">{selectedAccount.account_owner_name}</strong>
+                      </p>
+                    </div>
+                  );
+                })()}
+
+                {receivingAccounts.length === 0 && !loadingAccounts && (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                    <p className="font-medium">Digital payment accounts offline</p>
+                    <p className="text-[11px] mt-0.5">
+                      The administration has temporarily disabled mobile banking settlements. Please settle in cash with your server or courier.
+                    </p>
+                  </div>
+                )}
 
                 <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-xs text-muted-foreground space-y-1">
                   <p className="font-semibold text-foreground">Waiter & Cashier Settlement</p>
@@ -1265,10 +1509,10 @@ function AccountPage() {
         )}
       </section>
 
-      {/* 4. SAVED LOCATIONS & PROFILE INFO */}
+      {/* 4. SAVED LOCATIONS, PROFILE INFO & OFFICIAL PAYMENT ACCOUNTS */}
       <section
         aria-labelledby="profile-details-title"
-        className="grid gap-6 md:grid-cols-2 pt-4 border-t border-border"
+        className="grid gap-6 md:grid-cols-3 pt-4 border-t border-border"
       >
         <div className="surface-card p-6 space-y-3">
           <div className="flex items-center gap-2 text-primary font-semibold">
@@ -1310,6 +1554,91 @@ function AccountPage() {
               No saved addresses yet. When you place delivery orders, your locations will be
               recorded here.
             </p>
+          )}
+        </div>
+
+        {/* CUSTOMER ACCOUNT-PAYMENT SECTION */}
+        <div id="customer-account-payment-section" className="surface-card p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-primary font-semibold">
+              <Wallet className="size-4" />
+              <h3 className="font-display text-base">Payment Accounts</h3>
+            </div>
+            <Badge
+              variant="outline"
+              className="text-[10px] gap-1 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+            >
+              <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+            </Badge>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Active payment accounts configured by Rekik Café admin in{" "}
+            <code className="font-mono text-[11px] bg-muted px-1 py-0.5 rounded">
+              payment_account_settings
+            </code>
+            .
+          </p>
+
+          {loadingAccounts && receivingAccounts.length === 0 ? (
+            <div className="py-4 text-center">
+              <p className="text-xs text-muted-foreground animate-pulse">
+                Fetching active payment accounts…
+              </p>
+            </div>
+          ) : receivingAccounts.length > 0 ? (
+            <div className="space-y-2">
+              {receivingAccounts.map((acc) => (
+                <div
+                  key={acc.id || acc.payment_method}
+                  className="rounded-lg border border-border/80 bg-secondary/30 p-2.5 text-xs space-y-1"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-foreground flex items-center gap-1.5">
+                      {acc.payment_method === "telebirr" ? (
+                        <>
+                          <Smartphone className="size-3.5 text-primary" />
+                          <span>Telebirr Mobile</span>
+                        </>
+                      ) : (
+                        <>
+                          <CreditCard className="size-3.5 text-primary" />
+                          <span>Bank Transfer (CBE)</span>
+                        </>
+                      )}
+                    </span>
+                    <Badge variant="secondary" className="text-[10px] py-0 px-1.5 bg-primary/10 text-primary">
+                      Active
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between pt-0.5">
+                    <span className="font-mono text-xs font-bold text-primary">
+                      {acc.account_number}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(acc.account_number);
+                        toast.success(
+                          `${acc.payment_method === "telebirr" ? "Telebirr" : "CBE"} account copied!`,
+                        );
+                      }}
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Holder: <strong className="text-foreground/80">{acc.account_owner_name}</strong>
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
+              <p>No digital payment accounts are currently active.</p>
+              <p className="text-[11px] mt-1">Please settle orders in cash with your server or courier.</p>
+            </div>
           )}
         </div>
       </section>

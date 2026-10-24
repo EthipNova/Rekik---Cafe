@@ -69,6 +69,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -99,7 +100,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/site/Section";
 import { formatETB } from "@/lib/menu-data";
-import { statusLabels } from "@/lib/orders";
+import { statusLabels, type OrderStatus } from "@/lib/orders";
 import { readSettings } from "@/lib/settings";
 import { supabase } from "@/lib/supabase";
 import {
@@ -264,6 +265,7 @@ function RekikStaffMonitoringPage() {
   const [registerRole, setRegisterRole] = useState<"waiter" | "cashier">("waiter");
   const [registerName, setRegisterName] = useState("");
   const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPhone, setRegisterPhone] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
@@ -477,6 +479,7 @@ function RekikStaffMonitoringPage() {
 
     const name = registerName.trim();
     const email = registerEmail.trim().toLowerCase();
+    const phone = registerPhone.trim();
     const password = registerPassword;
 
     if (!name) {
@@ -487,6 +490,11 @@ function RekikStaffMonitoringPage() {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email || !emailRegex.test(email)) {
       setRegisterError("A valid email address is required.");
+      return;
+    }
+
+    if (phone && !/^[0-9+\s()-]{7,20}$/.test(phone)) {
+      setRegisterError("Enter a valid phone number (at least 7 digits, e.g. +251 91 123 4567 or 0911234567).");
       return;
     }
 
@@ -514,6 +522,7 @@ function RekikStaffMonitoringPage() {
           email,
           password,
           role: registerRole,
+          phone: phone || undefined,
         }),
       });
 
@@ -534,6 +543,7 @@ function RekikStaffMonitoringPage() {
       toast.success(`Registered ${name} as ${registerRole}`);
       setRegisterName("");
       setRegisterEmail("");
+      setRegisterPhone("");
       setRegisterPassword("");
       await loadData();
       setTimeout(() => {
@@ -587,6 +597,65 @@ function RekikStaffMonitoringPage() {
       toast.error(msg);
     } finally {
       setStatusLoading(false);
+    }
+  };
+
+  // Edit Staff Password State (Waiters & Cashiers)
+  const [passwordEditStaff, setPasswordEditStaff] = useState<StaffProfileRecord | null>(null);
+  const [editNewPassword, setEditNewPassword] = useState("");
+  const [editConfirmPassword, setEditConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  const handleUpdatePassword = async () => {
+    if (!passwordEditStaff) return;
+    const cleanPassword = editNewPassword.trim();
+    if (cleanPassword.length < 6) {
+      setPasswordError("Password must be at least 6 characters long.");
+      return;
+    }
+    if (cleanPassword !== editConfirmPassword.trim()) {
+      setPasswordError("New password and confirmation do not match.");
+      return;
+    }
+
+    setPasswordSubmitting(true);
+    setPasswordError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch("/api/admin/staff/password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          userId: passwordEditStaff.userId,
+          password: cleanPassword,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error || json.message || "Failed to update staff password.");
+      }
+
+      toast.success(`Password updated successfully for ${passwordEditStaff.fullName}`);
+      setPasswordEditStaff(null);
+      setEditNewPassword("");
+      setEditConfirmPassword("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to update password";
+      setPasswordError(msg);
+      toast.error(msg);
+    } finally {
+      setPasswordSubmitting(false);
     }
   };
 
@@ -720,6 +789,51 @@ function RekikStaffMonitoringPage() {
     if (!selectedStaffUserId || !data) return [];
     return data.workload.ordersAssignedToWaiters.filter((o) => o.waiterId === selectedStaffUserId);
   }, [selectedStaffUserId, data]);
+
+  // Real historical orders handled/assigned to the selected waiter
+  const selectedWaiterHistory = useMemo(() => {
+    if (!selectedStaff || selectedStaff.role.toLowerCase() !== "waiter" || !data?.rawOrders) {
+      return [];
+    }
+    return (data.rawOrders || []).filter(
+      (o: any) => (o.waiter_id || o.waiterId) === selectedStaff.userId,
+    );
+  }, [selectedStaff, data?.rawOrders]);
+
+  // Real historical payment reviews handled by the selected cashier
+  const selectedCashierHistory = useMemo(() => {
+    if (!selectedStaff || selectedStaff.role.toLowerCase() !== "cashier" || !data?.rawReviews) {
+      return [];
+    }
+    const ordersMap = new Map<string, any>();
+    (data.rawOrders || []).forEach((o: any) => ordersMap.set(o.id, o));
+    const proofsMap = new Map<string, any>();
+    (data.rawProofs || []).forEach((p: any) => proofsMap.set(p.id, p));
+
+    return (data.rawReviews || [])
+      .filter((r: any) => (r.cashier_id || r.cashierId) === selectedStaff.userId)
+      .map((r: any) => {
+        const proof = proofsMap.get(r.payment_proof_id || r.paymentProofId);
+        const order = proof ? ordersMap.get(proof.order_id || proof.orderId) : null;
+        return {
+          reviewId: r.id,
+          decision: r.decision || "approved",
+          reason: r.reason || null,
+          reviewedAt: r.reviewed_at || r.reviewedAt || new Date().toISOString(),
+          orderNumber:
+            order?.order_number ||
+            order?.orderNumber ||
+            (proof?.order_id ? `#${proof.order_id.slice(0, 4)}` : "—"),
+          customerName:
+            order?.customer_name || order?.customerName || proof?.customer_name || "Customer",
+          paymentMethod:
+            order?.payment_method || order?.paymentMethod || proof?.payment_method || "Mobile Banking",
+          amount:
+            Number(proof?.submitted_amount ?? proof?.amount ?? order?.total ?? order?.total_amount) || 0,
+          proofStatus: proof?.status || "reviewed",
+        };
+      });
+  }, [selectedStaff, data?.rawReviews, data?.rawOrders, data?.rawProofs]);
 
   return (
     <div className="relative min-h-[calc(100vh-8rem)] space-y-6 sm:space-y-8 p-4 sm:p-6 lg:p-8 rounded-2xl border border-amber-950/15 dark:border-amber-900/30 bg-gradient-to-b from-[#FAF8F5] via-[#FCFAF6] to-[#F5F2EB] dark:from-[#181310] dark:via-[#140F0C] dark:to-[#0F0B09] shadow-sm overflow-hidden">
@@ -879,7 +993,7 @@ function RekikStaffMonitoringPage() {
           )}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           {/* KPI 1: Registered Staff Accounts */}
           <Card className="border-amber-900/15 dark:border-amber-800/25 border-l-4 border-l-[#8B4513] dark:border-l-[#D27D2D] bg-card/90 dark:bg-[#1a1411]/90 shadow-xs hover:border-amber-800/30 transition-all">
             <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
@@ -904,68 +1018,6 @@ function RekikStaffMonitoringPage() {
                 {data
                   ? `${data.roleCounts.waiter || 0} Waiters · ${data.roleCounts.cashier || 0} Cashiers · ${data.roleCounts.admin || 0} Admins`
                   : "Verified staff profiles from database."}
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* KPI 2: Waiter Operational Queue */}
-          <Card className="border-amber-900/15 dark:border-amber-800/25 border-l-4 border-l-[#C17A44] dark:border-l-[#E09858] bg-card/90 dark:bg-[#1a1411]/90 shadow-xs hover:border-amber-700/30 transition-all">
-            <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Waiter Queue
-              </span>
-              <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300">
-                <UtensilsCrossed className="size-4" aria-hidden />
-              </div>
-            </CardHeader>
-            <CardContent className="p-4 pt-0 space-y-2">
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-display text-2xl font-bold text-foreground">
-                  {data ? data.workload.ordersAwaitingWaiterReview.length : "—"}
-                </span>
-                <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                  Awaiting Review
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>
-                  <strong>{data?.workload.ordersAssignedToWaiters.length ?? 0}</strong> active in
-                  service
-                </span>
-              </div>
-              <p className="text-[10px] text-muted-foreground border-t border-border/60 pt-1.5 leading-snug">
-                Orders awaiting waiter acceptance or actively being served.
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* KPI 3: Cashier Review Queue */}
-          <Card className="border-amber-900/15 dark:border-amber-800/25 border-l-4 border-l-emerald-600 dark:border-l-emerald-500 bg-card/90 dark:bg-[#1a1411]/90 shadow-xs hover:border-emerald-700/30 transition-all">
-            <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Cashier Review Queue
-              </span>
-              <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                <FileCheck2 className="size-4" aria-hidden />
-              </div>
-            </CardHeader>
-            <CardContent className="p-4 pt-0 space-y-2">
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-display text-2xl font-bold text-foreground">
-                  {data ? data.workload.paymentProofsAwaitingCashierReview.length : "—"}
-                </span>
-                <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                  Proofs Pending
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>
-                  <strong>{data?.workload.ordersAwaitingPayment.length ?? 0}</strong> awaiting
-                  payment
-                </span>
-              </div>
-              <p className="text-[10px] text-muted-foreground border-t border-border/60 pt-1.5 leading-snug">
-                Payment proofs submitted by customers awaiting cashier decision.
               </p>
             </CardContent>
           </Card>
@@ -1019,32 +1071,6 @@ function RekikStaffMonitoringPage() {
                   {filteredStaff.length}
                 </Badge>
               )}
-            </TabsTrigger>
-            <TabsTrigger value="workload" className="text-xs gap-1.5">
-              <ShoppingBag className="size-3.5" />
-              <span>Operational Workload</span>
-              {data &&
-                data.workload.ordersAwaitingWaiterReview.length +
-                  data.workload.paymentProofsAwaitingCashierReview.length >
-                  0 && (
-                  <Badge variant="destructive" className="text-[10px] ml-1 px-1.5 py-0">
-                    {data.workload.ordersAwaitingWaiterReview.length +
-                      data.workload.paymentProofsAwaitingCashierReview.length}
-                  </Badge>
-                )}
-            </TabsTrigger>
-            <TabsTrigger value="activity" className="text-xs gap-1.5">
-              <Activity className="size-3.5" />
-              <span>Activity & Decisions Log</span>
-              {data && (
-                <Badge variant="secondary" className="text-[10px] ml-1 px-1.5 py-0">
-                  {filteredActivities.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="governance" className="text-xs gap-1.5">
-              <Bell className="size-3.5" />
-              <span>Notifications & Audits</span>
             </TabsTrigger>
           </TabsList>
 
@@ -1120,7 +1146,6 @@ function RekikStaffMonitoringPage() {
                   <SelectItem value="waiter">Waiters</SelectItem>
                   <SelectItem value="cashier">Cashiers</SelectItem>
                   <SelectItem value="admin">Administrators</SelectItem>
-                  <SelectItem value="kitchen">Kitchen Staff</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -1318,6 +1343,27 @@ function RekikStaffMonitoringPage() {
                                   )}
                                 </Button>
                               )}
+                            {isAdmin &&
+                              (staff.role.toLowerCase() === "waiter" ||
+                                staff.role.toLowerCase() === "cashier") && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs font-medium border-border/80 text-foreground hover:bg-muted"
+                                  onClick={() => {
+                                    setPasswordEditStaff(staff);
+                                    setEditNewPassword("");
+                                    setEditConfirmPassword("");
+                                    setShowNewPassword(false);
+                                    setShowConfirmPassword(false);
+                                    setPasswordError(null);
+                                  }}
+                                  aria-label={`Edit password for ${staff.fullName}`}
+                                >
+                                  <KeyRound className="size-3 mr-1 text-primary" />
+                                  Password
+                                </Button>
+                              )}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1336,516 +1382,6 @@ function RekikStaffMonitoringPage() {
               </div>
             </div>
           )}
-        </TabsContent>
-
-        {/* ── TAB 2: OPERATIONAL WORKLOAD QUEUES (PHASE 6) ─────────────────── */}
-        <TabsContent value="workload" className="space-y-6 m-0">
-          <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 text-xs text-muted-foreground flex items-start gap-3">
-            <Info className="size-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="font-semibold text-foreground">
-                Operational Workload Monitoring Overview
-              </p>
-              <p>
-                This monitoring interface reflects active queue balances across Rekik Coffee&apos;s
-                5-stage workflow. Order acceptances, waiter reassignments, and payment verifications
-                must strictly be executed through authorized staff stations to uphold operational
-                integrity.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* 1. Orders Awaiting Waiter Review */}
-            <Card className="shadow-xs">
-              <CardHeader className="p-4 pb-2 border-b border-border/60">
-                <CardTitle className="font-display text-sm font-semibold flex items-center justify-between">
-                  <span>Orders Awaiting Waiter Review</span>
-                  <Badge
-                    variant="outline"
-                    className="bg-amber-500/10 text-amber-600 border-amber-500/30 text-xs"
-                  >
-                    {data?.workload.ordersAwaitingWaiterReview.length ?? 0}
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Incoming orders awaiting waiter acceptance or table assignment
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                {data && data.workload.ordersAwaitingWaiterReview.length > 0 ? (
-                  <div className="divide-y divide-border/60 max-h-[300px] overflow-y-auto">
-                    {data.workload.ordersAwaitingWaiterReview.map((ord) => (
-                      <div
-                        key={ord.orderId}
-                        className="p-3 text-xs flex items-center justify-between"
-                      >
-                        <div className="space-y-0.5">
-                          <p className="font-semibold text-foreground">
-                            Order {ord.orderNumber}{" "}
-                            <span className="text-muted-foreground font-normal">
-                              · {ord.customerName}
-                            </span>
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {ord.method === "dine-in"
-                              ? `Table ${ord.tableNumber || "Unassigned"}`
-                              : ord.method === "takeaway"
-                                ? "Takeaway"
-                                : "Delivery"}{" "}
-                            ·{" "}
-                            {new Date(ord.createdAt).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </p>
-                        </div>
-                        <span className="font-display font-bold text-primary">
-                          {formatETB(ord.totalAmount)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground p-6 text-center">
-                    No orders currently awaiting waiter review.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* 2. Payment Proofs Awaiting Cashier Review */}
-            <Card className="shadow-xs">
-              <CardHeader className="p-4 pb-2 border-b border-border/60">
-                <CardTitle className="font-display text-sm font-semibold flex items-center justify-between">
-                  <span>Proofs Awaiting Cashier Review</span>
-                  <Badge
-                    variant="outline"
-                    className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-xs"
-                  >
-                    {data?.workload.paymentProofsAwaitingCashierReview.length ?? 0}
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Customer payment uploads pending cashier station audit
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                {data && data.workload.paymentProofsAwaitingCashierReview.length > 0 ? (
-                  <div className="divide-y divide-border/60 max-h-[300px] overflow-y-auto">
-                    {data.workload.paymentProofsAwaitingCashierReview.map((proof) => (
-                      <div
-                        key={proof.proofId}
-                        className="p-3 text-xs flex items-center justify-between"
-                      >
-                        <div className="space-y-0.5">
-                          <p className="font-semibold text-foreground">
-                            Order {proof.orderNumber}{" "}
-                            <span className="text-muted-foreground font-normal">
-                              · {proof.customerName}
-                            </span>
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Ref: {proof.transactionReference || "None"} ·{" "}
-                            {new Date(proof.submittedAt).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </p>
-                        </div>
-                        <span className="font-display font-bold text-primary">
-                          {formatETB(proof.submittedAmount)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground p-6 text-center">
-                    No payment proofs pending cashier audit.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* 3. Active Waiter Assignments */}
-            <Card className="shadow-xs">
-              <CardHeader className="p-4 pb-2 border-b border-border/60">
-                <CardTitle className="font-display text-sm font-semibold flex items-center justify-between">
-                  <span>Active Waiter Service Assignments</span>
-                  <Badge variant="secondary" className="text-xs">
-                    {data?.workload.ordersAssignedToWaiters.length ?? 0}
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Orders actively handled by specific waiters
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                {data && data.workload.ordersAssignedToWaiters.length > 0 ? (
-                  <div className="divide-y divide-border/60 max-h-[300px] overflow-y-auto">
-                    {data.workload.ordersAssignedToWaiters.map((ord) => (
-                      <div
-                        key={ord.orderId}
-                        className="p-3 text-xs flex items-center justify-between"
-                      >
-                        <div className="space-y-0.5">
-                          <p className="font-semibold text-foreground">
-                            Order {ord.orderNumber}{" "}
-                            <span className="text-muted-foreground font-normal">
-                              · Table {ord.tableNumber || "—"}
-                            </span>
-                          </p>
-                          <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">
-                            Waiter: {ord.waiterName}
-                          </p>
-                        </div>
-                        <Badge variant="outline" className="text-[10px] capitalize">
-                          {statusLabels[ord.status] || ord.status}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground p-6 text-center">
-                    No active orders currently assigned to waiters.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* 4. Recently Rejected Operational Items */}
-            <Card className="shadow-xs">
-              <CardHeader className="p-4 pb-2 border-b border-border/60">
-                <CardTitle className="font-display text-sm font-semibold flex items-center justify-between">
-                  <span>Recent Operational Rejections</span>
-                  <Badge variant="destructive" className="text-xs">
-                    {data?.workload.recentlyRejectedItems.length ?? 0}
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Rejection logs with recorded operational rationale
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                {data && data.workload.recentlyRejectedItems.length > 0 ? (
-                  <div className="divide-y divide-border/60 max-h-[300px] overflow-y-auto">
-                    {data.workload.recentlyRejectedItems.map((rej, idx) => (
-                      <div key={idx} className="p-3 text-xs space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-destructive">
-                            Order {rej.orderNumber}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {new Date(rej.timestamp).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                        <p className="text-xs text-foreground">
-                          <strong>By:</strong> {rej.actorName}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground italic bg-muted/40 p-1.5 rounded">
-                          &quot;{rej.reason}&quot;
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground p-6 text-center">
-                    No operational rejections recorded in recent activity.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* ── TAB 3: STAFF ACTIVITY & ORDER ACCOUNTABILITY (PHASE 5) ───────── */}
-        <TabsContent value="activity" className="space-y-4 m-0">
-          {/* Activity Filters Toolbar */}
-          <div className="surface-card p-4 space-y-3 rounded-xl border border-border/80">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Search */}
-              <div className="relative">
-                <Search
-                  className="absolute left-3 top-2.5 size-4 text-muted-foreground"
-                  aria-hidden
-                />
-                <Input
-                  placeholder="Search order #, actor, reason…"
-                  value={activitySearchQuery}
-                  onChange={(e) => setActivitySearchQuery(e.target.value)}
-                  className="pl-9 h-9 text-xs"
-                />
-              </div>
-
-              {/* Activity Type Filter */}
-              <Select value={activityTypeFilter} onValueChange={setActivityTypeFilter}>
-                <SelectTrigger className="h-9 text-xs">
-                  <SelectValue placeholder="All activity types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All activity types</SelectItem>
-                  <SelectItem value="waiter_approval">Waiter Approvals</SelectItem>
-                  <SelectItem value="cashier_review">Cashier Payment Reviews</SelectItem>
-                  <SelectItem value="status_transition">Order Transitions</SelectItem>
-                  <SelectItem value="audit_log">Admin Audit Logs</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {/* Specific Staff Filter */}
-              <Select value={activityStaffFilter} onValueChange={setActivityStaffFilter}>
-                <SelectTrigger className="h-9 text-xs">
-                  <SelectValue placeholder="All staff members" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All staff actors</SelectItem>
-                  {data?.staffProfiles.map((s) => (
-                    <SelectItem key={s.userId} value={s.userId}>
-                      {s.fullName} ({s.role})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Reset */}
-              <div className="flex items-center justify-end">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-9 text-xs gap-1.5 text-primary"
-                  onClick={() => {
-                    setActivitySearchQuery("");
-                    setActivityTypeFilter("all");
-                    setActivityStaffFilter("all");
-                  }}
-                >
-                  <RotateCcw className="size-3.5" />
-                  Reset activity filters
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {/* Activity Log Feed */}
-          {loading && !data ? (
-            <div className="surface-card p-12 text-center text-sm text-muted-foreground rounded-xl">
-              <p className="animate-pulse">Loading activity records from database…</p>
-            </div>
-          ) : filteredActivities.length === 0 ? (
-            <div className="surface-card p-12 text-center space-y-3 rounded-xl">
-              <p className="text-base font-medium">No activity records found</p>
-              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                No staff actions recorded for this filter configuration and date window.
-              </p>
-            </div>
-          ) : (
-            <div className="surface-card overflow-hidden rounded-xl border border-border/80">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/40 hover:bg-muted/40 text-xs">
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Timestamp (EAT)
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Action Type
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Staff Actor
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Order #
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Decision / Transition
-                      </TableHead>
-                      <TableHead className="font-semibold uppercase tracking-wider">
-                        Operational Details & Notes
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody className="text-xs">
-                    {filteredActivities.map((act) => (
-                      <TableRow key={act.id} className="hover:bg-muted/30">
-                        {/* Timestamp */}
-                        <TableCell className="text-muted-foreground whitespace-nowrap">
-                          {new Date(act.timestamp).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                          })}{" "}
-                          ·{" "}
-                          {new Date(act.timestamp).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </TableCell>
-
-                        {/* Type */}
-                        <TableCell className="whitespace-nowrap">
-                          <ActivityTypeBadge type={act.activityType} />
-                        </TableCell>
-
-                        {/* Actor */}
-                        <TableCell className="font-medium text-foreground whitespace-nowrap">
-                          {act.actorName}
-                          <span className="block text-[10px] text-muted-foreground capitalize">
-                            {act.actorRole}
-                          </span>
-                        </TableCell>
-
-                        {/* Order */}
-                        <TableCell className="font-display font-semibold text-foreground whitespace-nowrap">
-                          {act.orderNumber || "—"}
-                        </TableCell>
-
-                        {/* Decision / Transition */}
-                        <TableCell className="whitespace-nowrap">
-                          {act.decision === "approved" ? (
-                            <Badge
-                              variant="outline"
-                              className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[11px] gap-1"
-                            >
-                              <CheckCircle2 className="size-3" /> Approved
-                            </Badge>
-                          ) : act.decision === "rejected" ? (
-                            <Badge variant="destructive" className="text-[11px] gap-1">
-                              <XCircle className="size-3" /> Rejected
-                            </Badge>
-                          ) : act.fromStatus && act.toStatus ? (
-                            <div className="flex items-center gap-1 font-mono text-[11px]">
-                              <span>{act.fromStatus}</span>
-                              <span className="text-muted-foreground">→</span>
-                              <span className="font-semibold text-primary">{act.toStatus}</span>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground capitalize">
-                              {act.decision || "Executed"}
-                            </span>
-                          )}
-                        </TableCell>
-
-                        {/* Details */}
-                        <TableCell className="max-w-[320px] text-muted-foreground">
-                          {act.reason && (
-                            <p className="text-destructive font-medium truncate">
-                              Reason: {act.reason}
-                            </p>
-                          )}
-                          {act.notes && <p className="text-foreground truncate">{act.notes}</p>}
-                          {act.actionDetails && (
-                            <p className="font-mono text-[11px] text-muted-foreground truncate">
-                              {act.actionDetails}
-                            </p>
-                          )}
-                          {!act.reason && !act.notes && !act.actionDetails && "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-        </TabsContent>
-
-        {/* ── TAB 4: NOTIFICATIONS & AUDIT HISTORY (PHASE 7) ───────────────── */}
-        <TabsContent value="governance" className="space-y-6 m-0">
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* System Notifications */}
-            <Card className="shadow-xs">
-              <CardHeader className="p-4 pb-2 border-b border-border/60">
-                <CardTitle className="font-display text-sm font-semibold flex items-center justify-between">
-                  <span>System Staff Notifications</span>
-                  <Bell className="size-4 text-muted-foreground" />
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Operational alerts broadcast to staff devices and terminals
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                {data && data.notifications.length > 0 ? (
-                  <div className="divide-y divide-border/60 max-h-[360px] overflow-y-auto">
-                    {data.notifications.map((n) => (
-                      <div key={n.id} className="p-3 text-xs space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-foreground flex items-center gap-1.5">
-                            {!n.isRead && (
-                              <span className="size-1.5 rounded-full bg-primary inline-block" />
-                            )}
-                            {n.title}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {new Date(n.createdAt).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                        <p className="text-muted-foreground text-xs">{n.message}</p>
-                        {n.orderNumber && (
-                          <span className="font-mono text-[10px] text-primary">
-                            Order {n.orderNumber}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground p-8 text-center">
-                    No system notifications logged.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Administrative Audit Logs */}
-            <Card className="shadow-xs">
-              <CardHeader className="p-4 pb-2 border-b border-border/60">
-                <CardTitle className="font-display text-sm font-semibold flex items-center justify-between">
-                  <span>Administrative Audit Logs</span>
-                  <ShieldCheck className="size-4 text-primary" />
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Security-sensitive administrative mutations and system events
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                {data && data.auditLogs.length > 0 ? (
-                  <div className="divide-y divide-border/60 max-h-[360px] overflow-y-auto">
-                    {data.auditLogs.map((al) => (
-                      <div key={al.id} className="p-3 text-xs space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-foreground">{al.action}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {new Date(al.createdAt).toLocaleString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground font-mono">
-                          Entity: {al.entityType} ({al.entityId})
-                        </p>
-                        {al.details && (
-                          <p className="text-[11px] text-muted-foreground bg-muted/40 p-1.5 rounded truncate">
-                            {al.details}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground p-8 text-center">
-                    No administrative audit events recorded in database.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
         </TabsContent>
       </Tabs>
 
@@ -1964,15 +1500,166 @@ function RekikStaffMonitoringPage() {
                 </div>
               </section>
 
-              {/* Active Assigned Orders */}
-              <section aria-labelledby="drawer-staff-orders" className="space-y-3">
-                <h3
-                  id="drawer-staff-orders"
-                  className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  Active Assigned Orders ({selectedStaffOrders.length})
-                </h3>
-                {selectedStaffOrders.length > 0 ? (
+              {/* Staff Role Specific Order & Workload History */}
+              {selectedStaff.role.toLowerCase() === "waiter" && (
+                <section aria-labelledby="drawer-waiter-history" className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3
+                      id="drawer-waiter-history"
+                      className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                    >
+                      Waiter Order History ({selectedWaiterHistory.length})
+                    </h3>
+                    <Badge variant="outline" className="text-[10px]">
+                      Assigned Orders
+                    </Badge>
+                  </div>
+                  {selectedWaiterHistory.length > 0 ? (
+                    <div className="rounded-xl border border-border bg-card/60 divide-y divide-border/60 overflow-hidden text-xs max-h-72 overflow-y-auto">
+                      {selectedWaiterHistory.map((ord: any) => {
+                        const orderNum =
+                          ord.order_number || ord.orderNumber || `#${String(ord.id).slice(0, 4)}`;
+                        const custName = ord.customer_name || ord.customerName || "Customer";
+                        const custPhone = ord.customer_phone || ord.customerPhone || null;
+                        const dateStr = ord.created_at || ord.createdAt;
+                        const method = ord.method || ord.orderMethod || "dine-in";
+                        const table = ord.table_number || ord.tableNumber;
+                        const totalVal = Number(ord.total_amount ?? ord.total) || 0;
+                        const status = ord.status || "pending";
+                        const itemsCount = Array.isArray(ord.items || ord.order_items)
+                          ? (ord.items || ord.order_items).length
+                          : 0;
+
+                        return (
+                          <div
+                            key={ord.id}
+                            className="p-3 space-y-1.5 hover:bg-muted/30 transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-foreground">Order {orderNum}</span>
+                              <Badge variant="outline" className="text-[10px] capitalize">
+                                {(statusLabels as Record<string, string>)[status] || status}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                              <span>
+                                {custName} {custPhone ? `(${custPhone})` : ""} ·{" "}
+                                {table ? `Table #${table}` : method}
+                              </span>
+                              <span className="font-semibold text-foreground font-display">
+                                {formatETB(totalVal)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                              <span>{itemsCount > 0 ? `${itemsCount} item(s)` : method}</span>
+                              <span>
+                                {dateStr
+                                  ? new Date(dateStr).toLocaleDateString("en-US", {
+                                      month: "short",
+                                      day: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })
+                                  : "—"}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic p-3 bg-muted/20 rounded-xl">
+                      No historical orders recorded for this waiter.
+                    </p>
+                  )}
+                </section>
+              )}
+
+              {selectedStaff.role.toLowerCase() === "cashier" && (
+                <section aria-labelledby="drawer-cashier-history" className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3
+                      id="drawer-cashier-history"
+                      className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                    >
+                      Cashier Review History ({selectedCashierHistory.length})
+                    </h3>
+                    <Badge variant="outline" className="text-[10px]">
+                      Payment Audits
+                    </Badge>
+                  </div>
+                  {selectedCashierHistory.length > 0 ? (
+                    <div className="rounded-xl border border-border bg-card/60 divide-y divide-border/60 overflow-hidden text-xs max-h-72 overflow-y-auto">
+                      {selectedCashierHistory.map((rev: any) => {
+                        const isApproved = rev.decision === "approved";
+
+                        return (
+                          <div
+                            key={rev.reviewId}
+                            className="p-3 space-y-1.5 hover:bg-muted/30 transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-foreground">
+                                Order {rev.orderNumber}
+                              </span>
+                              {isApproved ? (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[10px] gap-1"
+                                >
+                                  <CheckCircle2 className="size-3" /> Approved
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-destructive/10 text-destructive border-destructive/30 text-[10px] gap-1"
+                                >
+                                  <XCircle className="size-3" /> Rejected
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                              <span>
+                                {rev.customerName} · {rev.paymentMethod}
+                              </span>
+                              <span className="font-semibold text-foreground font-display">
+                                {formatETB(rev.amount)}
+                              </span>
+                            </div>
+                            {rev.reason && (
+                              <p className="text-[11px] text-muted-foreground italic bg-muted/40 p-1.5 rounded">
+                                &quot;{rev.reason}&quot;
+                              </p>
+                            )}
+                            <div className="text-[10px] text-muted-foreground text-right">
+                              {new Date(rev.reviewedAt).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic p-3 bg-muted/20 rounded-xl">
+                      No payment reviews handled by this cashier yet.
+                    </p>
+                  )}
+                </section>
+              )}
+
+              {/* Active Assigned Orders (for Waiters currently in service) */}
+              {selectedStaffOrders.length > 0 && selectedStaff.role.toLowerCase() !== "cashier" && (
+                <section aria-labelledby="drawer-staff-orders" className="space-y-3">
+                  <h3
+                    id="drawer-staff-orders"
+                    className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  >
+                    Active In Service ({selectedStaffOrders.length})
+                  </h3>
                   <div className="rounded-xl border border-border bg-card/60 divide-y divide-border/60 overflow-hidden text-xs">
                     {selectedStaffOrders.map((ord) => (
                       <div key={ord.orderId} className="p-3 flex items-center justify-between">
@@ -1988,12 +1675,8 @@ function RekikStaffMonitoringPage() {
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground italic p-3 bg-muted/20 rounded-xl">
-                    No orders currently assigned in service.
-                  </p>
-                )}
-              </section>
+                </section>
+              )}
 
               {/* Close Button */}
               <div className="pt-2 mt-auto border-t border-border">
@@ -2138,6 +1821,24 @@ function RekikStaffMonitoringPage() {
                   disabled={registerLoading}
                   className="h-9 text-xs"
                   autoComplete="email"
+                />
+              </div>
+
+              {/* Phone Number Field */}
+              <div className="space-y-1.5">
+                <Label htmlFor="staff-phone-input" className="text-xs font-medium">
+                  Phone Number <span className="text-muted-foreground text-[11px]">(optional)</span>
+                </Label>
+                <Input
+                  id="staff-phone-input"
+                  name="phone"
+                  type="tel"
+                  placeholder="e.g. +251 91 123 4567 or 0911234567"
+                  value={registerPhone}
+                  onChange={(e) => setRegisterPhone(e.target.value)}
+                  disabled={registerLoading}
+                  className="h-9 text-xs"
+                  autoComplete="tel"
                 />
               </div>
 
@@ -2641,6 +2342,149 @@ function RekikStaffMonitoringPage() {
                   <>
                     <Check className="size-3.5" />
                     <span>Save Account Details</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 8. EDIT STAFF PASSWORD MODAL (WAITERS & CASHIERS) ───────────── */}
+      <Dialog
+        open={passwordEditStaff !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPasswordEditStaff(null);
+            setEditNewPassword("");
+            setEditConfirmPassword("");
+            setPasswordError(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="font-display text-base font-bold flex items-center gap-2">
+              <KeyRound className="size-4 text-primary" />
+              <span>Reset Staff Password</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {passwordEditStaff && (
+                <>
+                  Set a new password for{" "}
+                  <strong className="text-foreground">{passwordEditStaff.fullName}</strong> (
+                  <span className="capitalize">{passwordEditStaff.role}</span>) · Auth ID:{" "}
+                  <code className="font-mono text-[11px]">{passwordEditStaff.userId.slice(0, 8)}…</code>
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleUpdatePassword();
+            }}
+            className="space-y-3.5 pt-2"
+          >
+            {/* Field: New Password */}
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-staff-new-password" className="text-xs font-medium">
+                New Password <span className="text-destructive">*</span>
+              </Label>
+              <div className="relative">
+                <Input
+                  id="edit-staff-new-password"
+                  type={showNewPassword ? "text" : "password"}
+                  placeholder="Min. 6 characters"
+                  value={editNewPassword}
+                  onChange={(e) => setEditNewPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  disabled={passwordSubmitting}
+                  className="h-9 text-xs pr-9 font-mono"
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label={showNewPassword ? "Hide password" : "Show password"}
+                >
+                  {showNewPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Field: Confirm New Password */}
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-staff-confirm-password" className="text-xs font-medium">
+                Confirm New Password <span className="text-destructive">*</span>
+              </Label>
+              <div className="relative">
+                <Input
+                  id="edit-staff-confirm-password"
+                  type={showConfirmPassword ? "text" : "password"}
+                  placeholder="Re-enter new password"
+                  value={editConfirmPassword}
+                  onChange={(e) => setEditConfirmPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  disabled={passwordSubmitting}
+                  className="h-9 text-xs pr-9 font-mono"
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                >
+                  {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+            </div>
+
+            {passwordError && (
+              <div className="rounded-md bg-destructive/10 border border-destructive/20 p-2.5 text-xs text-destructive flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>{passwordError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/60">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPasswordEditStaff(null);
+                  setEditNewPassword("");
+                  setEditConfirmPassword("");
+                  setPasswordError(null);
+                }}
+                disabled={passwordSubmitting}
+                className="h-8 text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={passwordSubmitting}
+                className="h-8 text-xs gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {passwordSubmitting ? (
+                  <>
+                    <RefreshCw className="size-3.5 animate-spin" />
+                    <span>Updating Password…</span>
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="size-3.5" />
+                    <span>Update Password</span>
                   </>
                 )}
               </Button>

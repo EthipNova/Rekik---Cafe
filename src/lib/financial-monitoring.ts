@@ -80,6 +80,47 @@ export interface OrderSalesRow {
   items: HistoricalOrderItemSnapshot[];
 }
 
+export type CanonicalPaymentMethod = "cbe" | "telebirr" | "cash";
+
+export const ALLOWED_PAYMENT_METHODS: { value: CanonicalPaymentMethod; label: string }[] = [
+  { value: "cbe", label: "CBE" },
+  { value: "telebirr", label: "Telebirr" },
+  { value: "cash", label: "Cash" },
+];
+
+export function classifyPaymentMethod(rawMethod?: string | null): CanonicalPaymentMethod | "other" {
+  if (!rawMethod) return "other";
+  const m = rawMethod.trim().toLowerCase();
+  if (m.includes("telebirr")) {
+    return "telebirr";
+  }
+  if (m.includes("cbe") || m.includes("bank transfer") || m.includes("commercial bank")) {
+    return "cbe";
+  }
+  if (
+    m.includes("cash") ||
+    m.includes("table") ||
+    m.includes("counter") ||
+    m.includes("pickup") ||
+    m.includes("delivery")
+  ) {
+    return "cash";
+  }
+  return "other";
+}
+
+export function orderMatchesPaymentMethod(
+  r: { paymentMethod?: string; paymentAttempts?: Array<{ method?: string }> },
+  filter: string,
+): boolean {
+  if (filter === "all") return true;
+  if (classifyPaymentMethod(r.paymentMethod) === filter) return true;
+  if (r.paymentAttempts && r.paymentAttempts.some((a) => classifyPaymentMethod(a.method) === filter)) {
+    return true;
+  }
+  return false;
+}
+
 export interface PaymentProofAuditItem {
   id: string;
   orderId: string;
@@ -315,26 +356,41 @@ export function processOrderSalesRow(rawOrder: any): OrderSalesRow {
     (p) => p.status === "paid" || p.status === "payment_verified" || p.status === "verified",
   );
 
-  // Sum verified payment amounts (avoiding pending/failed attempts)
-  let verifiedPaymentAmount = verifiedPaymentAttempts.reduce(
-    (sum, p) => sum + (Number(p.amount) || 0),
-    0,
-  );
+  const isCancelled =
+    rawOrder.status === "cancelled" ||
+    rawOrder.status === "rejected_by_waiter" ||
+    rawOrder.status === "payment_rejected";
+
+  const hasRefund = rawPayments.some((p) => p.status === "refunded");
+
+  // Sum verified payment amounts (avoiding pending/failed/refunded attempts and cancelled orders)
+  let verifiedPaymentAmount = isCancelled || hasRefund
+    ? 0
+    : verifiedPaymentAttempts.reduce(
+        (sum, p) => sum + (Number(p.amount) || 0),
+        0,
+      );
 
   // If no payment record exists in payments table, check order-level paymentStatus
   if (
+    !isCancelled &&
+    !hasRefund &&
     verifiedPaymentAttempts.length === 0 &&
     (rawOrder.paymentStatus === "paid" || rawOrder.status === "payment_verified")
   ) {
     verifiedPaymentAmount = Number(rawOrder.total_amount) || 0;
   }
 
-  const isFullyPaid = verifiedPaymentAmount > 0;
+  const isFullyPaid = verifiedPaymentAmount > 0 && !isCancelled && !hasRefund;
 
   // Resolve overall payment status
   let overallPaymentStatus: "paid" | "pending" | "failed" | "unpaid" = "unpaid";
   if (isFullyPaid) {
     overallPaymentStatus = "paid";
+  } else if (hasRefund) {
+    overallPaymentStatus = "failed";
+  } else if (isCancelled) {
+    overallPaymentStatus = rawOrder.status === "payment_rejected" ? "failed" : "unpaid";
   } else if (
     rawPayments.some((p) => p.status === "pending") ||
     rawOrder.status === "payment_under_review"
@@ -503,8 +559,14 @@ export async function loadSalesMonitoringData(
       ? (reviewsRes.value as any).data
       : [];
 
+  const ordersError =
+    ordersRes.status === "rejected"
+      ? (ordersRes.reason instanceof Error ? ordersRes.reason.message : String(ordersRes.reason))
+      : (ordersRes.value as any)?.error?.message;
+
   // Fallback: If direct client query returns 0 rows (due to restrictive RLS) or error,
   // fetch through authorized backend API endpoint /api/admin/sales-monitoring
+  let apiFallbackError: string | null = null;
   if (rawOrders.length === 0) {
     try {
       const session = (await supabase.auth.getSession()).data.session;
@@ -515,22 +577,31 @@ export async function loadSalesMonitoringData(
       const res = await fetch("/api/admin/sales-monitoring", { headers });
       if (res.ok) {
         const apiData = await res.json();
-        if (Array.isArray(apiData?.orders) && apiData.orders.length > 0) {
+        if (Array.isArray(apiData?.orders)) {
           rawOrders = apiData.orders;
-          if (Array.isArray(apiData.proofs) && apiData.proofs.length > 0) {
+          if (Array.isArray(apiData.proofs)) {
             rawProofs = apiData.proofs;
           }
-          if (Array.isArray(apiData.reviews) && apiData.reviews.length > 0) {
+          if (Array.isArray(apiData.reviews)) {
             rawReviews = apiData.reviews;
           }
         }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        apiFallbackError = errJson?.error || errJson?.message || `HTTP ${res.status}`;
       }
     } catch (apiErr) {
+      apiFallbackError = apiErr instanceof Error ? apiErr.message : "API network error";
       console.warn(
         "[financial-monitoring] Fallback to /api/admin/sales-monitoring failed:",
         apiErr,
       );
     }
+  }
+
+  // If both direct client query and API fallback failed due to authorization or network error, surface it
+  if (ordersError && rawOrders.length === 0 && apiFallbackError) {
+    throw new Error(`Failed to load sales monitoring records: ${apiFallbackError || ordersError}`);
   }
 
   // Map raw orders to normalized sales rows

@@ -101,6 +101,9 @@ export interface OwnerDashboardData {
   recentOrders: Order[];
   workflowStages: WorkflowStageSummary[];
   operationalAlerts: OperationalAlert[];
+  rejectedOrders: Order[];
+  rejectedOrdersCount: number;
+  ordersError?: string | null;
   unavailableProductsCount: number;
   lastUpdated: string;
 }
@@ -299,6 +302,13 @@ export async function loadOwnerDashboardData(
     supabase.from("products" as any).select("id, name, available"),
   ]);
 
+  let ordersError: string | null = null;
+  if (ordersRes.status === "rejected") {
+    ordersError = (ordersRes as any).reason?.message || "Failed to load orders from database.";
+  } else if ((ordersRes.value as any)?.error) {
+    ordersError = (ordersRes.value as any).error.message || "Database query failed for orders.";
+  }
+
   let rawOrders =
     ordersRes.status === "fulfilled" && Array.isArray((ordersRes.value as any)?.data)
       ? (ordersRes.value as any).data
@@ -323,17 +333,35 @@ export async function loadOwnerDashboardData(
         const apiData = await res.json();
         if (Array.isArray(apiData?.orders) && apiData.orders.length > 0) {
           rawOrders = apiData.orders;
+          ordersError = null;
           if (Array.isArray(apiData.proofs) && apiData.proofs.length > 0) {
             rawProofs = apiData.proofs;
           }
         }
+      } else if (!ordersError) {
+        ordersError = `Backend orders API returned status ${res.status}`;
       }
     } catch (apiErr) {
       console.warn("[owner-dashboard] Fallback to /api/admin/sales-monitoring failed:", apiErr);
+      if (!ordersError) {
+        ordersError =
+          apiErr instanceof Error ? apiErr.message : "Failed to fetch orders from server API.";
+      }
     }
   }
 
-  const allOrders: Order[] = rawOrders.map((raw: any) => {
+  // Deduplicate orders to prevent duplicate rows from table joins
+  const seenOrderIds = new Set<string>();
+  const uniqueRawOrders: any[] = [];
+  for (const raw of rawOrders) {
+    if (raw?.id) {
+      if (seenOrderIds.has(raw.id)) continue;
+      seenOrderIds.add(raw.id);
+    }
+    uniqueRawOrders.push(raw);
+  }
+
+  const allOrders: Order[] = uniqueRawOrders.map((raw: any) => {
     const paymentRaw = Array.isArray(raw?.payments) ? raw.payments[0] : raw?.payments;
     const paymentStatus = paymentRaw?.status || "paid";
     return {
@@ -637,56 +665,30 @@ export async function loadOwnerDashboardData(
 
   const peakDayRevenue = Math.max(0, ...salesTrend.map((p) => p.revenue));
 
-  // 6. Operational Alerts
-  const operationalAlerts: OperationalAlert[] = [];
+  // 6. Rejected Orders & Operational Alerts
+  // Task 3: Operational Alert must show only actual rejected orders
+  // Exclude pending, confirmed, preparing, delivered, completed, and all other non-rejected orders
+  const rejectedOrders = allOrders.filter((o) => {
+    return (
+      (o.status as string) === "rejected" ||
+      o.status === "rejected_by_waiter" ||
+      o.status === "payment_rejected" ||
+      o.waiterDecision === "rejected"
+    );
+  });
 
-  if (pendingProofsCount > 0) {
-    operationalAlerts.push({
-      id: "alert-proofs",
-      type: "proof_review",
-      title: "Payment Proofs Awaiting Verification",
-      description: `${pendingProofsCount} customer payment upload(s) requiring cashier review.`,
-      count: pendingProofsCount,
-      severity: "critical",
-      href: "/admin/payments",
-    });
-  }
-
-  if (awaitingWaiterOrders.length > 0) {
-    operationalAlerts.push({
-      id: "alert-waiter",
-      type: "waiter_review",
-      title: "New Orders Awaiting Waiter Review",
-      description: `${awaitingWaiterOrders.length} order(s) waiting for waiter assignment & approval.`,
-      count: awaitingWaiterOrders.length,
-      severity: "warning",
-      href: "/admin/orders",
-    });
-  }
-
-  if (attentionOrders.length > 0) {
-    operationalAlerts.push({
-      id: "alert-issues",
+  const operationalAlerts: OperationalAlert[] = rejectedOrders.map((o) => {
+    const reason = o.waiterRejectionReason || o.paymentProof?.rejectionReason || "Order marked rejected";
+    return {
+      id: `rejected-${o.id}`,
       type: "order_issue",
-      title: "Rejected or Failed Orders",
-      description: `${attentionOrders.length} order(s) have been rejected or encountered payment failure.`,
-      count: attentionOrders.length,
-      severity: "warning",
+      title: `Rejected Order #${o.number}`,
+      description: `${o.customer.name || "Guest diner"} — Reason: ${reason} (${o.total.toLocaleString()} ETB)`,
+      count: 1,
+      severity: "critical",
       href: "/admin/orders",
-    });
-  }
-
-  if (unavailableProducts.length > 0) {
-    operationalAlerts.push({
-      id: "alert-unavailable",
-      type: "item_unavailable",
-      title: "Menu Items Marked Unavailable",
-      description: `${unavailableProducts.length} menu product(s) currently toggled off.`,
-      count: unavailableProducts.length,
-      severity: "info",
-      href: "/admin/availability",
-    });
-  }
+    };
+  });
 
   return {
     range,
@@ -708,6 +710,9 @@ export async function loadOwnerDashboardData(
     recentOrders: allOrders.slice(0, 10),
     workflowStages,
     operationalAlerts,
+    rejectedOrders,
+    rejectedOrdersCount: rejectedOrders.length,
+    ordersError,
     unavailableProductsCount: unavailableProducts.length,
     lastUpdated: new Date().toLocaleTimeString("en-US", {
       hour: "2-digit",

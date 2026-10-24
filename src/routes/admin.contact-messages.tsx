@@ -102,6 +102,9 @@ function AdminContactMessagesPage() {
       const fetched = await fetchContactMessages(token ? { token } : undefined);
       setMessages(fetched);
       setError(null);
+      if (isManual) {
+        toast.success("Messages synced");
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load contact messages";
       console.error("[admin] Error loading contact messages:", err);
@@ -111,7 +114,6 @@ function AdminContactMessagesPage() {
       setLoading(false);
       if (isManual) {
         setRefreshing(false);
-        toast.success("Messages synced");
       }
     }
   };
@@ -282,9 +284,15 @@ function AdminContactMessagesPage() {
               <Mail className="size-4" aria-hidden />
             </div>
           </div>
-          <p className="font-display text-2xl font-bold text-foreground">{totalCount}</p>
+          <p className="font-display text-2xl font-bold text-foreground">
+            {error ? "—" : totalCount}
+          </p>
           <p className="text-xs text-muted-foreground">
-            {totalCount === 1 ? "Message recorded" : "Messages recorded"} in database
+            {error
+              ? "Unavailable due to connection error"
+              : totalCount === 1
+                ? "Message recorded in database"
+                : "Messages recorded in database"}
           </p>
         </div>
 
@@ -298,8 +306,12 @@ function AdminContactMessagesPage() {
               <MailQuestion className="size-4" aria-hidden />
             </div>
           </div>
-          <p className="font-display text-2xl font-bold text-foreground">{unreadCount}</p>
-          <p className="text-xs text-muted-foreground">Awaiting review from staff</p>
+          <p className="font-display text-2xl font-bold text-foreground">
+            {error ? "—" : unreadCount}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {error ? "Unavailable due to connection error" : "Awaiting review from staff"}
+          </p>
         </div>
 
         {/* Read Messages */}
@@ -312,8 +324,12 @@ function AdminContactMessagesPage() {
               <MailCheck className="size-4" aria-hidden />
             </div>
           </div>
-          <p className="font-display text-2xl font-bold text-foreground">{readCount}</p>
-          <p className="text-xs text-muted-foreground">Reviewed and archived</p>
+          <p className="font-display text-2xl font-bold text-foreground">
+            {error ? "—" : readCount}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {error ? "Unavailable due to connection error" : "Reviewed and archived"}
+          </p>
         </div>
       </div>
 

@@ -32,18 +32,48 @@ import {
   recordWaiterPaymentCollection,
   updateOrderPaymentMethod,
 } from "./db";
-import { validateContactInput } from "@/lib/contact";
-import type { AboutContent } from "@/lib/content";
+import { validateContactInput, type ContactMessage } from "@/lib/contact";
+import { isValidUUID, type AboutContent } from "@/lib/content";
 import type { Order, OrderStatus } from "@/lib/orders";
 import type { Promotion } from "@/lib/promotions";
 import { createScopedClient, supabase, type UserRole } from "@/lib/supabase";
 import { serverSupabase } from "./supabase";
-import { getRegisteredStaffList, registerStaffMember, updateStaffActiveStatus } from "./staff";
+import {
+  getRegisteredStaffList,
+  registerStaffMember,
+  updateStaffActiveStatus,
+  updateStaffPassword,
+} from "./staff";
 import {
   getAdminPaymentAccounts,
   getPublicPaymentAccounts,
   upsertPaymentAccount,
 } from "./payment-accounts";
+import {
+  resolveCashierMe,
+  getPendingPaymentReviews,
+  getPaymentReviewHistory,
+  getCashierOverviewMetrics,
+  getProofSignedUrl,
+  approvePaymentProof,
+  rejectPaymentProof,
+  getCashierNotifications,
+  markNotificationAsRead,
+} from "./cashier";
+import {
+  resolveWaiterUser,
+  getWaiterProfile,
+  updateWaiterAvailability,
+  getWaiterMetrics,
+  getWaiterOrders,
+  approveWaiterOrder,
+  rejectWaiterOrder,
+  submitWaiterPaymentProof,
+  getWaiterPayments,
+  getWaiterNotifications,
+  markWaiterNotificationRead,
+  getAvailableWaiters,
+} from "./waiter";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -305,8 +335,13 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return forbidden("Only administrators and staff can access customer data");
         }
 
-        const customers = await getCustomers(serverSupabase);
-        return json(customers);
+        try {
+          const customers = await getCustomers(serverSupabase);
+          return json(customers);
+        } catch (err: any) {
+          console.error("[api] /api/customers error:", err);
+          return json({ error: err.message || "Failed to load customer profiles from database" }, 500);
+        }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
@@ -740,6 +775,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
               email: String(body.email || ""),
               password: String(body.password || ""),
               role: body.role,
+              phone: body.phone ? String(body.phone).trim() : undefined,
             },
             authUser.id,
           );
@@ -815,6 +851,80 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
         try {
           const result = await updateStaffActiveStatus(targetUserId, isActive, authUser.id);
+          return json(result);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 403) return forbidden(err.message);
+          if (status === 404) return notFound(err.message);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/admin/staff/password") {
+      if (method === "PATCH" || method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN") {
+          return forbidden("Only administrators can update staff passwords");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || !body.userId || !body.password) {
+          return badRequest("Fields 'userId' and 'password' are required");
+        }
+
+        const cleanPassword = String(body.password).trim();
+        if (cleanPassword.length < 6) {
+          return badRequest("Password must be at least 6 characters long");
+        }
+
+        try {
+          const result = await updateStaffPassword(
+            String(body.userId),
+            cleanPassword,
+            authUser.id,
+          );
+          return json(result);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 403) return forbidden(err.message);
+          if (status === 404) return notFound(err.message);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const staffPasswordMatch = pathname.match(/^\/api\/admin\/staff\/([^/]+)\/password$/);
+    if (staffPasswordMatch) {
+      const targetUserId = decodeURIComponent(staffPasswordMatch[1]!);
+      if (method === "PATCH" || method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN") {
+          return forbidden("Only administrators can update staff passwords");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || !body.password) {
+          return badRequest("Field 'password' is required");
+        }
+
+        const cleanPassword = String(body.password).trim();
+        if (cleanPassword.length < 6) {
+          return badRequest("Password must be at least 6 characters long");
+        }
+
+        try {
+          const result = await updateStaffPassword(targetUserId, cleanPassword, authUser.id);
           return json(result);
         } catch (err: any) {
           const status = err.statusCode || 500;
@@ -1447,6 +1557,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           id: body.id || `promo-${Date.now().toString(36)}`,
           name: body.name,
           description: body.description || "",
+          imageUrl: body.imageUrl || null,
           discountType: body.discountType || "percentage",
           discountValue: Number(body.discountValue) || 0,
           applicableProductIds: Array.isArray(body.applicableProductIds)
@@ -1581,8 +1692,19 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return badRequest("Invalid JSON body");
         }
 
-        // Sanitize payload to ONLY allowed editable fields (protect id and updated_at)
+        // Validate body.id if explicitly provided
+        if (body.id !== undefined && body.id !== null) {
+          const idStr = String(body.id).trim();
+          if (!isValidUUID(idStr)) {
+            return badRequest(`Invalid content record ID "${body.id}": a valid UUID is required`);
+          }
+        }
+
+        // Sanitize payload to allowed editable fields
         const allowedUpdates: Partial<AboutContent> = {};
+        if (body.id && isValidUUID(String(body.id))) {
+          allowedUpdates.id = String(body.id).trim();
+        }
         if (body.homepage_hero_image !== undefined)
           allowedUpdates.homepage_hero_image = body.homepage_hero_image;
         if (body.about_hero_image !== undefined)
@@ -1607,8 +1729,16 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         if (typeof body.value_3_description === "string")
           allowedUpdates.value_3_description = body.value_3_description;
 
-        const updated = await updateAboutContent(allowedUpdates, token);
-        return json(updated);
+        try {
+          const updated = await updateAboutContent(allowedUpdates, token);
+          return json(updated);
+        } catch (err: any) {
+          console.error("[api] /api/about update error:", err);
+          return json(
+            { error: "Database update failed", message: err.message || "Failed to update website content" },
+            500,
+          );
+        }
       }
 
       return json({ error: "Method Not Allowed" }, 405);
@@ -1638,11 +1768,14 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         }
 
         try {
-          const result = await createContactMessage({
-            name: body.name,
-            email: body.email,
-            message: body.message,
-          });
+          const result = await createContactMessage(
+            {
+              name: body.name,
+              email: body.email,
+              message: body.message,
+            },
+            serverSupabase,
+          );
           return json(
             { success: true, message: "Contact message sent successfully", id: result.id },
             201,
@@ -1657,7 +1790,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    if (pathname === "/api/contact-messages") {
+    if (pathname === "/api/contact-messages" || pathname === "/api/admin/contact-messages") {
       if (method === "GET") {
         const authUser = await resolveAuthUser(request);
         if (!authUser) {
@@ -1667,15 +1800,19 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return forbidden("Only administrators and staff can access contact messages");
         }
 
-        const scopedClient = createScopedClient(authUser.token);
-        const messages = await getContactMessages(scopedClient);
-        return json(messages);
+        try {
+          const messages = await getContactMessages(serverSupabase);
+          return json(messages);
+        } catch (err: any) {
+          console.error("[api] /api/contact-messages fetch error:", err);
+          return json({ error: err.message || "Failed to load contact messages" }, 500);
+        }
       }
 
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    const contactMessageMatch = pathname.match(/^\/api\/contact-messages\/([^/]+)$/);
+    const contactMessageMatch = pathname.match(/^\/api\/(?:admin\/)?contact-messages\/([^/]+)$/);
     if (contactMessageMatch) {
       const messageId = decodeURIComponent(contactMessageMatch[1]!);
 
@@ -1704,12 +1841,16 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return badRequest("Field 'isRead' or 'is_read' boolean is required");
         }
 
-        const scopedClient = createScopedClient(authUser.token);
-        const updated = await updateContactMessageReadStatus(messageId, isRead, scopedClient);
-        if (!updated) {
-          return notFound(`Contact message '${messageId}' not found`);
+        try {
+          const updated = await updateContactMessageReadStatus(messageId, isRead, serverSupabase);
+          if (!updated) {
+            return notFound(`Contact message '${messageId}' not found`);
+          }
+          return json(updated);
+        } catch (err: any) {
+          console.error(`[api] /api/contact-messages/${messageId} update error:`, err);
+          return json({ error: err.message || "Failed to update contact message" }, 500);
         }
-        return json(updated);
       }
 
       if (method === "DELETE") {
@@ -1721,11 +1862,727 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return forbidden("Only administrators and staff can delete contact messages");
         }
 
-        const scopedClient = createScopedClient(authUser.token);
-        await deleteContactMessage(messageId, scopedClient);
-        return json({ success: true, deletedId: messageId });
+        try {
+          await deleteContactMessage(messageId, serverSupabase);
+          return json({ success: true, deletedId: messageId });
+        } catch (err: any) {
+          console.error(`[api] /api/contact-messages/${messageId} delete error:`, err);
+          return json({ error: err.message || "Failed to delete contact message" }, 500);
+        }
       }
 
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       8. Cashier Operations:
+          GET   /api/cashier/me
+          GET   /api/cashier/pending
+          GET   /api/cashier/history
+          GET   /api/cashier/metrics
+          POST  /api/cashier/proof-url
+          POST  /api/cashier/reviews/approve
+          POST  /api/cashier/reviews/reject
+          GET   /api/cashier/notifications
+          PATCH /api/cashier/notifications/:id/read
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/cashier/me") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: meResult.status,
+              role: (meResult as any).role,
+              message: meResult.message,
+            },
+            status,
+          );
+        }
+        return json({
+          success: true,
+          profile: meResult.profile,
+          role: meResult.role,
+        });
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/pending") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          const items = await getPendingPaymentReviews();
+          return json(items);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/history") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          const history = await getPaymentReviewHistory();
+          return json(history);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/metrics") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          const metrics = await getCashierOverviewMetrics();
+          return json(metrics);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/proof-url") {
+      if (method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        let allowed = Boolean(authUser && authUser.role === "ADMIN");
+        if (!allowed) {
+          const meResult = await resolveCashierMe(request);
+          if (meResult.success) {
+            allowed = true;
+          }
+        }
+        if (!allowed) {
+          return unauthorized("Cashier or Administrator authentication required");
+        }
+        const body = await request.json().catch(() => null);
+        if (!body?.proofId || typeof body.proofId !== "string") {
+          return badRequest("Field 'proofId' is required");
+        }
+        try {
+          const signedUrl = await getProofSignedUrl(body.proofId);
+          return json({ signedUrl });
+        } catch (err: any) {
+          return json({ error: "Proof URL Generation Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/reviews/approve") {
+      if (method === "POST") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        const body = await request.json().catch(() => null);
+        if (!body?.proofId || typeof body.proofId !== "string") {
+          return badRequest("Field 'proofId' is required");
+        }
+        try {
+          const result = await approvePaymentProof(
+            body.proofId,
+            meResult.profile.user_id,
+            body.notes,
+          );
+          return json(result);
+        } catch (err: any) {
+          return json({ error: "Payment Approval Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/reviews/reject") {
+      if (method === "POST") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        const body = await request.json().catch(() => null);
+        if (!body?.proofId || typeof body.proofId !== "string") {
+          return badRequest("Field 'proofId' is required");
+        }
+        if (!body?.reason || typeof body.reason !== "string" || !body.reason.trim()) {
+          return badRequest("A clear rejection reason is required");
+        }
+        try {
+          const result = await rejectPaymentProof(
+            body.proofId,
+            meResult.profile.user_id,
+            body.reason,
+          );
+          return json(result);
+        } catch (err: any) {
+          return json({ error: "Payment Rejection Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/notifications") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          const notifications = await getCashierNotifications(meResult.profile.user_id);
+          return json(notifications);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const cashierNotifMatch = pathname.match(/^\/api\/cashier\/notifications\/([^/]+)\/read$/);
+    if (cashierNotifMatch) {
+      const notificationId = decodeURIComponent(cashierNotifMatch[1]!);
+      if (method === "PATCH" || method === "POST") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          await markNotificationAsRead(notificationId, meResult.profile.user_id);
+          return json({ success: true, notificationId });
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       9. Waiter Station Operations & Floor Management:
+          GET   /api/waiters/available
+          GET   /api/waiter/profile
+          PATCH /api/waiter/profile
+          GET   /api/waiter/metrics
+          GET   /api/waiter/orders
+          POST  /api/waiter/orders/:id/approve
+          POST  /api/waiter/orders/:id/reject
+          POST  /api/waiter/orders/:id/payment-proof
+          GET   /api/waiter/payments
+          GET   /api/waiter/notifications
+          PATCH /api/waiter/notifications/:id
+          PATCH /api/waiter/notifications/:id/read
+          POST  /api/orders/:id/waiter-decision
+          POST  /api/orders/:id/waiter-payment-collection
+          POST  /api/orders/:id/payment-method
+          POST  /api/orders/:id/payment-proof
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/waiters/available") {
+      if (method === "GET") {
+        try {
+          const waiters = await getAvailableWaiters();
+          return json(waiters);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/profile") {
+      if (method === "GET") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        try {
+          const profile = await getWaiterProfile(waiterAuth.staff.userId);
+          return json({
+            user: profile || {
+              userId: waiterAuth.staff.userId,
+              fullName: waiterAuth.staff.fullName,
+              phone: waiterAuth.staff.phone,
+              role: waiterAuth.staff.role,
+              isAvailable: waiterAuth.staff.isAvailable,
+              isActive: waiterAuth.staff.isActive,
+            },
+          });
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+
+      if (method === "PATCH") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        const body = await request.json().catch(() => null);
+        if (typeof body?.isAvailable !== "boolean") {
+          return badRequest("Field 'isAvailable' boolean is required");
+        }
+        try {
+          const result = await updateWaiterAvailability(waiterAuth.staff.userId, body.isAvailable);
+          return json(result);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/metrics") {
+      if (method === "GET") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        try {
+          const metrics = await getWaiterMetrics(waiterAuth.staff);
+          return json(metrics);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/orders") {
+      if (method === "GET") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        try {
+          const statusFilter = url.searchParams.get("status") || undefined;
+          const searchFilter = url.searchParams.get("search") || undefined;
+          const dateFilter = url.searchParams.get("date") || undefined;
+          const orders = await getWaiterOrders(waiterAuth.staff, {
+            status: statusFilter,
+            search: searchFilter,
+            date: dateFilter,
+          });
+          return json(orders);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterApproveMatch = pathname.match(/^\/api\/waiter\/orders\/([^/]+)\/approve$/);
+    if (waiterApproveMatch) {
+      const orderId = decodeURIComponent(waiterApproveMatch[1]!);
+      if (method === "POST") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        const body = await request.json().catch(() => ({}));
+        try {
+          const updated = await approveWaiterOrder(waiterAuth.staff, orderId, body?.comments);
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Order Approval Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterRejectMatch = pathname.match(/^\/api\/waiter\/orders\/([^/]+)\/reject$/);
+    if (waiterRejectMatch) {
+      const orderId = decodeURIComponent(waiterRejectMatch[1]!);
+      if (method === "POST") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        const body = await request.json().catch(() => null);
+        if (!body?.reason || typeof body.reason !== "string" || !body.reason.trim()) {
+          return badRequest("A clear rejection reason is required");
+        }
+        try {
+          const updated = await rejectWaiterOrder(waiterAuth.staff, orderId, body.reason.trim());
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Order Rejection Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterPaymentProofMatch = pathname.match(/^\/api\/waiter\/orders\/([^/]+)\/payment-proof$/);
+    if (waiterPaymentProofMatch) {
+      const orderId = decodeURIComponent(waiterPaymentProofMatch[1]!);
+      if (method === "POST") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid payment proof submission payload");
+        }
+        try {
+          const updated = await submitWaiterPaymentProof(waiterAuth.staff, orderId, {
+            submittedAmount: Number(body.submittedAmount) || 0,
+            paymentMethod: body.paymentMethod || "Mobile Payment",
+            transactionReference: body.transactionReference || null,
+            notes: body.notes || null,
+            screenshotPath: body.screenshotPath || null,
+            imageBase64: body.imageBase64 || null,
+            mimeType: body.mimeType || null,
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Payment Proof Submission Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/payments") {
+      if (method === "GET") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        try {
+          const payments = await getWaiterPayments(waiterAuth.staff);
+          return json(payments);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/notifications") {
+      if (method === "GET") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        try {
+          const notifications = await getWaiterNotifications(waiterAuth.staff.userId);
+          return json(notifications);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const waiterNotifMatch = pathname.match(/^\/api\/waiter\/notifications\/([^/]+)(\/read)?$/);
+    if (waiterNotifMatch) {
+      const notificationId = decodeURIComponent(waiterNotifMatch[1]!);
+      if (method === "PATCH" || method === "POST") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        try {
+          const res = await markWaiterNotificationRead(waiterAuth.staff.userId, notificationId);
+          return json(res);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       9b. Order Operational Actions (Floor & Checkout Integrations):
+          POST /api/orders/:id/waiter-decision
+          POST /api/orders/:id/waiter-payment-collection
+          POST /api/orders/:id/payment-method
+          POST /api/orders/:id/payment-proof
+       ---------------------------------------------------------------------- */
+    const orderWaiterDecisionMatch = pathname.match(/^\/api\/orders\/([^/]+)\/waiter-decision$/);
+    if (orderWaiterDecisionMatch) {
+      const orderId = decodeURIComponent(orderWaiterDecisionMatch[1]!);
+      if (method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+          return forbidden("Floor staff or administrator authorization required");
+        }
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object" || !["approved", "rejected"].includes(body.decision)) {
+          return badRequest("Field 'decision' must be 'approved' or 'rejected'");
+        }
+        try {
+          const updated = await recordWaiterDecision({
+            orderId,
+            waiterId: authUser.id,
+            decision: body.decision,
+            comments: body.comments || body.reason,
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Waiter Decision Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const orderWaiterPaymentColMatch = pathname.match(/^\/api\/orders\/([^/]+)\/waiter-payment-collection$/);
+    if (orderWaiterPaymentColMatch) {
+      const orderId = decodeURIComponent(orderWaiterPaymentColMatch[1]!);
+      if (method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+          return forbidden("Floor staff or administrator authorization required");
+        }
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object" || !body.transactionReference) {
+          return badRequest("Field 'transactionReference' is required");
+        }
+        try {
+          const updated = await recordWaiterPaymentCollection({
+            orderId,
+            waiterId: authUser.id,
+            transactionReference: String(body.transactionReference).trim(),
+            ...(body.notes ? { notes: String(body.notes).trim() } : {}),
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Payment Collection Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const orderPaymentMethodMatch = pathname.match(/^\/api\/orders\/([^/]+)\/payment-method$/);
+    if (orderPaymentMethodMatch) {
+      const orderId = decodeURIComponent(orderPaymentMethodMatch[1]!);
+      if (method === "POST" || method === "PATCH") {
+        const body = await request.json().catch(() => null);
+        if (!body?.paymentMethod) {
+          return badRequest("Field 'paymentMethod' is required");
+        }
+        try {
+          const updated = await updateOrderPaymentMethod({
+            orderId,
+            paymentMethod: String(body.paymentMethod),
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Update Payment Method Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const orderPaymentProofMatch = pathname.match(/^\/api\/orders\/([^/]+)\/payment-proof$/);
+    if (orderPaymentProofMatch) {
+      const orderId = decodeURIComponent(orderPaymentProofMatch[1]!);
+      if (method === "POST") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid payment proof submission payload");
+        }
+
+        let screenshotPath = body.screenshotPath;
+        if (!screenshotPath && body.imageBase64) {
+          try {
+            const base64Data = body.imageBase64.includes(",")
+              ? body.imageBase64.split(",")[1]!
+              : body.imageBase64;
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = body.mimeType?.includes("png")
+              ? "png"
+              : body.mimeType?.includes("webp")
+                ? "webp"
+                : "jpg";
+            const storagePath = `proofs/${orderId}/${Date.now()}.${ext}`;
+
+            try {
+              await serverSupabase.storage.createBucket("payment-proofs", { public: true });
+            } catch {
+              /* ignore if exists */
+            }
+
+            const { error: uploadError } = await serverSupabase.storage
+              .from("payment-proofs")
+              .upload(storagePath, buffer, {
+                contentType: body.mimeType || "image/jpeg",
+                upsert: true,
+              });
+
+            if (!uploadError) {
+              screenshotPath = storagePath;
+            }
+          } catch (uploadEx) {
+            console.warn("[api] Error uploading payment proof image:", uploadEx);
+          }
+        }
+
+        if (!screenshotPath) {
+          screenshotPath = `proofs/order-${orderId}.png`;
+        }
+
+        try {
+          const updated = await createPaymentProof(orderId, {
+            screenshotPath,
+            transactionReference: body.transactionReference || null,
+            ...(Number(body.submittedAmount) > 0
+              ? { submittedAmount: Number(body.submittedAmount) }
+              : {}),
+            ...(body.paymentMethod ? { paymentMethod: String(body.paymentMethod) } : {}),
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Payment Proof Submission Failed", message: err.message }, 400);
+        }
+      }
       return json({ error: "Method Not Allowed" }, 405);
     }
 

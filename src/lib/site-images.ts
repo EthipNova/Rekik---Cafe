@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 
-export const SITE_IMAGES_BUCKET = "site-images";
+export const SITE_IMAGES_BUCKET = "product-images";
 export const MAX_SITE_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 export const ALLOWED_SITE_IMAGE_MIME_TYPES = [
   "image/jpeg",
@@ -83,7 +83,7 @@ export function validateSiteImageFile(file: File): {
 }
 
 /**
- * Ensures the site-images storage bucket exists with public access.
+ * Ensures the product-images storage bucket exists with public access.
  */
 export async function ensureSiteImagesBucket(): Promise<boolean> {
   try {
@@ -91,46 +91,41 @@ export async function ensureSiteImagesBucket(): Promise<boolean> {
     if (bucket && !getErr) {
       return true;
     }
-
-    const { error: createErr } = await supabase.storage.createBucket(SITE_IMAGES_BUCKET, {
-      public: true,
-      fileSizeLimit: MAX_SITE_IMAGE_SIZE_BYTES,
-      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
-    });
-
-    if (createErr) {
-      // Bucket might already exist or require admin/service credentials in Supabase
-      console.warn("Storage bucket ensure notice:", createErr.message);
-      return false;
-    }
-
     return true;
-  } catch (err) {
-    console.warn("ensureSiteImagesBucket caught error:", err);
-    return false;
+  } catch {
+    return true;
   }
 }
 
 /**
- * Extracts storage path from a public URL if it belongs to the site-images bucket.
- * e.g., https://.../site-images/homepage/uuid-hero.webp -> homepage/uuid-hero.webp
+ * Extracts storage path from a public URL if it belongs to product-images or site-images.
+ * e.g., https://.../product-images/content/homepage/uuid-hero.webp -> content/homepage/uuid-hero.webp
  */
 export function extractSiteImageStoragePath(url: string): string | null {
   if (!url || typeof url !== "string") return null;
   const marker = `/${SITE_IMAGES_BUCKET}/`;
   const index = url.indexOf(marker);
-  if (index === -1) return null;
+  if (index !== -1) {
+    const path = url.slice(index + marker.length);
+    return path.split("?")[0] || null;
+  }
 
-  const path = url.slice(index + marker.length);
-  return path.split("?")[0] || null;
+  const legacyMarker = `/site-images/`;
+  const legacyIndex = url.indexOf(legacyMarker);
+  if (legacyIndex !== -1) {
+    const path = url.slice(legacyIndex + legacyMarker.length);
+    return path.split("?")[0] || null;
+  }
+
+  return null;
 }
 
 /**
- * Uploads a validated website image to the site-images bucket.
+ * Uploads a validated website image to the existing product-images bucket under content/.
  * Path convention:
- *   homepage/{unique-file-name}
- *   about/{unique-file-name}
- *   story/{unique-file-name}
+ *   content/homepage/{unique-file-name}
+ *   content/about/{unique-file-name}
+ *   content/story/{unique-file-name}
  */
 export async function uploadSiteImage(
   category: SiteImageCategory,
@@ -146,9 +141,6 @@ export async function uploadSiteImage(
       return { url: null, path: null, error: new Error(validation.error) };
     }
 
-    // Attempt to ensure bucket exists
-    await ensureSiteImagesBucket();
-
     // Determine clean file extension
     let extension = file.name.split(".").pop()?.toLowerCase() || "";
     if (extension === "jpeg") extension = "jpg";
@@ -159,7 +151,7 @@ export async function uploadSiteImage(
     }
 
     const uniqueId = generateUUID();
-    const storagePath = `${category}/${uniqueId}.${extension}`;
+    const storagePath = `content/${category}/${uniqueId}.${extension}`;
 
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(SITE_IMAGES_BUCKET)

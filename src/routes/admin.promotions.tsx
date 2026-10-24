@@ -13,8 +13,9 @@ import {
   ShoppingBag,
   Tag,
   Trash2,
+  Upload,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -62,6 +63,7 @@ import {
   fetchPromotionProductsList,
   formatDiscount,
   formatETB,
+  generatePromotionId,
   resolvePromotionTargetType,
   updateAdminPromotion,
   type CreatePromotionInput,
@@ -71,6 +73,7 @@ import {
   type PromotionStatus,
   type PromotionTargetType,
 } from "@/lib/promotions";
+import { uploadPromotionImage, validateProductImageFile } from "@/lib/product-images";
 import { fetchCategories } from "@/services/api";
 import type { Category } from "@/lib/menu-data";
 import { cn } from "@/lib/utils";
@@ -145,7 +148,6 @@ function AdminPromotions() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [discountTypeFilter, setDiscountTypeFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("newest");
 
@@ -169,6 +171,24 @@ function AdminPromotions() {
   const [categoriesList, setCategoriesList] = useState<Category[]>([]);
   const [minOrderAmount, setMinOrderAmount] = useState<string>("");
   const [formErrors, setFormErrors] = useState<FormErrors>({});
+
+  // Image Upload State
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageUrl, setImageUrl] = useState<string>("");
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (imageFile) {
+      const objectUrl = URL.createObjectURL(imageFile);
+      setLocalPreviewUrl(objectUrl);
+      return () => {
+        URL.revokeObjectURL(objectUrl);
+      };
+    }
+    setLocalPreviewUrl(null);
+    return undefined;
+  }, [imageFile]);
 
   const loadData = async () => {
     setLoading(true);
@@ -247,14 +267,8 @@ function AdminPromotions() {
   });
   const productsOnPromotionCount = targetedProductIds.size;
 
-  // Filter promotions
+  // Filter promotions (displays across all statuses by default)
   const filteredPromotions = safePromos.filter((p) => {
-    const status = derivePromotionStatus(p);
-
-    if (statusFilter !== "all" && status !== statusFilter) {
-      return false;
-    }
-
     if (discountTypeFilter !== "all" && p.discountType !== discountTypeFilter) {
       return false;
     }
@@ -312,6 +326,10 @@ function AdminPromotions() {
     setEditingPromotion(null);
     setName("");
     setDescription("");
+    setImageFile(null);
+    setImageUrl("");
+    setLocalPreviewUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
     setDiscountType("percentage");
     setDiscountValue("15");
     setStartDate(today);
@@ -329,6 +347,10 @@ function AdminPromotions() {
     setEditingPromotion(promo);
     setName(promo.name);
     setDescription(promo.description || "");
+    setImageFile(null);
+    setImageUrl(promo.imageUrl || "");
+    setLocalPreviewUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
     setDiscountType(promo.discountType);
     setDiscountValue(String(promo.discountValue));
     setStartDate(promo.startDate);
@@ -400,9 +422,22 @@ function AdminPromotions() {
             ? "expired"
             : "active";
 
+    let finalImageUrl: string | null = imageUrl.trim() || null;
+    if (imageFile) {
+      const targetPromoId = editingPromotion?.id || generatePromotionId();
+      const uploadResult = await uploadPromotionImage(targetPromoId, imageFile);
+      if (uploadResult.error || !uploadResult.url) {
+        toast.error(uploadResult.error?.message || "Failed to upload promotion image.");
+        setIsSubmitting(false);
+        return;
+      }
+      finalImageUrl = uploadResult.url;
+    }
+
     const payload: CreatePromotionInput = {
       name: name.trim(),
       description: description.trim() || undefined,
+      imageUrl: finalImageUrl,
       discountType,
       discountValue: Number(discountValue),
       startDate,
@@ -470,14 +505,12 @@ function AdminPromotions() {
 
   const resetFilters = () => {
     setSearchQuery("");
-    setStatusFilter("all");
     setDiscountTypeFilter("all");
     setSortBy("newest");
   };
 
   const isFiltered =
     searchQuery.trim() !== "" ||
-    statusFilter !== "all" ||
     discountTypeFilter !== "all" ||
     sortBy !== "newest";
 
@@ -584,20 +617,6 @@ function AdminPromotions() {
               aria-label="Search promotions"
             />
           </div>
-
-          {/* Status Filter */}
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-9 text-sm" aria-label="Filter by promotion status">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="scheduled">Scheduled</SelectItem>
-              <SelectItem value="expired">Expired</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-            </SelectContent>
-          </Select>
 
           {/* Discount Type Filter */}
           <Select value={discountTypeFilter} onValueChange={setDiscountTypeFilter}>
@@ -716,6 +735,16 @@ function AdminPromotions() {
                 className="surface-card p-4 sm:p-5 flex flex-col justify-between space-y-4 hover:border-primary/40 transition-colors"
               >
                 <div className="space-y-3">
+                  {promo.imageUrl && (
+                    <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-border/50 bg-muted">
+                      <img
+                        src={promo.imageUrl}
+                        alt={promo.name}
+                        loading="lazy"
+                        className="size-full object-cover"
+                      />
+                    </div>
+                  )}
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <h2 className="font-display font-semibold text-lg text-foreground truncate">
@@ -841,6 +870,83 @@ function AdminPromotions() {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
+            </div>
+
+            {/* Optional Promotion Image */}
+            <div className="space-y-1.5">
+              <Label>Promotion Image (Optional)</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/jpg"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const validation = validateProductImageFile(file);
+                  if (!validation.valid) {
+                    toast.error(validation.error || "Invalid image file");
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                    return;
+                  }
+                  setImageFile(file);
+                }}
+              />
+              {localPreviewUrl || imageUrl ? (
+                <div className="rounded-lg border border-border bg-card p-3 space-y-2">
+                  <div className="relative aspect-video w-full overflow-hidden rounded-md border border-border/60 bg-muted">
+                    <img
+                      src={localPreviewUrl || imageUrl}
+                      alt="Promotion preview"
+                      className="size-full object-cover"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground truncate max-w-[200px]">
+                      {imageFile ? imageFile.name : "Saved image"}
+                    </span>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs px-2"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Change
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs px-2 text-destructive hover:text-destructive"
+                        onClick={() => {
+                          setImageFile(null);
+                          setImageUrl("");
+                          setLocalPreviewUrl(null);
+                          if (fileInputRef.current) fileInputRef.current.value = "";
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border p-4 text-center hover:border-primary/50 hover:bg-muted/30 transition-colors cursor-pointer"
+                >
+                  <Upload className="size-5 text-muted-foreground" aria-hidden />
+                  <span className="text-xs font-medium text-foreground">
+                    Upload promotion banner image
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    JPG, PNG, or WebP up to 5MB (optional)
+                  </span>
+                </button>
+              )}
             </div>
 
             {/* Discount Type & Value */}
@@ -1139,6 +1245,17 @@ function AdminPromotions() {
                   {selectedDetailsPromo.description || "No description provided."}
                 </SheetDescription>
               </SheetHeader>
+
+              {/* Promotion Image */}
+              {selectedDetailsPromo.imageUrl && (
+                <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/60 bg-muted">
+                  <img
+                    src={selectedDetailsPromo.imageUrl}
+                    alt={selectedDetailsPromo.name}
+                    className="size-full object-cover"
+                  />
+                </div>
+              )}
 
               {/* Discount Value */}
               <section aria-labelledby="details-discount" className="space-y-2">

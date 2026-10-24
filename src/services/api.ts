@@ -593,7 +593,7 @@ export async function fetchSettings(): Promise<NebaSettings> {
       .select(
         "id, cafe_name, phone, email, address, opening_hours, delivery_fee, cafe_latitude, cafe_longitude, price_per_km, min_delivery_fee, max_delivery_distance_km, delivery_enabled, rounding_rule, updated_at",
       )
-      .eq("id", 1)
+      .limit(1)
       .maybeSingle();
 
     if (!error && data) {
@@ -704,6 +704,7 @@ export interface CreateOrderPayload {
   discount?: number | undefined;
   waiterId?: string | undefined;
   customerNotes?: string | undefined;
+  clientReferenceId?: string | undefined;
 }
 
 /**
@@ -770,9 +771,6 @@ export async function fetchOrderById(id: string): Promise<Order> {
         status,
         table_number,
         delivery_address,
-        delivery_latitude,
-        delivery_longitude,
-        delivery_distance_km,
         subtotal,
         discount_amount,
         delivery_fee,

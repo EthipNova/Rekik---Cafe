@@ -143,6 +143,9 @@ export interface StaffMonitoringData {
   activities: StaffActivityItem[];
   notifications: StaffNotificationItem[];
   auditLogs: StaffAuditLogItem[];
+  rawOrders?: any[];
+  rawReviews?: any[];
+  rawProofs?: any[];
   lastRefreshedAt: string;
 }
 
@@ -253,98 +256,131 @@ export function classifyOperationalWorkload(
   const awaitingPayment: OperationalWorkloadQueue["ordersAwaitingPayment"] = [];
   const rejectedItems: OperationalWorkloadQueue["recentlyRejectedItems"] = [];
 
+  const ordersById = new Map<string, any>();
+  const seenProofOrderIds = new Set<string>();
+
   orders.forEach((o) => {
-    const orderNum = o.order_number || `#${String(o.id).slice(0, 4)}`;
-    const waiterName = o.waiter_id ? staffMap.get(o.waiter_id) || "Assigned Waiter" : null;
+    const id = o.id || "";
+    ordersById.set(id, o);
+
+    const orderNum = o.order_number || o.orderNumber || `#${String(id).slice(0, 4)}`;
+    const waiterId = o.waiter_id || o.waiterId || null;
+    const waiterName = waiterId ? staffMap.get(waiterId) || "Assigned Waiter" : null;
+    const status = o.status;
+    const totalAmount = Number(o.total_amount ?? o.total) || 0;
+    const customerName = o.customer_name || o.customerName || "Guest Diner";
+    const method = o.method || o.orderMethod || "dine-in";
+    const tableNumber = o.table_number || o.tableNumber || null;
+    const createdAt = o.created_at || o.createdAt || new Date().toISOString();
 
     // 1. Orders awaiting waiter review
-    if (o.status === "pending_waiter" || o.status === "received") {
+    if (status === "pending_waiter" || status === "received") {
       awaitingWaiter.push({
-        orderId: o.id,
+        orderId: id,
         orderNumber: orderNum,
-        customerName: o.customer_name || "Guest Diner",
-        method: o.method || "dine-in",
-        tableNumber: o.table_number || null,
-        createdAt: o.created_at,
-        totalAmount: Number(o.total_amount) || 0,
+        customerName,
+        method,
+        tableNumber,
+        createdAt,
+        totalAmount,
       });
     }
 
     // 2. Orders assigned to waiters currently active in workflow
     if (
-      o.waiter_id &&
-      o.status !== "completed" &&
-      o.status !== "delivered" &&
-      o.status !== "cancelled" &&
-      o.status !== "rejected_by_waiter"
+      waiterId &&
+      status !== "completed" &&
+      status !== "delivered" &&
+      status !== "cancelled" &&
+      status !== "rejected_by_waiter"
     ) {
       assignedWaiters.push({
-        orderId: o.id,
+        orderId: id,
         orderNumber: orderNum,
-        waiterId: o.waiter_id,
+        waiterId,
         waiterName: waiterName || "Waiter",
-        status: o.status,
-        method: o.method || "dine-in",
-        tableNumber: o.table_number || null,
-        createdAt: o.created_at,
+        status,
+        method,
+        tableNumber,
+        createdAt,
       });
     }
 
     // 3. Orders approved by waiter and awaiting payment
-    if (o.status === "awaiting_payment") {
+    if (status === "awaiting_payment") {
       awaitingPayment.push({
-        orderId: o.id,
+        orderId: id,
         orderNumber: orderNum,
-        customerName: o.customer_name || "Guest Diner",
+        customerName,
         waiterName,
-        createdAt: o.created_at,
-        totalAmount: Number(o.total_amount) || 0,
+        createdAt,
+        totalAmount,
       });
     }
 
     // 4. Recently rejected by waiter
-    if (o.status === "rejected_by_waiter") {
+    if (status === "rejected_by_waiter") {
       rejectedItems.push({
         type: "order_rejected_by_waiter",
-        orderId: o.id,
+        orderId: id,
         orderNumber: orderNum,
         actorName: waiterName || "Waiter",
         reason: "Order rejected during waiter verification",
-        timestamp: o.updated_at || o.created_at,
+        timestamp: o.updated_at || o.updatedAt || createdAt,
       });
     }
   });
 
   // 5. Payment proofs awaiting cashier review
   const proofsAwaiting: OperationalWorkloadQueue["paymentProofsAwaitingCashierReview"] = [];
-  const ordersById = new Map<string, any>();
-  orders.forEach((o) => ordersById.set(o.id, o));
 
   paymentProofs.forEach((p) => {
-    const linked = ordersById.get(p.order_id);
-    const orderNum = linked?.order_number || (p.order_id ? `#${p.order_id.slice(0, 4)}` : "—");
-    const customer = linked?.customer_name || "Customer";
+    const orderId = p.order_id || p.orderId || "";
+    seenProofOrderIds.add(orderId);
+    const linked = ordersById.get(orderId);
+    const orderNum =
+      linked?.order_number ||
+      linked?.orderNumber ||
+      (orderId ? `#${String(orderId).slice(0, 4)}` : "—");
+    const customer =
+      linked?.customer_name || linked?.customerName || p.customer_name || "Customer";
 
     if (p.status === "pending") {
       proofsAwaiting.push({
         proofId: p.id,
-        orderId: p.order_id,
+        orderId,
         orderNumber: orderNum,
         customerName: customer,
-        submittedAmount: Number(p.submitted_amount) || 0,
-        transactionReference: p.transaction_reference || null,
-        submittedAt: p.created_at,
+        submittedAmount: Number(p.submitted_amount ?? p.amount ?? linked?.total ?? linked?.total_amount) || 0,
+        transactionReference: p.transaction_reference || p.transactionReference || null,
+        submittedAt: p.created_at || p.submittedAt || new Date().toISOString(),
       });
     }
 
     if (p.status === "rejected") {
       rejectedItems.push({
         type: "payment_rejected_by_cashier",
-        orderId: p.order_id,
+        orderId,
         orderNumber: orderNum,
         actorName: "Cashier Review Station",
-        reason: p.rejection_reason || "Payment proof rejected by cashier",
-        timestamp: p.created_at,
+        reason: p.rejection_reason || p.cashierReason || "Payment proof rejected by cashier",
+        timestamp: p.created_at || p.reviewed_at || new Date().toISOString(),
+      });
+    }
+  });
+
+  // Also include orders with status 'payment_under_review' that don't have a separate proof row
+  orders.forEach((o) => {
+    if (o.status === "payment_under_review" && !seenProofOrderIds.has(o.id)) {
+      const orderNum = o.order_number || o.orderNumber || `#${String(o.id).slice(0, 4)}`;
+      proofsAwaiting.push({
+        proofId: `ord-${o.id}`,
+        orderId: o.id,
+        orderNumber: orderNum,
+        customerName: o.customer_name || o.customerName || "Customer",
+        submittedAmount: Number(o.total_amount ?? o.total) || 0,
+        transactionReference: o.transaction_reference || o.transactionReference || null,
+        submittedAt: o.updated_at || o.created_at || new Date().toISOString(),
       });
     }
   });
@@ -387,7 +423,7 @@ export async function loadStaffMonitoringData(
     // 1. Staff Profiles
     supabase
       .from("staff_profiles" as any)
-      .select("user_id, full_name, email, role, phone, is_active, created_at, updated_at")
+      .select("user_id, full_name, role, phone, is_active, created_at, updated_at")
       .order("created_at", { ascending: false }),
 
     // 2. Orders with waiter linkage
@@ -448,7 +484,7 @@ export async function loadStaffMonitoringData(
   // Extract query payloads
   const rawStaff: any[] =
     staffRes.status === "fulfilled" && staffRes.value.data ? staffRes.value.data : [];
-  const rawOrders: any[] =
+  let rawOrders: any[] =
     ordersRes.status === "fulfilled" && ordersRes.value.data ? ordersRes.value.data : [];
   const rawApprovals: any[] =
     approvalsRes.status === "fulfilled" && approvalsRes.value.data ? approvalsRes.value.data : [];
@@ -456,11 +492,11 @@ export async function loadStaffMonitoringData(
     statusLogsRes.status === "fulfilled" && statusLogsRes.value.data
       ? statusLogsRes.value.data
       : [];
-  const rawReviews: any[] =
+  let rawReviews: any[] =
     paymentReviewsRes.status === "fulfilled" && paymentReviewsRes.value.data
       ? paymentReviewsRes.value.data
       : [];
-  const rawProofs: any[] =
+  let rawProofs: any[] =
     proofsRes.status === "fulfilled" && proofsRes.value.data ? proofsRes.value.data : [];
   const rawNotifications: any[] =
     notificationsRes.status === "fulfilled" && notificationsRes.value.data
@@ -475,6 +511,71 @@ export async function loadStaffMonitoringData(
   rawUsers.forEach((u: { id: string; email: string }) => {
     if (u.id && u.email) userEmailMap.set(u.id, u.email);
   });
+
+  // If client-side direct query returned no staff (due to RLS or unauthenticated session),
+  // fallback to authorized server endpoint /api/admin/staff with session token
+  if (rawStaff.length === 0) {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const staffApiRes = await fetch("/api/admin/staff", { headers });
+      if (staffApiRes.ok) {
+        const staffList = await staffApiRes.json();
+        if (Array.isArray(staffList) && staffList.length > 0) {
+          staffList.forEach((s: any) => {
+            rawStaff.push({
+              user_id: s.id,
+              full_name: s.name,
+              role: s.role,
+              phone: s.phone,
+              is_active: s.isActive,
+              created_at: s.createdAt,
+              updated_at: s.updatedAt,
+            });
+            if (s.email && s.email !== "—") {
+              userEmailMap.set(s.id, s.email);
+            }
+          });
+        }
+      }
+    } catch (apiErr) {
+      console.warn("[staff-monitoring] /api/admin/staff fallback failed:", apiErr);
+    }
+  }
+
+  // If client-side direct query returned no orders (due to RLS or unauthenticated session),
+  // fallback to authorized server endpoint /api/admin/sales-monitoring with session token
+  if (rawOrders.length === 0) {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const salesApiRes = await fetch("/api/admin/sales-monitoring", { headers });
+      if (salesApiRes.ok) {
+        const salesData = await salesApiRes.json();
+        if (Array.isArray(salesData?.orders) && salesData.orders.length > 0) {
+          rawOrders = salesData.orders;
+        }
+        if (rawProofs.length === 0 && Array.isArray(salesData?.proofs)) {
+          rawProofs = salesData.proofs;
+        }
+        if (rawReviews.length === 0 && Array.isArray(salesData?.reviews)) {
+          rawReviews = salesData.reviews;
+        }
+      }
+    } catch (salesErr) {
+      console.warn("[staff-monitoring] /api/admin/sales-monitoring fallback failed:", salesErr);
+    }
+  }
 
   // Lookup maps
   const staffNameMap = new Map<string, string>();
@@ -492,14 +593,15 @@ export async function loadStaffMonitoringData(
   const completedOrdersPerWaiter = new Map<string, number>();
 
   rawOrders.forEach((o) => {
-    if (o.waiter_id) {
+    const waiterId = o.waiter_id || o.waiterId;
+    if (waiterId) {
       if (o.status === "completed" || o.status === "delivered") {
         completedOrdersPerWaiter.set(
-          o.waiter_id,
-          (completedOrdersPerWaiter.get(o.waiter_id) || 0) + 1,
+          waiterId,
+          (completedOrdersPerWaiter.get(waiterId) || 0) + 1,
         );
       } else if (o.status !== "cancelled" && o.status !== "rejected_by_waiter") {
-        activeOrdersPerWaiter.set(o.waiter_id, (activeOrdersPerWaiter.get(o.waiter_id) || 0) + 1);
+        activeOrdersPerWaiter.set(waiterId, (activeOrdersPerWaiter.get(waiterId) || 0) + 1);
       }
     }
   });
@@ -681,6 +783,9 @@ export async function loadStaffMonitoringData(
     activities,
     notifications,
     auditLogs,
+    rawOrders,
+    rawReviews,
+    rawProofs,
     lastRefreshedAt: new Date().toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",

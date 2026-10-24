@@ -390,7 +390,7 @@ function RekikOwnerDashboard() {
           Business Performance Key Metrics
         </h2>
 
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {/* 1. Verified Sales Revenue */}
           <Card className="p-3.5 sm:p-5 flex flex-col justify-between border-primary/20 shadow-xs relative overflow-hidden group hover:border-primary/40 transition-colors">
             <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
@@ -459,34 +459,7 @@ function RekikOwnerDashboard() {
             </div>
           </Card>
 
-          {/* 4. Active Workflow Queue */}
-          <Card className="p-3.5 sm:p-5 flex flex-col justify-between shadow-xs hover:border-border/80 transition-colors">
-            <div>
-              <div className="flex items-center justify-between gap-1 text-muted-foreground">
-                <span className="text-xs font-medium">Active Queue</span>
-                <Clock className="size-3.5 text-blue-600 dark:text-blue-400" aria-hidden />
-              </div>
-              {loading && !data ? (
-                <Skeleton className="h-8 w-16 mt-2" />
-              ) : (
-                <p className="font-display text-2xl sm:text-3xl font-semibold tracking-tight mt-1.5 text-foreground">
-                  {(data?.awaitingWaiterCount ?? 0) +
-                    (data?.awaitingPaymentCount ?? 0) +
-                    (data?.awaitingCashierReviewCount ?? 0)}
-                </p>
-              )}
-            </div>
-            <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground pt-2 border-t border-border/50">
-              <span className="text-amber-600 dark:text-amber-400 font-medium">
-                {data?.awaitingWaiterCount ?? 0} review
-              </span>
-              <span className="text-purple-600 dark:text-purple-400 font-medium">
-                {data?.awaitingCashierReviewCount ?? 0} cashier
-              </span>
-            </div>
-          </Card>
-
-          {/* 5. Staff On Duty */}
+          {/* 4. Staff On Duty */}
           <Card className="p-3.5 sm:p-5 flex flex-col justify-between shadow-xs hover:border-border/80 transition-colors">
             <div>
               <div className="flex items-center justify-between gap-1 text-muted-foreground">
@@ -517,128 +490,6 @@ function RekikOwnerDashboard() {
               )}
             </div>
           </Card>
-
-          {/* 6. Operational Issues / Attention */}
-          <Card
-            className={cn(
-              "p-3.5 sm:p-5 flex flex-col justify-between shadow-xs transition-colors",
-              (data?.unresolvedAttentionCount ?? 0) > 0
-                ? "border-amber-500/30 bg-amber-500/5 hover:border-amber-500/50"
-                : "hover:border-border/80",
-            )}
-          >
-            <div>
-              <div className="flex items-center justify-between gap-1 text-muted-foreground">
-                <span className="text-xs font-medium">Issues Needing Attention</span>
-                <AlertTriangle
-                  className={cn(
-                    "size-3.5",
-                    (data?.unresolvedAttentionCount ?? 0) > 0
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "text-muted-foreground",
-                  )}
-                  aria-hidden
-                />
-              </div>
-              {loading && !data ? (
-                <Skeleton className="h-8 w-16 mt-2" />
-              ) : (
-                <p
-                  className={cn(
-                    "font-display text-2xl sm:text-3xl font-semibold tracking-tight mt-1.5",
-                    (data?.unresolvedAttentionCount ?? 0) > 0
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "text-foreground",
-                  )}
-                >
-                  {data?.unresolvedAttentionCount ?? 0}
-                </p>
-              )}
-            </div>
-            <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground pt-2 border-t border-border/50">
-              <Link
-                to="/admin/orders"
-                className="text-primary hover:underline inline-flex items-center gap-1 font-medium text-[11px]"
-              >
-                <span>Inspect in board</span>
-                <ArrowRight className="size-3" />
-              </Link>
-            </div>
-          </Card>
-        </div>
-      </section>
-
-      {/* ── Operational Management Shortcuts (Quick Access) ──────────────── */}
-      <section aria-labelledby="shortcuts-heading" className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2
-            id="shortcuts-heading"
-            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-          >
-            Management Shortcuts
-          </h2>
-          <span className="text-[11px] text-muted-foreground">Direct operational consoles</span>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Link
-            to="/admin/growth"
-            className="group p-3.5 rounded-xl border border-border/70 bg-card hover:border-primary/50 hover:bg-secondary/30 transition-all flex items-center justify-between shadow-xs"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                <TrendingUp className="size-4" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-                  Performance & Growth
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  Revenue, trends & business analytics
-                </p>
-              </div>
-            </div>
-            <ArrowRight className="size-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-          </Link>
-
-          <Link
-            to="/admin/inventory"
-            className="group p-3.5 rounded-xl border border-border/70 bg-card hover:border-primary/50 hover:bg-secondary/30 transition-all flex items-center justify-between shadow-xs"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                <Boxes className="size-4" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-                  Inventory & Stock
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  Physical stock, batches & alert levels
-                </p>
-              </div>
-            </div>
-            <ArrowRight className="size-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-          </Link>
-
-          <Link
-            to="/admin/availability"
-            className="group p-3.5 rounded-xl border border-border/70 bg-card hover:border-primary/50 hover:bg-secondary/30 transition-all flex items-center justify-between shadow-xs"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                <ToggleLeft className="size-4" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
-                  Menu Availability
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  Instant item toggle & dining status
-                </p>
-              </div>
-            </div>
-            <ArrowRight className="size-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-          </Link>
         </div>
       </section>
 
@@ -699,15 +550,10 @@ function RekikOwnerDashboard() {
               </div>
 
               <div className="mt-3 pt-2.5 border-t border-border/50 flex items-center justify-between text-xs">
+                <span className="text-[11px] text-muted-foreground">Pipeline Value</span>
                 <span className="font-medium text-foreground font-mono">
                   {formatETB(stage.totalValue)}
                 </span>
-                <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-xs -mr-1">
-                  <Link to={stage.href}>
-                    <span>Manage</span>
-                    <ArrowRight className="size-3 ml-1" />
-                  </Link>
-                </Button>
               </div>
             </Card>
           ))}
@@ -730,24 +576,11 @@ function RekikOwnerDashboard() {
                   {data?.range.label.toLowerCase() || "selected period"}.
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <span className="text-[11px] text-muted-foreground block">Peak Day Sales</span>
-                  <span className="font-mono text-xs sm:text-sm font-semibold text-foreground">
-                    {formatETB(data?.peakDayRevenue ?? 0)}
-                  </span>
-                </div>
-                <Button
-                  asChild
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs gap-1 hidden sm:inline-flex"
-                >
-                  <Link to="/admin/growth">
-                    <span>Growth Analytics</span>
-                    <ArrowUpRight className="size-3" />
-                  </Link>
-                </Button>
+              <div className="text-right">
+                <span className="text-[11px] text-muted-foreground block">Peak Day Sales</span>
+                <span className="font-mono text-xs sm:text-sm font-semibold text-foreground">
+                  {formatETB(data?.peakDayRevenue ?? 0)}
+                </span>
               </div>
             </div>
 
@@ -830,20 +663,23 @@ function RekikOwnerDashboard() {
           </div>
         </Card>
 
-        {/* Right: Operational Summary & Alerts */}
+        {/* Right: Operational Summary & Alerts — Showing Only Rejected Orders (Task 3) */}
         <Card className="p-4 sm:p-6 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between">
               <CardTitle className="font-display text-base sm:text-lg font-semibold flex items-center gap-2">
-                <ShieldCheck className="size-4 text-emerald-600" aria-hidden />
+                <AlertCircle className="size-4 text-destructive" aria-hidden />
                 <span>Operational Alerts</span>
               </CardTitle>
-              <Badge variant="outline" className="text-xs">
-                {data?.operationalAlerts.length ?? 0} active
+              <Badge
+                variant={data && data.rejectedOrdersCount > 0 ? "destructive" : "outline"}
+                className="text-xs font-mono"
+              >
+                {data?.rejectedOrdersCount ?? 0} rejected
               </Badge>
             </div>
             <CardDescription className="text-xs text-muted-foreground mt-0.5">
-              Live operational items requiring staff or management intervention.
+              Live rejected orders requiring staff review or cancellation inspection.
             </CardDescription>
 
             <div className="mt-4 space-y-2.5">
@@ -852,73 +688,94 @@ function RekikOwnerDashboard() {
                   <Skeleton className="h-14 w-full" />
                   <Skeleton className="h-14 w-full" />
                 </div>
-              ) : !data || data.operationalAlerts.length === 0 ? (
+              ) : data?.ordersError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center space-y-2">
+                  <AlertCircle className="size-5 text-destructive mx-auto" />
+                  <p className="text-xs font-semibold text-destructive">
+                    Unable to load rejected orders
+                  </p>
+                  <p className="text-[11px] text-muted-foreground max-w-xs mx-auto">
+                    {data.ordersError}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1.5"
+                    onClick={() => void refreshData(preset, customStart, customEnd)}
+                  >
+                    <RefreshCw className="size-3" /> Retry
+                  </Button>
+                </div>
+              ) : !data || data.rejectedOrdersCount === 0 ? (
                 <div className="rounded-lg border border-dashed border-border/60 bg-emerald-500/5 p-6 text-center">
                   <CheckCircle2 className="size-7 text-emerald-600 mx-auto mb-1.5" />
                   <p className="text-xs font-semibold text-foreground">
                     All operational pipelines clear
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    No pending payment proofs, rejected orders, or availability blocks at this
-                    moment.
+                    No rejected orders requiring attention at this moment.
                   </p>
                 </div>
               ) : (
-                data.operationalAlerts.map((alert) => (
-                  <Link
-                    key={alert.id}
-                    to={alert.href}
-                    className="flex items-start justify-between gap-3 p-3 rounded-lg border border-border/60 bg-card hover:bg-secondary/40 transition-colors group"
-                  >
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      {alert.severity === "critical" ? (
-                        <AlertCircle className="size-4 text-destructive shrink-0 mt-0.5" />
-                      ) : alert.severity === "warning" ? (
-                        <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                      ) : (
-                        <Package className="size-4 text-muted-foreground shrink-0 mt-0.5" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-foreground group-hover:text-primary transition-colors truncate">
-                          {alert.title}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground line-clamp-1">
-                          {alert.description}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge
-                      variant={alert.severity === "critical" ? "destructive" : "secondary"}
-                      className="shrink-0 text-xs font-mono"
-                    >
-                      {alert.count}
-                    </Badge>
-                  </Link>
-                ))
+                <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                  {data.rejectedOrders.map((order) => {
+                    const reason =
+                      order.waiterRejectionReason ||
+                      order.paymentProof?.rejectionReason ||
+                      "Order was rejected";
+                    return (
+                      <Link
+                        key={order.id}
+                        to="/admin/orders"
+                        className="flex items-start justify-between gap-3 p-3 rounded-lg border border-destructive/25 bg-card hover:bg-destructive/5 transition-colors group"
+                      >
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <XCircle className="size-4 text-destructive shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-foreground group-hover:text-primary transition-colors truncate">
+                              Order #{order.number} — {order.customer.name || "Guest Diner"}
+                            </p>
+                            <p className="text-[11px] text-muted-foreground line-clamp-1">
+                              Reason: {reason}
+                            </p>
+                            <span className="text-[10px] text-muted-foreground">
+                              {new Date(order.createdAt).toLocaleTimeString("en-US", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}{" "}
+                              • {formatETB(order.total)}
+                            </span>
+                          </div>
+                        </div>
+                        <Badge variant="destructive" className="shrink-0 text-xs font-mono">
+                          Rejected
+                        </Badge>
+                      </Link>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-border/40 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="text-muted-foreground font-medium">Quick Consoles:</span>
-            <div className="flex items-center gap-3">
-              <Link
-                to="/admin/inventory"
-                className="text-primary font-medium hover:underline inline-flex items-center gap-1"
-              >
-                <Boxes className="size-3" />
-                <span>Inventory & Stock ({data?.unavailableProductsCount ?? 0} out)</span>
-              </Link>
-              <span className="text-border">|</span>
-              <Link
-                to="/admin/availability"
-                className="text-primary font-medium hover:underline inline-flex items-center gap-1"
-              >
-                <ToggleLeft className="size-3" />
-                <span>Availability Toggles</span>
-                <ArrowRight className="size-3" />
-              </Link>
-            </div>
+          <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between text-xs">
+            <Link
+              to="/admin/orders"
+              className="text-primary font-medium hover:underline inline-flex items-center gap-1"
+            >
+              <span>View all in Orders Board</span>
+              <ArrowRight className="size-3" />
+            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground gap-1"
+              onClick={() => void refreshData(preset, customStart, customEnd)}
+              disabled={loading}
+            >
+              <RefreshCw className={cn("size-3", loading && "animate-spin")} />
+              <span>Refresh</span>
+            </Button>
           </div>
         </Card>
       </div>
