@@ -25,7 +25,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   createAdminProduct,
+  deleteAdminProduct,
   fetchAdminCategories,
   fetchAdminProducts,
   formatETB,
@@ -108,6 +119,8 @@ function AdminProducts() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingProduct, setDeletingProduct] = useState<Product | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -302,6 +315,32 @@ function AdminProducts() {
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!deletingProduct) return;
+    setIsDeleting(true);
+    try {
+      const { success, error, warning } = await deleteAdminProduct(
+        deletingProduct.id,
+        deletingProduct.image,
+      );
+      if (!success || error) {
+        toast.error(error?.message || "Failed to delete product.");
+        return;
+      }
+      setProducts((prev) => prev.filter((p) => p.id !== deletingProduct.id));
+      if (warning) {
+        toast.warning(warning);
+      } else {
+        toast.success(`"${deletingProduct.name}" deleted successfully.`);
+      }
+      setDeletingProduct(null);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete product.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -459,9 +498,19 @@ function AdminProducts() {
                         />
                       </td>
                       <td className="p-3 text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>
-                          <Pencil className="size-4" /> Edit
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>
+                            <Pencil className="size-4" /> Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeletingProduct(p)}
+                          >
+                            <Trash2 className="size-4" /> Delete
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -491,6 +540,41 @@ function AdminProducts() {
           uploadStatus={uploadStatus}
         />
       </Dialog>
+
+      <AlertDialog
+        open={!!deletingProduct}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) {
+            setDeletingProduct(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Product</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete{" "}
+              <span className="font-semibold text-foreground">"{deletingProduct?.name}"</span>? This
+              will remove the item from the menu and delete its associated image from storage. If
+              this item is linked to inventory tracking or customer orders, deletion will be safely
+              blocked.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeleting}
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmDelete();
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Deleting..." : "Delete Product"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

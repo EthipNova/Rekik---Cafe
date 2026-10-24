@@ -18,7 +18,7 @@ export const Route = createFileRoute("/menu/$category")({
     return { categories, products };
   },
   head: ({ params, loaderData }) => {
-    const category = loaderData?.categories.find((c) => c.slug === params.category);
+    const category = loaderData?.categories?.find((c: any) => c.slug === params.category);
     if (category && category.active === false) {
       return {
         meta: [
@@ -49,7 +49,7 @@ function CategoryPage() {
   const { categories, products } = Route.useLoaderData();
   const navigate = useNavigate();
 
-  const targetCategory = categories.find((c) => c.slug === category);
+  const targetCategory = (categories as any[])?.find((c: any) => c.slug === category);
 
   useEffect(() => {
     if (targetCategory && targetCategory.active === false) {

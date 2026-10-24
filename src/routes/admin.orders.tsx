@@ -8,8 +8,6 @@ import {
   ExternalLink,
   Eye,
   Filter,
-  Kanban,
-  List,
   MapPin,
   Phone,
   Printer,
@@ -86,7 +84,6 @@ export const Route = createFileRoute("/admin/orders")({
   component: AdminOrdersPage,
 });
 
-type ViewMode = "board" | "table";
 
 const STATUS_COLUMNS: { status: OrderStatus; label: string; description: string; color: string }[] =
   [
@@ -158,26 +155,6 @@ function getNextActionLabel(order: Order): string {
   }
 }
 
-function getNextShortActionLabel(order: Order): string {
-  const next = getNextStatus(order);
-  if (!next) return "Done";
-  switch (next) {
-    case "confirmed":
-      return "Confirm";
-    case "preparing":
-      return "Prep";
-    case "ready":
-      return "Ready";
-    case "out-for-delivery":
-      return "Dispatch";
-    case "delivered":
-      return "Delivered";
-    case "completed":
-      return "Complete";
-    default:
-      return statusLabels[next] || "Next";
-  }
-}
 
 function MethodBadge({ method }: { method: OrderMethod }) {
   if (method === "dine-in") {
@@ -241,7 +218,6 @@ function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("board");
   const [searchQuery, setSearchQuery] = useState("");
   const [methodFilter, setMethodFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -460,35 +436,6 @@ function AdminOrdersPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center rounded-lg border border-border bg-card p-1">
-            <button
-              type="button"
-              onClick={() => setViewMode("board")}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                viewMode === "board"
-                  ? "bg-primary text-primary-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Kanban className="size-3.5" />
-              Board View
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("table")}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                viewMode === "table"
-                  ? "bg-primary text-primary-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <List className="size-3.5" />
-              Table View
-            </button>
-          </div>
-
           <Button
             variant="outline"
             size="sm"
@@ -610,7 +557,7 @@ function AdminOrdersPage() {
         </div>
       </div>
 
-      {/* Main Content Area: Kanban vs Table */}
+      {/* Main Content Area: Orders List / Table View */}
       {loading ? (
         <div className="surface-card flex items-center justify-center p-16 text-sm text-muted-foreground">
           <RefreshCw className="mr-2.5 size-5 animate-spin text-primary" />
@@ -626,160 +573,6 @@ function AdminOrdersPage() {
               : "Try adjusting your search query or filter criteria."
           }
         />
-      ) : viewMode === "board" ? (
-        /* KANBAN BOARD VIEW */
-        <div className="grid gap-4 overflow-x-auto pb-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
-          {STATUS_COLUMNS.map((column) => {
-            const colOrders = filteredOrders.filter((o) => {
-              if (column.status === "completed") {
-                return o.status === "completed" || o.status === "delivered";
-              }
-              return o.status === column.status;
-            });
-
-            return (
-              <div
-                key={column.status}
-                className="flex flex-col rounded-xl border border-border bg-secondary/30 p-3 min-w-[280px]"
-              >
-                {/* Column Header */}
-                <div className="flex items-center justify-between border-b border-border/60 pb-2.5 mb-3">
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-display text-xs font-semibold uppercase tracking-wider text-foreground">
-                      {column.label}
-                    </h2>
-                  </div>
-                  <span className="flex size-5 items-center justify-center rounded-full bg-card text-xs font-semibold border border-border shadow-2xs">
-                    {colOrders.length}
-                  </span>
-                </div>
-
-                {/* Cards List */}
-                <div className="space-y-3 flex-1 sm:overflow-y-auto sm:max-h-[calc(100vh-340px)] pr-0.5">
-                  {colOrders.length === 0 ? (
-                    <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-border/80 text-xs text-muted-foreground">
-                      No orders
-                    </div>
-                  ) : (
-                    colOrders.map((order) => {
-                      const next = getNextStatus(order);
-                      const isUpdating = updatingId === order.id;
-
-                      return (
-                        <article
-                          key={order.id}
-                          className="surface-card relative flex flex-col gap-2.5 p-3.5 transition-all hover:border-primary/40 hover:shadow-sm"
-                        >
-                          {/* Card Header: Order # + Time */}
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-display font-semibold text-sm text-foreground">
-                              {order.number}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                              <Clock className="size-3" />
-                              {formatElapsed(order.createdAt)}
-                            </span>
-                          </div>
-
-                          {/* Badges: Method + Payment */}
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <MethodBadge method={order.method} />
-                            {order.customer.table && (
-                              <Badge variant="secondary" className="text-[10px] font-mono">
-                                Table #{order.customer.table}
-                              </Badge>
-                            )}
-                          </div>
-
-                          {/* Customer Info */}
-                          <div className="text-xs text-muted-foreground space-y-0.5 border-t border-border/40 pt-2">
-                            <p className="font-medium text-foreground truncate">
-                              {order.customer.name || "Guest Customer"}
-                            </p>
-                            {order.customer.phone && (
-                              <p className="truncate flex items-center gap-1">
-                                <Phone className="size-2.5" />
-                                {order.customer.phone}
-                              </p>
-                            )}
-                            {order.method === "delivery" && order.customer.address && (
-                              <p className="truncate flex items-center gap-1 text-[11px]">
-                                <MapPin className="size-2.5 text-primary shrink-0" />
-                                {order.customer.address}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Line Items Summary */}
-                          <div className="rounded-md bg-secondary/50 p-2 text-xs">
-                            <p className="font-medium text-foreground text-[11px] mb-1">
-                              {order.items.reduce((s, i) => s + i.quantity, 0)} items:
-                            </p>
-                            <ul className="space-y-0.5 text-muted-foreground line-clamp-3">
-                              {order.items.map((item, idx) => (
-                                <li key={idx} className="flex justify-between text-[11px]">
-                                  <span className="truncate pr-2">
-                                    {item.quantity}× {item.name}
-                                  </span>
-                                  <span className="shrink-0 font-medium">
-                                    {formatETB(item.price * item.quantity)}
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          {/* Footer: Price + Quick Advance Button */}
-                          <div className="flex items-center justify-between gap-2 border-t border-border/40 pt-2.5">
-                            <div className="flex flex-col">
-                              <span className="text-[10px] text-muted-foreground uppercase">
-                                Total
-                              </span>
-                              <span className="font-semibold text-sm text-primary">
-                                {formatETB(order.total)}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-1.5">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="size-9"
-                                title="View order details"
-                                aria-label={`View order ${order.number} details`}
-                                onClick={() => setSelectedOrderId(order.id)}
-                              >
-                                <Eye className="size-4" />
-                              </Button>
-
-                              {next && (
-                                <Button
-                                  size="sm"
-                                  className="h-9 text-xs px-3 gap-1.5"
-                                  disabled={isUpdating}
-                                  onClick={() => handleAdvanceStatus(order)}
-                                >
-                                  {isUpdating ? (
-                                    <RefreshCw className="size-3.5 animate-spin" />
-                                  ) : (
-                                    <>
-                                      <span>{getNextShortActionLabel(order)}</span>
-                                      <ArrowRight className="size-3.5" />
-                                    </>
-                                  )}
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       ) : (
         /* TABLE / LIST VIEW */
         <div className="space-y-3">

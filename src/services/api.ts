@@ -179,15 +179,15 @@ export async function fetchCategories(): Promise<Category[]> {
   try {
     const { data, error } = await supabase
       .from("categories" as any)
-      .select("id, slug, name, tagline, is_active")
-      .order("name", { ascending: true });
+      .select("id, slug, name, description, is_active, sort_order")
+      .order("sort_order", { ascending: true });
 
     if (!error && Array.isArray(data)) {
       return data.map((c: any) => ({
         id: c.id,
         slug: c.slug,
         name: c.name,
-        tagline: c.tagline || "",
+        tagline: c.description || c.tagline || "",
         active: c.is_active ?? true,
       }));
     }
@@ -251,7 +251,7 @@ export async function fetchProducts(options?: FetchProductsOptions): Promise<Pro
           id,
           slug,
           name,
-          tagline,
+          description,
           is_active
         )
       `,
@@ -330,7 +330,7 @@ export async function fetchProductById(id: string): Promise<Product> {
           id,
           slug,
           name,
-          tagline,
+          description,
           is_active
         )
       `,
@@ -593,7 +593,7 @@ export async function fetchSettings(): Promise<NebaSettings> {
       .select(
         "id, cafe_name, phone, email, address, opening_hours, delivery_fee, cafe_latitude, cafe_longitude, price_per_km, min_delivery_fee, max_delivery_distance_km, delivery_enabled, rounding_rule, updated_at",
       )
-      .eq("id", 1)
+      .limit(1)
       .maybeSingle();
 
     if (!error && data) {
@@ -664,7 +664,10 @@ function normalizeServiceOrder(raw: any): Order {
         : null,
     total: Number(raw.total_amount) || 0,
     waiterId: raw.waiter_id || null,
-    waiterName: raw.staff_profiles?.full_name || null,
+    waiterName:
+      (Array.isArray(raw.staff_profiles)
+        ? raw.staff_profiles[0]?.full_name
+        : raw.staff_profiles?.full_name) || null,
     waiterDecision: raw.waiter_decision || "pending",
     waiterRejectionReason: raw.waiter_rejection_reason || null,
     paymentProof: Array.isArray(raw.payment_proofs) && raw.payment_proofs[0]
@@ -701,6 +704,7 @@ export interface CreateOrderPayload {
   discount?: number | undefined;
   waiterId?: string | undefined;
   customerNotes?: string | undefined;
+  clientReferenceId?: string | undefined;
 }
 
 /**
@@ -767,9 +771,6 @@ export async function fetchOrderById(id: string): Promise<Order> {
         status,
         table_number,
         delivery_address,
-        delivery_latitude,
-        delivery_longitude,
-        delivery_distance_km,
         subtotal,
         discount_amount,
         delivery_fee,

@@ -129,6 +129,8 @@ function AdminAccountPage() {
 
     setProfile((prev) => (prev ? { ...prev, fullName, phone } : prev));
     toast.success("Profile details saved successfully.");
+    // Reload persisted values from database to confirm update
+    void loadAccount();
   };
 
   const handleAvatarFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,6 +153,8 @@ function AdminAccountPage() {
 
     setProfile((prev) => (prev ? { ...prev, avatarUrl: res.avatarUrl } : prev));
     toast.success("Profile photo updated.");
+    // Reload persisted values from database to confirm update
+    void loadAccount();
   };
 
   const handleRemoveAvatar = async () => {
@@ -167,6 +171,8 @@ function AdminAccountPage() {
 
     setProfile((prev) => (prev ? { ...prev, avatarUrl: null } : prev));
     toast.success("Profile photo removed.");
+    // Reload persisted values from database to confirm update
+    void loadAccount();
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {

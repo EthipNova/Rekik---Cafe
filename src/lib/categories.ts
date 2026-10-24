@@ -20,6 +20,7 @@ type RawCategoryRecord = {
   slug?: string;
   name?: string;
   tagline?: string;
+  description?: string;
   is_active?: boolean;
   created_at?: string;
   products?: { count: number | string }[];
@@ -128,7 +129,7 @@ function normalizeCategoryRecord(raw: RawCategoryRecord): AdminCategory {
     id: raw?.id ?? "",
     slug: raw?.slug ?? "",
     name: raw?.name ?? "",
-    tagline: raw?.tagline ?? "",
+    tagline: raw?.description ?? raw?.tagline ?? "",
     active: Boolean(raw?.is_active),
     productCount,
     ...(raw?.created_at ? { createdAt: raw.created_at } : {}),
@@ -162,7 +163,7 @@ export async function createAdminCategory(input: CreateCategoryInput): Promise<{
       id,
       name: trimmedName,
       slug,
-      tagline: input.tagline?.trim() || "New category",
+      description: input.tagline?.trim() || "New category",
       is_active: true,
     };
 
@@ -174,7 +175,7 @@ export async function createAdminCategory(input: CreateCategoryInput): Promise<{
         id,
         slug,
         name,
-        tagline,
+        description,
         is_active,
         created_at
       `,
@@ -230,7 +231,7 @@ export async function fetchAdminCategories(): Promise<{
         id,
         slug,
         name,
-        tagline,
+        description,
         is_active,
         created_at,
         products (count)

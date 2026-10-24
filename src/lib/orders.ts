@@ -2,7 +2,21 @@ import { getProduct } from "./menu-data";
 
 export type OrderMethod = "dine-in" | "takeaway" | "delivery";
 export type OrderStatus =
-  "received" | "confirmed" | "preparing" | "ready" | "out-for-delivery" | "delivered" | "completed";
+  | "received"
+  | "confirmed"
+  | "preparing"
+  | "ready"
+  | "out-for-delivery"
+  | "delivered"
+  | "completed"
+  // Rekik Workflow statuses
+  | "pending_waiter"
+  | "awaiting_payment"
+  | "payment_under_review"
+  | "payment_verified"
+  | "rejected_by_waiter"
+  | "payment_rejected"
+  | "cancelled";
 
 export type OrderItem = { productId: string; name: string; quantity: number; price: number };
 
@@ -30,7 +44,7 @@ export type Order = {
   total: number;
   waiterId?: string | null;
   waiterName?: string | null;
-  waiterDecision?: "pending" | "approved" | "rejected";
+  waiterDecision?: "pending" | "approved" | "rejected" | string | null;
   waiterRejectionReason?: string | null;
   transactionReference?: string | null;
   paymentProof?: {
@@ -45,7 +59,8 @@ export type Order = {
   } | null;
 };
 
-const STORAGE_KEY = "neba.orders.v1";
+const STORAGE_KEY = "rekik.orders.v1";
+const LEGACY_STORAGE_KEY = "neba.orders.v1";
 
 export const dineInFlow: OrderStatus[] = [
   "received",
@@ -72,6 +87,13 @@ export const statusLabels: Record<OrderStatus, string> = {
   "out-for-delivery": "Out for Delivery",
   delivered: "Delivered",
   completed: "Completed",
+  pending_waiter: "Awaiting Waiter",
+  awaiting_payment: "Awaiting Payment",
+  payment_under_review: "Payment Under Review",
+  payment_verified: "Payment Verified",
+  rejected_by_waiter: "Rejected by Waiter",
+  payment_rejected: "Payment Rejected",
+  cancelled: "Cancelled",
 };
 
 export const methodLabels: Record<OrderMethod, string> = {
@@ -87,7 +109,7 @@ export function flowFor(method: OrderMethod) {
 export function readOrders(): Order[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as Order[]) : [];

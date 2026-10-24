@@ -32,29 +32,25 @@ import {
   recordWaiterPaymentCollection,
   updateOrderPaymentMethod,
 } from "./db";
-import { serverSupabase } from "./supabase";
-import { validateContactInput } from "@/lib/contact";
-import type { AboutContent } from "@/lib/content";
+import { validateContactInput, type ContactMessage } from "@/lib/contact";
+import { isValidUUID, type AboutContent } from "@/lib/content";
 import type { Order, OrderStatus } from "@/lib/orders";
 import type { Promotion } from "@/lib/promotions";
 import { createScopedClient, supabase, type UserRole } from "@/lib/supabase";
+import { serverSupabase } from "./supabase";
 import {
-  resolveStaffUser,
-  getWaiterProfile,
-  updateWaiterAvailability,
-  getWaiterMetrics,
-  getWaiterOrders,
-  approveWaiterOrder,
-  rejectWaiterOrder,
-  getWaiterPayments,
-  getWaiterNotifications,
-  markWaiterNotificationRead,
-  getAvailableWaiters,
-  submitWaiterPaymentProof,
-} from "./waiter";
+  getRegisteredStaffList,
+  registerStaffMember,
+  updateStaffActiveStatus,
+  updateStaffPassword,
+} from "./staff";
+import {
+  getAdminPaymentAccounts,
+  getPublicPaymentAccounts,
+  upsertPaymentAccount,
+} from "./payment-accounts";
 import {
   resolveCashierMe,
-  authenticateCashier,
   getPendingPaymentReviews,
   getPaymentReviewHistory,
   getCashierOverviewMetrics,
@@ -64,6 +60,20 @@ import {
   getCashierNotifications,
   markNotificationAsRead,
 } from "./cashier";
+import {
+  resolveWaiterUser,
+  getWaiterProfile,
+  updateWaiterAvailability,
+  getWaiterMetrics,
+  getWaiterOrders,
+  approveWaiterOrder,
+  rejectWaiterOrder,
+  submitWaiterPaymentProof,
+  getWaiterPayments,
+  getWaiterNotifications,
+  markWaiterNotificationRead,
+  getAvailableWaiters,
+} from "./waiter";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -113,44 +123,138 @@ export interface AuthenticatedUser {
 }
 
 /**
- * Resolves the authenticated Supabase user from the request Authorization Bearer token,
- * fetches their role from public.users (or defaults to CUSTOMER), and returns verified identity.
+ * Extracts the Supabase access token from Authorization header (case-insensitive)
+ * or cookie fallback.
+ */
+function extractTokenFromRequest(request: Request): string | null {
+  const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
+  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+    return authHeader.replace(/^Bearer\s+/i, "").trim();
+  }
+
+  // Check Cookie header fallback
+  const cookieHeader = request.headers.get("cookie") || request.headers.get("Cookie");
+  if (cookieHeader) {
+    const cookies = cookieHeader.split(";").map((c) => c.trim());
+    for (const cookie of cookies) {
+      const [name, ...rest] = cookie.split("=");
+      if (!name) continue;
+      const val = decodeURIComponent(rest.join("="));
+      if (!val) continue;
+
+      if (name.startsWith("sb-") && name.endsWith("-auth-token")) {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed) && parsed[0]) return parsed[0];
+          if (parsed.access_token) return parsed.access_token;
+        } catch {
+          if (val.startsWith("base64-")) {
+            try {
+              const decoded = Buffer.from(val.replace("base64-", ""), "base64").toString("utf-8");
+              const parsed = JSON.parse(decoded);
+              if (parsed.access_token) return parsed.access_token;
+            } catch {
+              /* ignore decode error */
+            }
+          }
+        }
+      } else if (name === "sb-access-token" || name === "supabase-auth-token") {
+        return val;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolves the authenticated Supabase user from the request Authorization Bearer token or session cookie,
+ * fetches their role from public.users / staff_profiles, and returns verified identity.
  */
 export async function resolveAuthUser(request: Request): Promise<AuthenticatedUser | null> {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const token = extractTokenFromRequest(request);
+  if (!token) {
     return null;
   }
 
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  if (!token) return null;
-
   try {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser(token);
-    if (userError || !user || !user.id) return null;
+    let user = null;
+    let userError = null;
+
+    if (serverSupabase?.auth) {
+      const res = await serverSupabase.auth.getUser(token);
+      user = res.data?.user;
+      userError = res.error;
+    }
+    if (!user && supabase?.auth) {
+      const res = await supabase.auth.getUser(token);
+      user = res.data?.user;
+      userError = res.error || userError;
+    }
+
+    if (userError || !user || !user.id) {
+      if (userError) {
+        console.warn(`[api:resolveAuthUser] Token validation failed: ${userError.message}`);
+      }
+      return null;
+    }
 
     let role: UserRole = "CUSTOMER";
     let fullName: string | null = null;
     let phone: string | null = null;
 
+    // 1. Primary check: public.staff_profiles for active operational roles (admin, manager, owner, cashier, waiter, staff)
     try {
-      const scopedClient = createScopedClient(token);
-      const { data: profile } = await scopedClient
-        .from("users")
-        .select("role, full_name, phone")
-        .eq("id", user.id)
+      const { data: staffProfile } = await (serverSupabase.from("staff_profiles" as any) as any)
+        .select("role, full_name, phone, is_active")
+        .eq("user_id", user.id)
         .maybeSingle();
 
-      if (profile) {
-        if (profile.role) role = profile.role as UserRole;
-        if (profile.full_name) fullName = profile.full_name;
-        if (profile.phone) phone = profile.phone;
+      if (staffProfile && staffProfile.is_active) {
+        const staffRole = (staffProfile.role || "").toLowerCase().trim();
+        if (["admin", "manager", "owner"].includes(staffRole)) {
+          role = "ADMIN";
+        } else if (["cashier", "waiter", "kitchen", "staff"].includes(staffRole)) {
+          role = "STAFF";
+        }
+        if (staffProfile.full_name) fullName = staffProfile.full_name;
+        if (staffProfile.phone) phone = staffProfile.phone;
       }
     } catch {
       /* ignore lookup failure */
+    }
+
+    // 2. Fallback check: public.users if not resolved as active staff
+    if (role === "CUSTOMER") {
+      try {
+        const { data: profile } = await (serverSupabase.from("users" as any) as any)
+          .select("role, full_name, phone")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profile) {
+          const userRole = (profile.role || "").toUpperCase().trim();
+          if (userRole === "ADMIN") role = "ADMIN";
+          else if (userRole === "STAFF") role = "STAFF";
+          if (profile.full_name) fullName = fullName || profile.full_name;
+          if (profile.phone) phone = phone || profile.phone;
+        }
+      } catch {
+        /* ignore lookup failure */
+      }
+    }
+
+    // 3. Fallback to token-scoped RPC is_admin_or_staff
+    if (role === "CUSTOMER") {
+      try {
+        const scopedClient = createScopedClient(token);
+        const { data: isStaff } = await (scopedClient.rpc("is_admin_or_staff" as any) as any);
+        if (isStaff === true) {
+          role = "STAFF";
+        }
+      } catch {
+        /* ignore rpc failure */
+      }
     }
 
     if (!fullName) {
@@ -231,9 +335,13 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return forbidden("Only administrators and staff can access customer data");
         }
 
-        const scopedClient = createScopedClient(authUser.token);
-        const customers = await getCustomers(scopedClient);
-        return json(customers);
+        try {
+          const customers = await getCustomers(serverSupabase);
+          return json(customers);
+        } catch (err: any) {
+          console.error("[api] /api/customers error:", err);
+          return json({ error: err.message || "Failed to load customer profiles from database" }, 500);
+        }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
@@ -339,8 +447,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         // Admin and Staff: authorized operational orders
         if (authUser.role === "ADMIN" || authUser.role === "STAFF") {
           const phone = url.searchParams.get("phone") || undefined;
-          const scopedClient = createScopedClient(authUser.token);
-          const orders = await getOrders(phone ? { phone } : undefined, scopedClient);
+          const orders = await getOrders(phone ? { phone } : undefined, serverSupabase);
           return json(orders);
         }
 
@@ -437,7 +544,842 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           customer: updated.customer,
         });
       }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
 
+    /* ----------------------------------------------------------------------
+       3c. Admin Payments: GET /api/admin/payments
+       Returns all payment transactions for authorized Admin & Staff.
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/admin/payments") {
+      if (method === "GET") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+          return forbidden("Only administrators and staff can access payment records");
+        }
+
+        const { data, error } = await (serverSupabase.from("payments" as any) as any)
+          .select(
+            `
+            id,
+            order_id,
+            method,
+            status,
+            amount,
+            transaction_reference,
+            paid_at,
+            created_at,
+            orders (
+              id,
+              order_number,
+              customer_id,
+              customer_name,
+              customer_phone,
+              method,
+              status,
+              table_number,
+              delivery_address,
+              subtotal,
+              discount_amount,
+              delivery_fee,
+              total_amount,
+              created_at,
+              updated_at,
+              customers (
+                id,
+                name,
+                phone,
+                email
+              ),
+              order_items (
+                id,
+                order_id,
+                product_id,
+                name,
+                quantity,
+                unit_price,
+                line_total,
+                products (
+                  id,
+                  name,
+                  image_url,
+                  price
+                )
+              )
+            )
+          `,
+          )
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          return json({ error: "Failed to fetch payments", message: error.message }, 500);
+        }
+
+        return json(data || []);
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       3d. Admin Sales Monitoring: GET /api/admin/sales-monitoring
+       Returns orders, proofs, and reviews datasets for authorized Admin & Staff.
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/admin/sales-monitoring") {
+      if (method === "GET") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+          return forbidden("Only administrators and staff can access financial monitoring");
+        }
+
+        const [ordersRes, proofsRes, reviewsRes] = await Promise.allSettled([
+          (serverSupabase.from("orders" as any) as any)
+            .select(
+              `
+              id,
+              order_number,
+              customer_name,
+              customer_phone,
+              method,
+              status,
+              waiter_id,
+              table_number,
+              delivery_address,
+              subtotal,
+              discount_amount,
+              delivery_fee,
+              total_amount,
+              created_at,
+              updated_at,
+              staff_profiles (
+                user_id,
+                full_name,
+                role
+              ),
+              order_items (
+                id,
+                order_id,
+                product_id,
+                name,
+                unit_price,
+                quantity,
+                line_total
+              ),
+              payments (
+                id,
+                order_id,
+                method,
+                status,
+                amount,
+                transaction_reference,
+                paid_at,
+                created_at
+              )
+            `,
+            )
+            .order("created_at", { ascending: false }),
+
+          (serverSupabase.from("payment_proofs" as any) as any)
+            .select(
+              `
+              id,
+              payment_id,
+              order_id,
+              submitted_by,
+              screenshot_path,
+              submitted_amount,
+              transaction_reference,
+              status,
+              rejection_reason,
+              reviewed_by,
+              submitted_at,
+              reviewed_at
+            `,
+            )
+            .order("submitted_at", { ascending: false }),
+
+          (serverSupabase.from("payment_reviews" as any) as any)
+            .select(
+              `
+              id,
+              payment_proof_id,
+              cashier_id,
+              decision,
+              reason,
+              reviewed_at
+            `,
+            )
+            .order("reviewed_at", { ascending: false }),
+        ]);
+
+        const orders =
+          ordersRes.status === "fulfilled" && Array.isArray((ordersRes.value as any)?.data)
+            ? (ordersRes.value as any).data
+            : [];
+        const proofs =
+          proofsRes.status === "fulfilled" && Array.isArray((proofsRes.value as any)?.data)
+            ? (proofsRes.value as any).data
+            : [];
+        const reviews =
+          reviewsRes.status === "fulfilled" && Array.isArray((reviewsRes.value as any)?.data)
+            ? (reviewsRes.value as any).data
+            : [];
+
+        return json({ orders, proofs, reviews });
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       3e. Admin Staff Management & Registration:
+           GET   /api/admin/staff
+           POST  /api/admin/staff (or /api/admin/staff/register)
+           PATCH /api/admin/staff/status (or /api/admin/staff/:id/status)
+       Only authorized administrators may access staff registration and management.
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/admin/staff" || pathname === "/api/admin/staff/register") {
+      const authUser = await resolveAuthUser(request);
+      if (!authUser) {
+        return unauthorized("Authentication required to access staff management");
+      }
+      if (authUser.role !== "ADMIN") {
+        return forbidden("Only administrators can manage staff registrations");
+      }
+
+      // GET /api/admin/staff
+      if (method === "GET") {
+        try {
+          const staff = await getRegisteredStaffList();
+          return json(staff);
+        } catch (err: unknown) {
+          return serverError(err);
+        }
+      }
+
+      // POST /api/admin/staff
+      if (method === "POST") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid registration request payload");
+        }
+
+        try {
+          const newStaff = await registerStaffMember(
+            {
+              name: String(body.name || ""),
+              email: String(body.email || ""),
+              password: String(body.password || ""),
+              role: body.role,
+              phone: body.phone ? String(body.phone).trim() : undefined,
+            },
+            authUser.id,
+          );
+          return json({ success: true, staff: newStaff }, 201);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 409) return json({ error: err.message, message: err.message }, 409);
+          if (status === 403) return forbidden(err.message);
+          return serverError(err);
+        }
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/admin/staff/status") {
+      if (method === "PATCH" || method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN") {
+          return forbidden("Only administrators can change staff account status");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || !body.userId || body.isActive === undefined) {
+          return badRequest("Fields 'userId' and 'isActive' boolean are required");
+        }
+
+        try {
+          const result = await updateStaffActiveStatus(
+            String(body.userId),
+            Boolean(body.isActive),
+            authUser.id,
+          );
+          return json(result);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 403) return forbidden(err.message);
+          if (status === 404) return notFound(err.message);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const staffStatusMatch = pathname.match(/^\/api\/admin\/staff\/([^/]+)\/status$/);
+    if (staffStatusMatch) {
+      const targetUserId = decodeURIComponent(staffStatusMatch[1]!);
+      if (method === "PATCH" || method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN") {
+          return forbidden("Only administrators can change staff account status");
+        }
+
+        const body = await request.json().catch(() => null);
+        const isActive =
+          body?.isActive !== undefined
+            ? Boolean(body.isActive)
+            : body?.is_active !== undefined
+              ? Boolean(body.is_active)
+              : undefined;
+
+        if (isActive === undefined) {
+          return badRequest("Field 'isActive' boolean is required");
+        }
+
+        try {
+          const result = await updateStaffActiveStatus(targetUserId, isActive, authUser.id);
+          return json(result);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 403) return forbidden(err.message);
+          if (status === 404) return notFound(err.message);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/admin/staff/password") {
+      if (method === "PATCH" || method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN") {
+          return forbidden("Only administrators can update staff passwords");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || !body.userId || !body.password) {
+          return badRequest("Fields 'userId' and 'password' are required");
+        }
+
+        const cleanPassword = String(body.password).trim();
+        if (cleanPassword.length < 6) {
+          return badRequest("Password must be at least 6 characters long");
+        }
+
+        try {
+          const result = await updateStaffPassword(
+            String(body.userId),
+            cleanPassword,
+            authUser.id,
+          );
+          return json(result);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 403) return forbidden(err.message);
+          if (status === 404) return notFound(err.message);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const staffPasswordMatch = pathname.match(/^\/api\/admin\/staff\/([^/]+)\/password$/);
+    if (staffPasswordMatch) {
+      const targetUserId = decodeURIComponent(staffPasswordMatch[1]!);
+      if (method === "PATCH" || method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN") {
+          return forbidden("Only administrators can update staff passwords");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || !body.password) {
+          return badRequest("Field 'password' is required");
+        }
+
+        const cleanPassword = String(body.password).trim();
+        if (cleanPassword.length < 6) {
+          return badRequest("Password must be at least 6 characters long");
+        }
+
+        try {
+          const result = await updateStaffPassword(targetUserId, cleanPassword, authUser.id);
+          return json(result);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 403) return forbidden(err.message);
+          if (status === 404) return notFound(err.message);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       3g. Admin Account & Profile Management:
+           GET    /api/admin/account
+           PATCH  /api/admin/account
+           POST   /api/admin/account/avatar
+           DELETE /api/admin/account/avatar
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/admin/account") {
+      const authUser = await resolveAuthUser(request);
+      if (!authUser) {
+        return unauthorized("Authentication required to access account profile");
+      }
+      if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+        return forbidden("Staff or administrator authorization required");
+      }
+
+      if (method === "GET") {
+        try {
+          // 1. Fetch staff profile if exists
+          let staffProfile: {
+            full_name?: string | null;
+            phone?: string | null;
+            role?: string | null;
+            created_at?: string | null;
+            updated_at?: string | null;
+          } | null = null;
+          try {
+            const { data } = await (serverSupabase.from("staff_profiles" as any) as any)
+              .select("full_name, phone, role, created_at, updated_at")
+              .eq("user_id", authUser.id)
+              .maybeSingle();
+            staffProfile = data;
+          } catch {
+            /* ignore lookup failure */
+          }
+
+          // 2. Fetch users record if exists
+          let userRecord: {
+            full_name?: string | null;
+            phone?: string | null;
+            avatar_url?: string | null;
+            role?: string | null;
+            created_at?: string | null;
+            updated_at?: string | null;
+          } | null = null;
+          try {
+            const { data } = await (serverSupabase.from("users" as any) as any)
+              .select("full_name, phone, avatar_url, role, created_at, updated_at")
+              .eq("id", authUser.id)
+              .maybeSingle();
+            userRecord = data;
+          } catch {
+            /* ignore lookup failure */
+          }
+
+          // 3. Fetch auth user details from Supabase Auth
+          let authUserMeta: Record<string, unknown> = {};
+          let authCreatedAt: string | null = null;
+          let authLastSignIn: string | null = null;
+          try {
+            const { data: authRecord } = await serverSupabase.auth.admin.getUserById(authUser.id);
+            if (authRecord?.user) {
+              authUserMeta = (authRecord.user.user_metadata as Record<string, unknown>) || {};
+              authCreatedAt = authRecord.user.created_at || null;
+              authLastSignIn = authRecord.user.last_sign_in_at || null;
+            }
+          } catch {
+            /* ignore auth lookup failure */
+          }
+
+          const profile = {
+            id: authUser.id,
+            email: authUser.email,
+            role: authUser.role,
+            fullName:
+              staffProfile?.full_name ||
+              userRecord?.full_name ||
+              (authUserMeta["full_name"] as string) ||
+              authUser.fullName ||
+              "",
+            phone:
+              staffProfile?.phone ||
+              userRecord?.phone ||
+              (authUserMeta["phone"] as string) ||
+              authUser.phone ||
+              "",
+            avatarUrl: userRecord?.avatar_url || (authUserMeta["avatar_url"] as string) || null,
+            accountCreatedAt: authCreatedAt || userRecord?.created_at || null,
+            lastSignInAt: authLastSignIn,
+            dbCreatedAt: staffProfile?.created_at || userRecord?.created_at || null,
+            dbUpdatedAt: staffProfile?.updated_at || userRecord?.updated_at || null,
+          };
+
+          return json({ success: true, data: profile });
+        } catch (err) {
+          return serverError(err);
+        }
+      }
+
+      if (method === "PATCH" || method === "PUT") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid profile update payload");
+        }
+
+        const fullName =
+          typeof body.fullName === "string"
+            ? body.fullName.trim()
+            : typeof body.full_name === "string"
+              ? body.full_name.trim()
+              : undefined;
+        const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
+        const avatarUrl =
+          body.avatarUrl !== undefined
+            ? body.avatarUrl
+            : body.avatar_url !== undefined
+              ? body.avatar_url
+              : undefined;
+
+        if (fullName !== undefined && fullName.length === 0) {
+          return badRequest("Full name cannot be empty");
+        }
+
+        try {
+          // Update staff_profiles if present
+          try {
+            const spUpdates: Record<string, unknown> = {
+              updated_at: new Date().toISOString(),
+            };
+            if (fullName !== undefined) spUpdates["full_name"] = fullName;
+            if (phone !== undefined) spUpdates["phone"] = phone;
+            await (serverSupabase.from("staff_profiles" as any) as any)
+              .update(spUpdates)
+              .eq("user_id", authUser.id);
+          } catch {
+            /* ignore update failure */
+          }
+
+          // Update users if present
+          try {
+            const uUpdates: Record<string, unknown> = {
+              updated_at: new Date().toISOString(),
+            };
+            if (fullName !== undefined) uUpdates["full_name"] = fullName;
+            if (phone !== undefined) uUpdates["phone"] = phone;
+            if (avatarUrl !== undefined) uUpdates["avatar_url"] = avatarUrl;
+            await (serverSupabase.from("users" as any) as any)
+              .update(uUpdates)
+              .eq("id", authUser.id);
+          } catch {
+            /* ignore update failure */
+          }
+
+          // Update auth user metadata
+          try {
+            const metaUpdates: Record<string, unknown> = {};
+            if (fullName !== undefined) metaUpdates["full_name"] = fullName;
+            if (phone !== undefined) metaUpdates["phone"] = phone;
+            if (avatarUrl !== undefined) metaUpdates["avatar_url"] = avatarUrl;
+            if (Object.keys(metaUpdates).length > 0) {
+              await serverSupabase.auth.admin.updateUserById(authUser.id, {
+                user_metadata: metaUpdates,
+              });
+            }
+          } catch {
+            /* ignore auth metadata update failure */
+          }
+
+          return json({ success: true, message: "Profile updated successfully" });
+        } catch (err) {
+          return serverError(err);
+        }
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/admin/account/avatar") {
+      const authUser = await resolveAuthUser(request);
+      if (!authUser) {
+        return unauthorized("Authentication required to manage avatar");
+      }
+      if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+        return forbidden("Staff or administrator authorization required");
+      }
+
+      if (method === "POST") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid avatar upload payload");
+        }
+
+        const dataUrl = body.dataUrl || body.data || body.fileData;
+        const previousAvatarUrl = body.previousAvatarUrl;
+
+        if (!dataUrl || typeof dataUrl !== "string") {
+          return badRequest("Missing avatar image data");
+        }
+
+        const matches = dataUrl.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+        if (!matches || !matches[1] || !matches[2]) {
+          return badRequest("Invalid base64 image data URL format");
+        }
+
+        const mimeType = matches[1].toLowerCase();
+        const base64Data = matches[2];
+
+        const allowedMimes = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
+        if (!allowedMimes.includes(mimeType)) {
+          return badRequest("Only JPG, PNG, and WEBP images are supported");
+        }
+
+        let extension = "jpg";
+        if (mimeType.includes("png")) extension = "png";
+        else if (mimeType.includes("webp")) extension = "webp";
+
+        const buffer = Buffer.from(base64Data, "base64");
+        if (buffer.length > 5 * 1024 * 1024) {
+          return badRequest("Avatar image exceeds 5 MB size limit");
+        }
+
+        const uniqueFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${extension}`;
+        const storagePath = `avatars/${authUser.id}/${uniqueFilename}`;
+
+        // Ensure avatars bucket exists
+        try {
+          await serverSupabase.storage.createBucket("avatars", {
+            public: true,
+            fileSizeLimit: 5242880,
+            allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
+          });
+        } catch {
+          /* already exists */
+        }
+
+        const { error: uploadError } = await serverSupabase.storage
+          .from("avatars")
+          .upload(storagePath, buffer, {
+            contentType: mimeType,
+            upsert: true,
+          });
+
+        if (uploadError) {
+          return serverError(new Error(`Storage upload failed: ${uploadError.message}`));
+        }
+
+        const { data: urlData } = serverSupabase.storage.from("avatars").getPublicUrl(storagePath);
+        const publicUrl = urlData.publicUrl;
+
+        // Update database and auth metadata with publicUrl
+        try {
+          await (serverSupabase.from("users" as any) as any)
+            .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+            .eq("id", authUser.id);
+        } catch {
+          /* ignore */
+        }
+
+        try {
+          await serverSupabase.auth.admin.updateUserById(authUser.id, {
+            user_metadata: { avatar_url: publicUrl },
+          });
+        } catch {
+          /* ignore */
+        }
+
+        // Clean up previous avatar if safe
+        if (previousAvatarUrl && typeof previousAvatarUrl === "string") {
+          try {
+            const marker = "/avatars/";
+            const idx = previousAvatarUrl.indexOf(marker);
+            if (idx !== -1) {
+              const oldPath = previousAvatarUrl.slice(idx + marker.length).split("?")[0];
+              if (
+                oldPath &&
+                oldPath.startsWith(`avatars/${authUser.id}/`) &&
+                oldPath !== storagePath
+              ) {
+                await serverSupabase.storage.from("avatars").remove([oldPath]);
+              }
+            }
+          } catch {
+            /* ignore cleanup failure */
+          }
+        }
+
+        return json({ success: true, avatarUrl: publicUrl });
+      }
+
+      if (method === "DELETE") {
+        const body = await request.json().catch(() => ({}));
+        const currentAvatarUrl = body?.currentAvatarUrl || body?.avatarUrl;
+
+        // Clear in database
+        try {
+          await (serverSupabase.from("users" as any) as any)
+            .update({ avatar_url: null, updated_at: new Date().toISOString() })
+            .eq("id", authUser.id);
+        } catch {
+          /* ignore */
+        }
+
+        try {
+          await serverSupabase.auth.admin.updateUserById(authUser.id, {
+            user_metadata: { avatar_url: null },
+          });
+        } catch {
+          /* ignore */
+        }
+
+        // Remove from storage if path points to this user's avatar
+        if (currentAvatarUrl && typeof currentAvatarUrl === "string") {
+          try {
+            const marker = "/avatars/";
+            const idx = currentAvatarUrl.indexOf(marker);
+            if (idx !== -1) {
+              const oldPath = currentAvatarUrl.slice(idx + marker.length).split("?")[0];
+              if (oldPath && oldPath.startsWith(`avatars/${authUser.id}/`)) {
+                await serverSupabase.storage.from("avatars").remove([oldPath]);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        return json({
+          success: true,
+          avatarUrl: null,
+          message: "Avatar removed successfully",
+        });
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
+       3f. Receiving Accounts Management (public.payment_account_settings):
+           GET  /api/payment-accounts (public active list for checkout)
+           GET  /api/admin/payment-accounts (admin list)
+           POST /api/admin/payment-accounts (admin upsert)
+           PATCH /api/admin/payment-accounts/:id (admin update)
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/payment-accounts") {
+      if (method === "GET") {
+        try {
+          const accounts = await getPublicPaymentAccounts();
+          return json(accounts);
+        } catch (err: unknown) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/admin/payment-accounts") {
+      const authUser = await resolveAuthUser(request);
+      if (!authUser) {
+        return unauthorized("Authentication required to access receiving accounts");
+      }
+      if (authUser.role !== "ADMIN") {
+        return forbidden("Only administrators can view or manage receiving accounts");
+      }
+
+      if (method === "GET") {
+        try {
+          const accounts = await getAdminPaymentAccounts();
+          return json(accounts);
+        } catch (err: unknown) {
+          return serverError(err);
+        }
+      }
+
+      if (method === "POST" || method === "PUT") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid receiving account payload");
+        }
+
+        try {
+          const saved = await upsertPaymentAccount({
+            id: body.id ? String(body.id) : undefined,
+            payment_method: String(body.payment_method || body.paymentMethod || ""),
+            account_number: String(body.account_number || body.accountNumber || ""),
+            account_owner_name: String(body.account_owner_name || body.accountOwnerName || ""),
+            is_active:
+              body.is_active !== undefined
+                ? Boolean(body.is_active)
+                : body.isActive !== undefined
+                  ? Boolean(body.isActive)
+                  : true,
+          });
+          return json({ success: true, account: saved });
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 409) return json({ error: err.message, message: err.message }, 409);
+          if (status === 403) return forbidden(err.message);
+          return serverError(err);
+        }
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const paymentAccountMatch = pathname.match(/^\/api\/admin\/payment-accounts\/([^/]+)$/);
+    if (paymentAccountMatch) {
+      const targetId = decodeURIComponent(paymentAccountMatch[1]!);
+      if (method === "PATCH" || method === "PUT" || method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN") {
+          return forbidden("Only administrators can update receiving accounts");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid receiving account payload");
+        }
+
+        try {
+          const saved = await upsertPaymentAccount({
+            id: targetId,
+            payment_method: String(body.payment_method || body.paymentMethod || ""),
+            account_number: String(body.account_number || body.accountNumber || ""),
+            account_owner_name: String(body.account_owner_name || body.accountOwnerName || ""),
+            is_active:
+              body.is_active !== undefined
+                ? Boolean(body.is_active)
+                : body.isActive !== undefined
+                  ? Boolean(body.isActive)
+                  : undefined,
+          });
+          return json({ success: true, account: saved });
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 409) return json({ error: err.message, message: err.message }, 409);
+          return serverError(err);
+        }
+      }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
@@ -468,182 +1410,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    const orderPaymentProofMatch = pathname.match(/^\/api\/orders\/([^/]+)\/payment-proof$/);
-    if (orderPaymentProofMatch) {
-      const orderId = decodeURIComponent(orderPaymentProofMatch[1]!);
-      if (method === "POST") {
-        const body = await request.json().catch(() => null);
-        if (!body || typeof body !== "object") {
-          return badRequest("Invalid payment proof payload");
-        }
-
-        let screenshotPath = body.screenshotPath;
-        if (body.imageBase64 && typeof body.imageBase64 === "string") {
-          try {
-            const rawBase64 = body.imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-            const buffer = Buffer.from(rawBase64, "base64");
-            const ext = body.mimeType?.includes("png") ? "png" : "jpg";
-            const storagePath = `proofs/${orderId}_${Date.now()}.${ext}`;
-            const { error: uploadErr } = await serverSupabase.storage
-              .from("payment-proofs")
-              .upload(storagePath, buffer, {
-                contentType: body.mimeType || "image/jpeg",
-                upsert: true,
-              });
-            if (uploadErr) {
-              console.warn("[api] Storage upload warning:", uploadErr.message);
-              screenshotPath = storagePath;
-            } else {
-              screenshotPath = storagePath;
-            }
-          } catch (upEx) {
-            console.warn("[api] Image decode exception:", upEx);
-            screenshotPath = `proofs/${orderId}_receipt.jpg`;
-          }
-        }
-
-        if (!screenshotPath) {
-          return badRequest("A screenshot receipt or file is required.");
-        }
-
-        try {
-          const updated = await createPaymentProof(orderId, {
-            screenshotPath,
-            submittedAmount: body.submittedAmount,
-            transactionReference: body.transactionReference,
-            paymentMethod: body.paymentMethod,
-          });
-          return json(updated);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Failed to record payment proof";
-          return badRequest(msg);
-        }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
-
-    const waiterDecisionMatch = pathname.match(/^\/api\/orders\/([^/]+)\/waiter-decision$/);
-    if (waiterDecisionMatch) {
-      const orderId = decodeURIComponent(waiterDecisionMatch[1]!);
-      if (method === "POST") {
-        const authUser = await resolveAuthUser(request);
-        if (!authUser) {
-          return unauthorized("Authentication required to record waiter decision");
-        }
-        if (authUser.role !== "STAFF" && authUser.role !== "ADMIN") {
-          return forbidden("Only assigned waiters or authorized staff can record order decisions");
-        }
-
-        const body = await request.json().catch(() => null);
-        if (!body || (body.decision !== "approved" && body.decision !== "rejected")) {
-          return badRequest("Field 'decision' must be either 'approved' or 'rejected'.");
-        }
-
-        try {
-          const updated = await recordWaiterDecision({
-            orderId,
-            waiterId: authUser.id,
-            decision: body.decision,
-            comments: body.comments,
-          });
-          return json(updated);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : "Failed to record waiter decision";
-          return json({ error: "Decision Failed", message }, 400);
-        }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
-
-    const waiterPaymentCollectionMatch = pathname.match(
-      /^\/api\/orders\/([^/]+)\/waiter-payment-collection$/,
-    );
-    if (waiterPaymentCollectionMatch) {
-      const orderId = decodeURIComponent(waiterPaymentCollectionMatch[1]!);
-      if (method === "POST") {
-        const authUser = await resolveAuthUser(request);
-        if (!authUser) {
-          return unauthorized("Authentication required to record payment collection");
-        }
-        if (authUser.role !== "STAFF" && authUser.role !== "ADMIN") {
-          return forbidden(
-            "Only assigned waiters or authorized staff can record payment collection",
-          );
-        }
-
-        const body = await request.json().catch(() => null);
-        if (!body || !body.transactionReference || !body.transactionReference.trim()) {
-          return badRequest("Field 'transactionReference' is required.");
-        }
-
-        try {
-          const updated = await recordWaiterPaymentCollection({
-            orderId,
-            waiterId: authUser.id,
-            transactionReference: body.transactionReference,
-            notes: body.notes,
-          });
-          return json(updated);
-        } catch (err: unknown) {
-          const message =
-            err instanceof Error ? err.message : "Failed to record payment collection";
-          return json({ error: "Collection Failed", message }, 400);
-        }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
-
-    const paymentMethodMatch = pathname.match(/^\/api\/orders\/([^/]+)\/payment-method$/);
-    if (paymentMethodMatch) {
-      const orderId = decodeURIComponent(paymentMethodMatch[1]!);
-      if (method === "POST" || method === "PATCH") {
-        const authUser = await resolveAuthUser(request);
-        const body = await request.json().catch(() => null);
-        if (!body || !body.paymentMethod || !body.paymentMethod.trim()) {
-          return badRequest("Field 'paymentMethod' is required.");
-        }
-
-        try {
-          const updated = await updateOrderPaymentMethod({
-            orderId,
-            paymentMethod: body.paymentMethod,
-            ...(authUser?.id ? { userId: authUser.id } : {}),
-          });
-          return json(updated);
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : "Failed to update payment method";
-          return json({ error: "Update Failed", message }, 400);
-        }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
-
-    if (pathname === "/api/test/cashier-review") {
-      if (method === "POST") {
-        const body = await request.json().catch(() => null);
-        if (
-          !body ||
-          !body.orderId ||
-          !body.decision ||
-          (body.decision !== "approved" && body.decision !== "rejected")
-        ) {
-          return badRequest(
-            "Fields 'orderId' and 'decision' ('approved' | 'rejected') are required.",
-          );
-        }
-        try {
-          const updated = await testCashierReview(body.orderId, {
-            decision: body.decision,
-            rejectionReason: body.rejectionReason,
-          });
-          return json(updated);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Test cashier review failed";
-          return badRequest(msg);
-        }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
 
     const orderMatch = pathname.match(/^\/api\/orders\/([^/]+)$/);
     if (orderMatch) {
@@ -654,22 +1420,6 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         const scopedClient = authUser?.token ? createScopedClient(authUser.token) : undefined;
         const order = await getOrderById(orderId, scopedClient);
         if (!order) return notFound(`Order '${orderId}' not found`);
-
-        // If caller is unauthenticated, ensure this order does not belong to a private registered customer
-        if (!authUser) {
-          try {
-            const { data: orderRow } = await (serverSupabase.from("orders" as any) as any)
-              .select("customer_id, customers:customer_id ( user_id )")
-              .or(`id.eq.${order.id},order_number.eq.${order.number}`)
-              .maybeSingle();
-
-            if (orderRow?.customers?.user_id) {
-              return unauthorized("Authentication required to access this customer order");
-            }
-          } catch {
-            /* ignore check failure, proceed */
-          }
-        }
 
         // If caller is an authenticated CUSTOMER, verify they own this order
         if (authUser && authUser.role === "CUSTOMER") {
@@ -807,6 +1557,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           id: body.id || `promo-${Date.now().toString(36)}`,
           name: body.name,
           description: body.description || "",
+          imageUrl: body.imageUrl || null,
           discountType: body.discountType || "percentage",
           discountValue: Number(body.discountValue) || 0,
           applicableProductIds: Array.isArray(body.applicableProductIds)
@@ -869,6 +1620,46 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         if (!body || typeof body !== "object") {
           return badRequest("Invalid JSON body");
         }
+
+        // Validate values before saving
+        if (body.cafeName !== undefined && (!body.cafeName || !body.cafeName.trim())) {
+          return badRequest("Café name cannot be empty");
+        }
+        if (
+          body.pricePerKm !== undefined &&
+          (isNaN(Number(body.pricePerKm)) || Number(body.pricePerKm) < 0)
+        ) {
+          return badRequest("Price per KM cannot be negative");
+        }
+        if (
+          body.minDeliveryFee !== undefined &&
+          (isNaN(Number(body.minDeliveryFee)) || Number(body.minDeliveryFee) < 0)
+        ) {
+          return badRequest("Minimum delivery fee cannot be negative");
+        }
+        if (
+          body.maxDeliveryDistanceKm !== undefined &&
+          (isNaN(Number(body.maxDeliveryDistanceKm)) || Number(body.maxDeliveryDistanceKm) <= 0)
+        ) {
+          return badRequest("Maximum delivery distance must be greater than 0");
+        }
+        if (body.cafeLatitude !== undefined && body.cafeLatitude !== null) {
+          const lat = Number(body.cafeLatitude);
+          if (isNaN(lat) || lat < -90 || lat > 90) {
+            return badRequest("Café latitude must be between -90 and 90 degrees");
+          }
+        }
+        if (body.cafeLongitude !== undefined && body.cafeLongitude !== null) {
+          const lng = Number(body.cafeLongitude);
+          if (isNaN(lng) || lng < -180 || lng > 180) {
+            return badRequest("Café longitude must be between -180 and 180 degrees");
+          }
+        }
+        const validRules = ["none", "nearest_1", "nearest_5", "ceil"];
+        if (body.roundingRule !== undefined && !validRules.includes(body.roundingRule)) {
+          return badRequest("Invalid rounding rule selected");
+        }
+
         const updated = await updateSettings(body);
         return json(updated);
       }
@@ -901,8 +1692,19 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return badRequest("Invalid JSON body");
         }
 
-        // Sanitize payload to ONLY allowed editable fields (protect id and updated_at)
+        // Validate body.id if explicitly provided
+        if (body.id !== undefined && body.id !== null) {
+          const idStr = String(body.id).trim();
+          if (!isValidUUID(idStr)) {
+            return badRequest(`Invalid content record ID "${body.id}": a valid UUID is required`);
+          }
+        }
+
+        // Sanitize payload to allowed editable fields
         const allowedUpdates: Partial<AboutContent> = {};
+        if (body.id && isValidUUID(String(body.id))) {
+          allowedUpdates.id = String(body.id).trim();
+        }
         if (body.homepage_hero_image !== undefined)
           allowedUpdates.homepage_hero_image = body.homepage_hero_image;
         if (body.about_hero_image !== undefined)
@@ -927,8 +1729,16 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         if (typeof body.value_3_description === "string")
           allowedUpdates.value_3_description = body.value_3_description;
 
-        const updated = await updateAboutContent(allowedUpdates, token);
-        return json(updated);
+        try {
+          const updated = await updateAboutContent(allowedUpdates, token);
+          return json(updated);
+        } catch (err: any) {
+          console.error("[api] /api/about update error:", err);
+          return json(
+            { error: "Database update failed", message: err.message || "Failed to update website content" },
+            500,
+          );
+        }
       }
 
       return json({ error: "Method Not Allowed" }, 405);
@@ -958,11 +1768,14 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         }
 
         try {
-          const result = await createContactMessage({
-            name: body.name,
-            email: body.email,
-            message: body.message,
-          });
+          const result = await createContactMessage(
+            {
+              name: body.name,
+              email: body.email,
+              message: body.message,
+            },
+            serverSupabase,
+          );
           return json(
             { success: true, message: "Contact message sent successfully", id: result.id },
             201,
@@ -977,7 +1790,7 @@ export async function handleApiRequest(request: Request): Promise<Response> {
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    if (pathname === "/api/contact-messages") {
+    if (pathname === "/api/contact-messages" || pathname === "/api/admin/contact-messages") {
       if (method === "GET") {
         const authUser = await resolveAuthUser(request);
         if (!authUser) {
@@ -987,15 +1800,19 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return forbidden("Only administrators and staff can access contact messages");
         }
 
-        const scopedClient = createScopedClient(authUser.token);
-        const messages = await getContactMessages(scopedClient);
-        return json(messages);
+        try {
+          const messages = await getContactMessages(serverSupabase);
+          return json(messages);
+        } catch (err: any) {
+          console.error("[api] /api/contact-messages fetch error:", err);
+          return json({ error: err.message || "Failed to load contact messages" }, 500);
+        }
       }
 
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    const contactMessageMatch = pathname.match(/^\/api\/contact-messages\/([^/]+)$/);
+    const contactMessageMatch = pathname.match(/^\/api\/(?:admin\/)?contact-messages\/([^/]+)$/);
     if (contactMessageMatch) {
       const messageId = decodeURIComponent(contactMessageMatch[1]!);
 
@@ -1024,12 +1841,16 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return badRequest("Field 'isRead' or 'is_read' boolean is required");
         }
 
-        const scopedClient = createScopedClient(authUser.token);
-        const updated = await updateContactMessageReadStatus(messageId, isRead, scopedClient);
-        if (!updated) {
-          return notFound(`Contact message '${messageId}' not found`);
+        try {
+          const updated = await updateContactMessageReadStatus(messageId, isRead, serverSupabase);
+          if (!updated) {
+            return notFound(`Contact message '${messageId}' not found`);
+          }
+          return json(updated);
+        } catch (err: any) {
+          console.error(`[api] /api/contact-messages/${messageId} update error:`, err);
+          return json({ error: err.message || "Failed to update contact message" }, 500);
         }
-        return json(updated);
       }
 
       if (method === "DELETE") {
@@ -1041,61 +1862,332 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           return forbidden("Only administrators and staff can delete contact messages");
         }
 
-        const scopedClient = createScopedClient(authUser.token);
-        await deleteContactMessage(messageId, scopedClient);
-        return json({ success: true, deletedId: messageId });
+        try {
+          await deleteContactMessage(messageId, serverSupabase);
+          return json({ success: true, deletedId: messageId });
+        } catch (err: any) {
+          console.error(`[api] /api/contact-messages/${messageId} delete error:`, err);
+          return json({ error: err.message || "Failed to delete contact message" }, 500);
+        }
       }
 
       return json({ error: "Method Not Allowed" }, 405);
     }
 
     /* ----------------------------------------------------------------------
-       7. Available Waiters (Public/Customer Table Selection):
-          GET /api/waiters/available
+       8. Cashier Operations:
+          GET   /api/cashier/me
+          GET   /api/cashier/pending
+          GET   /api/cashier/history
+          GET   /api/cashier/metrics
+          POST  /api/cashier/proof-url
+          POST  /api/cashier/reviews/approve
+          POST  /api/cashier/reviews/reject
+          GET   /api/cashier/notifications
+          PATCH /api/cashier/notifications/:id/read
        ---------------------------------------------------------------------- */
-    if (pathname === "/api/waiters/available") {
+    if (pathname === "/api/cashier/me") {
       if (method === "GET") {
-        const availableWaiters = await getAvailableWaiters();
-        return json(availableWaiters);
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: meResult.status,
+              role: (meResult as any).role,
+              message: meResult.message,
+            },
+            status,
+          );
+        }
+        return json({
+          success: true,
+          profile: meResult.profile,
+          role: meResult.role,
+        });
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/pending") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          const items = await getPendingPaymentReviews();
+          return json(items);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/history") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          const history = await getPaymentReviewHistory();
+          return json(history);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/metrics") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          const metrics = await getCashierOverviewMetrics();
+          return json(metrics);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/proof-url") {
+      if (method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        let allowed = Boolean(authUser && authUser.role === "ADMIN");
+        if (!allowed) {
+          const meResult = await resolveCashierMe(request);
+          if (meResult.success) {
+            allowed = true;
+          }
+        }
+        if (!allowed) {
+          return unauthorized("Cashier or Administrator authentication required");
+        }
+        const body = await request.json().catch(() => null);
+        if (!body?.proofId || typeof body.proofId !== "string") {
+          return badRequest("Field 'proofId' is required");
+        }
+        try {
+          const signedUrl = await getProofSignedUrl(body.proofId);
+          return json({ signedUrl });
+        } catch (err: any) {
+          return json({ error: "Proof URL Generation Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/reviews/approve") {
+      if (method === "POST") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        const body = await request.json().catch(() => null);
+        if (!body?.proofId || typeof body.proofId !== "string") {
+          return badRequest("Field 'proofId' is required");
+        }
+        try {
+          const result = await approvePaymentProof(
+            body.proofId,
+            meResult.profile.user_id,
+            body.notes,
+          );
+          return json(result);
+        } catch (err: any) {
+          return json({ error: "Payment Approval Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/reviews/reject") {
+      if (method === "POST") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        const body = await request.json().catch(() => null);
+        if (!body?.proofId || typeof body.proofId !== "string") {
+          return badRequest("Field 'proofId' is required");
+        }
+        if (!body?.reason || typeof body.reason !== "string" || !body.reason.trim()) {
+          return badRequest("A clear rejection reason is required");
+        }
+        try {
+          const result = await rejectPaymentProof(
+            body.proofId,
+            meResult.profile.user_id,
+            body.reason,
+          );
+          return json(result);
+        } catch (err: any) {
+          return json({ error: "Payment Rejection Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/cashier/notifications") {
+      if (method === "GET") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          const notifications = await getCashierNotifications(meResult.profile.user_id);
+          return json(notifications);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const cashierNotifMatch = pathname.match(/^\/api\/cashier\/notifications\/([^/]+)\/read$/);
+    if (cashierNotifMatch) {
+      const notificationId = decodeURIComponent(cashierNotifMatch[1]!);
+      if (method === "PATCH" || method === "POST") {
+        const meResult = await resolveCashierMe(request);
+        if (!meResult.success) {
+          const status = meResult.status === "unauthenticated" ? 401 : 403;
+          return json(
+            { error: status === 401 ? "Unauthorized" : "Forbidden", message: meResult.message },
+            status,
+          );
+        }
+        try {
+          await markNotificationAsRead(notificationId, meResult.profile.user_id);
+          return json({ success: true, notificationId });
+        } catch (err: any) {
+          return serverError(err);
+        }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
     /* ----------------------------------------------------------------------
-       8. Waiter Operations:
+       9. Waiter Station Operations & Floor Management:
+          GET   /api/waiters/available
           GET   /api/waiter/profile
           PATCH /api/waiter/profile
           GET   /api/waiter/metrics
           GET   /api/waiter/orders
           POST  /api/waiter/orders/:id/approve
           POST  /api/waiter/orders/:id/reject
+          POST  /api/waiter/orders/:id/payment-proof
           GET   /api/waiter/payments
           GET   /api/waiter/notifications
           PATCH /api/waiter/notifications/:id
+          PATCH /api/waiter/notifications/:id/read
+          POST  /api/orders/:id/waiter-decision
+          POST  /api/orders/:id/waiter-payment-collection
+          POST  /api/orders/:id/payment-method
+          POST  /api/orders/:id/payment-proof
        ---------------------------------------------------------------------- */
-    if (pathname === "/api/waiter/profile") {
-      const staffUser = await resolveStaffUser(request);
-      if (!staffUser) {
-        return unauthorized("Valid waiter or admin credentials required");
-      }
-
+    if (pathname === "/api/waiters/available") {
       if (method === "GET") {
-        const profile = await getWaiterProfile(staffUser.userId);
-        return json({
-          user: {
-            ...profile,
-            email: staffUser.email,
-          },
-        });
+        try {
+          const waiters = await getAvailableWaiters();
+          return json(waiters);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/profile") {
+      if (method === "GET") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        try {
+          const profile = await getWaiterProfile(waiterAuth.staff.userId);
+          return json({
+            user: profile || {
+              userId: waiterAuth.staff.userId,
+              fullName: waiterAuth.staff.fullName,
+              phone: waiterAuth.staff.phone,
+              role: waiterAuth.staff.role,
+              isAvailable: waiterAuth.staff.isAvailable,
+              isActive: waiterAuth.staff.isActive,
+            },
+          });
+        } catch (err: any) {
+          return serverError(err);
+        }
       }
 
       if (method === "PATCH") {
-        const body = await request.json().catch(() => null);
-        if (!body || typeof body.isAvailable !== "boolean") {
-          return badRequest("Field 'isAvailable' (boolean) is required");
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
-        const updated = await updateWaiterAvailability(staffUser.userId, body.isAvailable);
-        return json(updated);
+        const body = await request.json().catch(() => null);
+        if (typeof body?.isAvailable !== "boolean") {
+          return badRequest("Field 'isAvailable' boolean is required");
+        }
+        try {
+          const result = await updateWaiterAvailability(waiterAuth.staff.userId, body.isAvailable);
+          return json(result);
+        } catch (err: any) {
+          return serverError(err);
+        }
       }
 
       return json({ error: "Method Not Allowed" }, 405);
@@ -1103,31 +2195,59 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
     if (pathname === "/api/waiter/metrics") {
       if (method === "GET") {
-        const staffUser = await resolveStaffUser(request);
-        if (!staffUser) {
-          return unauthorized("Valid waiter or admin credentials required");
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
-        const metrics = await getWaiterMetrics(staffUser);
-        return json(metrics);
+        try {
+          const metrics = await getWaiterMetrics(waiterAuth.staff);
+          return json(metrics);
+        } catch (err: any) {
+          return serverError(err);
+        }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
     if (pathname === "/api/waiter/orders") {
       if (method === "GET") {
-        const staffUser = await resolveStaffUser(request);
-        if (!staffUser) {
-          return unauthorized("Valid waiter or admin credentials required");
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
-        const filters: { status?: string; search?: string; date?: string } = {};
-        const status = url.searchParams.get("status");
-        if (status) filters.status = status;
-        const search = url.searchParams.get("search");
-        if (search) filters.search = search;
-        const date = url.searchParams.get("date");
-        if (date) filters.date = date;
-        const orders = await getWaiterOrders(staffUser, filters);
-        return json(orders);
+        try {
+          const statusFilter = url.searchParams.get("status") || undefined;
+          const searchFilter = url.searchParams.get("search") || undefined;
+          const dateFilter = url.searchParams.get("date") || undefined;
+          const orders = await getWaiterOrders(waiterAuth.staff, {
+            status: statusFilter,
+            search: searchFilter,
+            date: dateFilter,
+          });
+          return json(orders);
+        } catch (err: any) {
+          return serverError(err);
+        }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
@@ -1136,17 +2256,26 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     if (waiterApproveMatch) {
       const orderId = decodeURIComponent(waiterApproveMatch[1]!);
       if (method === "POST") {
-        const staffUser = await resolveStaffUser(request);
-        if (!staffUser) {
-          return unauthorized("Valid waiter or admin credentials required");
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
         const body = await request.json().catch(() => ({}));
         try {
-          const approved = await approveWaiterOrder(staffUser, orderId, body?.comments);
-          return json(approved);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Failed to approve order";
-          return badRequest(msg);
+          const updated = await approveWaiterOrder(waiterAuth.staff, orderId, body?.comments);
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Order Approval Failed", message: err.message }, 400);
         }
       }
       return json({ error: "Method Not Allowed" }, 405);
@@ -1156,104 +2285,69 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     if (waiterRejectMatch) {
       const orderId = decodeURIComponent(waiterRejectMatch[1]!);
       if (method === "POST") {
-        const staffUser = await resolveStaffUser(request);
-        if (!staffUser) {
-          return unauthorized("Valid waiter or admin credentials required");
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
         const body = await request.json().catch(() => null);
-        if (!body || !body.reason || !body.reason.trim()) {
-          return badRequest("A rejection reason is strictly required.");
+        if (!body?.reason || typeof body.reason !== "string" || !body.reason.trim()) {
+          return badRequest("A clear rejection reason is required");
         }
         try {
-          const rejected = await rejectWaiterOrder(staffUser, orderId, body.reason.trim());
-          return json(rejected);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Failed to reject order";
-          return badRequest(msg);
+          const updated = await rejectWaiterOrder(waiterAuth.staff, orderId, body.reason.trim());
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Order Rejection Failed", message: err.message }, 400);
         }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    const waiterPaymentProofMatch = pathname.match(
-      /^\/api\/waiter\/orders\/([^/]+)\/payment-proof$/,
-    );
+    const waiterPaymentProofMatch = pathname.match(/^\/api\/waiter\/orders\/([^/]+)\/payment-proof$/);
     if (waiterPaymentProofMatch) {
       const orderId = decodeURIComponent(waiterPaymentProofMatch[1]!);
       if (method === "POST") {
-        const staffUser = await resolveStaffUser(request);
-        if (!staffUser) {
-          return unauthorized("Valid waiter or admin credentials required");
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
-
         const body = await request.json().catch(() => null);
         if (!body || typeof body !== "object") {
-          return badRequest("Invalid payment proof payload");
+          return badRequest("Invalid payment proof submission payload");
         }
-
-        const submittedAmount = Number(body.submittedAmount);
-        if (isNaN(submittedAmount) || submittedAmount <= 0) {
-          return badRequest("A valid positive payment amount is required.");
-        }
-
-        const paymentMethod =
-          typeof body.paymentMethod === "string" ? body.paymentMethod.trim() : "";
-        if (!paymentMethod) {
-          return badRequest("A supported payment method is required.");
-        }
-
-        let screenshotPath = body.screenshotPath;
-        if (body.imageBase64 && typeof body.imageBase64 === "string") {
-          try {
-            const rawBase64 = body.imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-            const buffer = Buffer.from(rawBase64, "base64");
-            if (buffer.length > 5 * 1024 * 1024) {
-              return badRequest("Payment receipt file size exceeds the 5MB maximum limit.");
-            }
-            const ext = body.mimeType?.includes("png")
-              ? "png"
-              : body.mimeType?.includes("webp")
-                ? "webp"
-                : "jpg";
-            const storagePath = `proofs/${orderId}_waiter_${Date.now()}.${ext}`;
-            const { error: uploadErr } = await serverSupabase.storage
-              .from("payment-proofs")
-              .upload(storagePath, buffer, {
-                contentType: body.mimeType || "image/jpeg",
-                upsert: true,
-              });
-            if (uploadErr) {
-              console.warn("[api] Storage upload warning:", uploadErr.message);
-              return badRequest(`Storage upload failed: ${uploadErr.message}`);
-            }
-            screenshotPath = storagePath;
-          } catch (upEx) {
-            console.warn("[api] Image decode exception:", upEx);
-            return badRequest("Failed to process payment evidence image file.");
-          }
-        }
-
-        if (!screenshotPath) {
-          return badRequest("Payment evidence photo/screenshot is strictly required.");
-        }
-
-        const cleanTxRef =
-          typeof body.transactionReference === "string" && body.transactionReference.trim()
-            ? body.transactionReference.trim()
-            : null;
-
         try {
-          const updatedOrder = await submitWaiterPaymentProof(staffUser, orderId, {
-            screenshotPath,
-            submittedAmount,
-            paymentMethod,
-            transactionReference: cleanTxRef,
+          const updated = await submitWaiterPaymentProof(waiterAuth.staff, orderId, {
+            submittedAmount: Number(body.submittedAmount) || 0,
+            paymentMethod: body.paymentMethod || "Mobile Payment",
+            transactionReference: body.transactionReference || null,
             notes: body.notes || null,
+            screenshotPath: body.screenshotPath || null,
+            imageBase64: body.imageBase64 || null,
+            mimeType: body.mimeType || null,
           });
-          return json(updatedOrder);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Failed to record payment proof";
-          return badRequest(msg);
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Payment Proof Submission Failed", message: err.message }, 400);
         }
       }
       return json({ error: "Method Not Allowed" }, 405);
@@ -1261,224 +2355,232 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
     if (pathname === "/api/waiter/payments") {
       if (method === "GET") {
-        const staffUser = await resolveStaffUser(request);
-        if (!staffUser) {
-          return unauthorized("Valid waiter or admin credentials required");
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
-        const payments = await getWaiterPayments(staffUser);
-        return json(payments);
+        try {
+          const payments = await getWaiterPayments(waiterAuth.staff);
+          return json(payments);
+        } catch (err: any) {
+          return serverError(err);
+        }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
     if (pathname === "/api/waiter/notifications") {
       if (method === "GET") {
-        const staffUser = await resolveStaffUser(request);
-        if (!staffUser) {
-          return unauthorized("Valid waiter or admin credentials required");
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
-        const notifications = await getWaiterNotifications(staffUser.userId);
-        return json(notifications);
+        try {
+          const notifications = await getWaiterNotifications(waiterAuth.staff.userId);
+          return json(notifications);
+        } catch (err: any) {
+          return serverError(err);
+        }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    const waiterNotifReadMatch = pathname.match(/^\/api\/waiter\/notifications\/([^/]+)$/);
-    if (waiterNotifReadMatch) {
-      const notifId = decodeURIComponent(waiterNotifReadMatch[1]!);
-      if (method === "PATCH") {
-        const staffUser = await resolveStaffUser(request);
-        if (!staffUser) {
-          return unauthorized("Valid waiter or admin credentials required");
+    const waiterNotifMatch = pathname.match(/^\/api\/waiter\/notifications\/([^/]+)(\/read)?$/);
+    if (waiterNotifMatch) {
+      const notificationId = decodeURIComponent(waiterNotifMatch[1]!);
+      if (method === "PATCH" || method === "POST") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
         }
         try {
-          const result = await markWaiterNotificationRead(staffUser.userId, notifId);
-          return json(result);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Failed to update notification";
-          return badRequest(msg);
+          const res = await markWaiterNotificationRead(waiterAuth.staff.userId, notificationId);
+          return json(res);
+        } catch (err: any) {
+          return serverError(err);
         }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
     /* ----------------------------------------------------------------------
-       CASHIER PORTAL API ROUTES
+       9b. Order Operational Actions (Floor & Checkout Integrations):
+          POST /api/orders/:id/waiter-decision
+          POST /api/orders/:id/waiter-payment-collection
+          POST /api/orders/:id/payment-method
+          POST /api/orders/:id/payment-proof
        ---------------------------------------------------------------------- */
-
-    // 1. GET /api/cashier/me
-    if (pathname === "/api/cashier/me") {
-      if (method === "GET") {
-        const result = await resolveCashierMe(request);
-        if (!result.success) {
-          if (result.status === "unauthenticated") {
-            return unauthorized(result.message);
-          }
-          return forbidden(result.message);
-        }
-        return json(result);
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
-
-    // 2. GET /api/cashier/pending
-    if (pathname === "/api/cashier/pending") {
-      if (method === "GET") {
-        try {
-          await authenticateCashier(request);
-          const pending = await getPendingPaymentReviews();
-          return json(pending);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Unauthorized";
-          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
-          if (msg.includes("FORBIDDEN")) return forbidden(msg);
-          return serverError(err);
-        }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
-
-    // 3. GET /api/cashier/history
-    if (pathname === "/api/cashier/history") {
-      if (method === "GET") {
-        try {
-          await authenticateCashier(request);
-          const history = await getPaymentReviewHistory();
-          return json(history);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Unauthorized";
-          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
-          if (msg.includes("FORBIDDEN")) return forbidden(msg);
-          return serverError(err);
-        }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
-
-    // 4. GET /api/cashier/metrics
-    if (pathname === "/api/cashier/metrics") {
-      if (method === "GET") {
-        try {
-          await authenticateCashier(request);
-          const metrics = await getCashierOverviewMetrics();
-          return json(metrics);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Unauthorized";
-          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
-          if (msg.includes("FORBIDDEN")) return forbidden(msg);
-          return serverError(err);
-        }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
-
-    // 5. POST /api/cashier/proof-url
-    if (pathname === "/api/cashier/proof-url") {
+    const orderWaiterDecisionMatch = pathname.match(/^\/api\/orders\/([^/]+)\/waiter-decision$/);
+    if (orderWaiterDecisionMatch) {
+      const orderId = decodeURIComponent(orderWaiterDecisionMatch[1]!);
       if (method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+          return forbidden("Floor staff or administrator authorization required");
+        }
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object" || !["approved", "rejected"].includes(body.decision)) {
+          return badRequest("Field 'decision' must be 'approved' or 'rejected'");
+        }
         try {
-          await authenticateCashier(request);
-          const body = await request.json().catch(() => ({}));
-          const target = body.proofId || body.path || body.screenshotPath;
-          if (!target) {
-            return badRequest("proofId or screenshot path is required");
-          }
-          const signedUrl = await getProofSignedUrl(target);
-          return json({ signedUrl });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Unauthorized";
-          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
-          if (msg.includes("FORBIDDEN")) return forbidden(msg);
-          return serverError(err);
+          const updated = await recordWaiterDecision({
+            orderId,
+            waiterId: authUser.id,
+            decision: body.decision,
+            comments: body.comments || body.reason,
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Waiter Decision Failed", message: err.message }, 400);
         }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    // 6. POST /api/cashier/reviews/approve
-    if (pathname === "/api/cashier/reviews/approve") {
+    const orderWaiterPaymentColMatch = pathname.match(/^\/api\/orders\/([^/]+)\/waiter-payment-collection$/);
+    if (orderWaiterPaymentColMatch) {
+      const orderId = decodeURIComponent(orderWaiterPaymentColMatch[1]!);
       if (method === "POST") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+          return forbidden("Floor staff or administrator authorization required");
+        }
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object" || !body.transactionReference) {
+          return badRequest("Field 'transactionReference' is required");
+        }
         try {
-          const { profile } = await authenticateCashier(request);
-          const body = await request.json().catch(() => ({}));
-          const proofId = body.proofId || body.proof_id;
-          if (!proofId) {
-            return badRequest("Field 'proofId' is required.");
-          }
-          const result = await approvePaymentProof(proofId, profile.user_id, body.notes);
-          return json(result);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Error approving payment";
-          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
-          if (msg.includes("FORBIDDEN")) return forbidden(msg);
-          if (msg.includes("already been reviewed") || msg.includes("not found")) {
-            return json({ error: "Conflict", message: msg }, 409);
-          }
-          return serverError(err);
+          const updated = await recordWaiterPaymentCollection({
+            orderId,
+            waiterId: authUser.id,
+            transactionReference: String(body.transactionReference).trim(),
+            ...(body.notes ? { notes: String(body.notes).trim() } : {}),
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Payment Collection Failed", message: err.message }, 400);
         }
       }
       return json({ error: "Method Not Allowed" }, 405);
     }
 
-    // 7. POST /api/cashier/reviews/reject
-    if (pathname === "/api/cashier/reviews/reject") {
+    const orderPaymentMethodMatch = pathname.match(/^\/api\/orders\/([^/]+)\/payment-method$/);
+    if (orderPaymentMethodMatch) {
+      const orderId = decodeURIComponent(orderPaymentMethodMatch[1]!);
+      if (method === "POST" || method === "PATCH") {
+        const body = await request.json().catch(() => null);
+        if (!body?.paymentMethod) {
+          return badRequest("Field 'paymentMethod' is required");
+        }
+        try {
+          const updated = await updateOrderPaymentMethod({
+            orderId,
+            paymentMethod: String(body.paymentMethod),
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Update Payment Method Failed", message: err.message }, 400);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const orderPaymentProofMatch = pathname.match(/^\/api\/orders\/([^/]+)\/payment-proof$/);
+    if (orderPaymentProofMatch) {
+      const orderId = decodeURIComponent(orderPaymentProofMatch[1]!);
       if (method === "POST") {
-        try {
-          const { profile } = await authenticateCashier(request);
-          const body = await request.json().catch(() => ({}));
-          const proofId = body.proofId || body.proof_id;
-          const reason = body.reason?.trim();
-          if (!proofId) {
-            return badRequest("Field 'proofId' is required.");
-          }
-          if (!reason) {
-            return badRequest("A rejection reason is required.");
-          }
-          const result = await rejectPaymentProof(proofId, profile.user_id, reason);
-          return json(result);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Error rejecting payment";
-          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
-          if (msg.includes("FORBIDDEN")) return forbidden(msg);
-          if (msg.includes("already been reviewed") || msg.includes("not found")) {
-            return json({ error: "Conflict", message: msg }, 409);
-          }
-          return serverError(err);
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid payment proof submission payload");
         }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
 
-    // 8. GET /api/cashier/notifications
-    if (pathname === "/api/cashier/notifications") {
-      if (method === "GET") {
-        try {
-          const { profile } = await authenticateCashier(request);
-          const notifications = await getCashierNotifications(profile.user_id);
-          return json(notifications);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Unauthorized";
-          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
-          if (msg.includes("FORBIDDEN")) return forbidden(msg);
-          return serverError(err);
+        let screenshotPath = body.screenshotPath;
+        if (!screenshotPath && body.imageBase64) {
+          try {
+            const base64Data = body.imageBase64.includes(",")
+              ? body.imageBase64.split(",")[1]!
+              : body.imageBase64;
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = body.mimeType?.includes("png")
+              ? "png"
+              : body.mimeType?.includes("webp")
+                ? "webp"
+                : "jpg";
+            const storagePath = `proofs/${orderId}/${Date.now()}.${ext}`;
+
+            try {
+              await serverSupabase.storage.createBucket("payment-proofs", { public: true });
+            } catch {
+              /* ignore if exists */
+            }
+
+            const { error: uploadError } = await serverSupabase.storage
+              .from("payment-proofs")
+              .upload(storagePath, buffer, {
+                contentType: body.mimeType || "image/jpeg",
+                upsert: true,
+              });
+
+            if (!uploadError) {
+              screenshotPath = storagePath;
+            }
+          } catch (uploadEx) {
+            console.warn("[api] Error uploading payment proof image:", uploadEx);
+          }
         }
-      }
-      return json({ error: "Method Not Allowed" }, 405);
-    }
 
-    // 9. PATCH /api/cashier/notifications/:id/read
-    const notifMatch = pathname.match(/^\/api\/cashier\/notifications\/([^/]+)\/read$/);
-    if (notifMatch) {
-      if (method === "PATCH" || method === "POST") {
+        if (!screenshotPath) {
+          screenshotPath = `proofs/order-${orderId}.png`;
+        }
+
         try {
-          const { profile } = await authenticateCashier(request);
-          const notifId = decodeURIComponent(notifMatch[1]!);
-          await markNotificationAsRead(notifId, profile.user_id);
-          return json({ success: true, notificationId: notifId });
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "Unauthorized";
-          if (msg.includes("UNAUTHORIZED")) return unauthorized(msg);
-          if (msg.includes("FORBIDDEN")) return forbidden(msg);
-          return serverError(err);
+          const updated = await createPaymentProof(orderId, {
+            screenshotPath,
+            transactionReference: body.transactionReference || null,
+            ...(Number(body.submittedAmount) > 0
+              ? { submittedAmount: Number(body.submittedAmount) }
+              : {}),
+            ...(body.paymentMethod ? { paymentMethod: String(body.paymentMethod) } : {}),
+          });
+          return json(updated);
+        } catch (err: any) {
+          return json({ error: "Payment Proof Submission Failed", message: err.message }, 400);
         }
       }
       return json({ error: "Method Not Allowed" }, 405);
@@ -1489,3 +2591,4 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     return serverError(error);
   }
 }
+

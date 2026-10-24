@@ -12,7 +12,7 @@ import {
   isValidCoordinate,
 } from "@/lib/distance";
 import { serverSupabase as supabase } from "./supabase";
-import { type AboutContent, DEFAULT_ABOUT_CONTENT, normalizeAboutContent } from "@/lib/content";
+import { type AboutContent, DEFAULT_ABOUT_CONTENT, normalizeAboutContent, isValidUUID } from "@/lib/content";
 import { createScopedClient } from "@/lib/supabase";
 import type { ContactMessage, CreateContactMessageInput } from "@/lib/contact";
 
@@ -146,7 +146,7 @@ function normalizeCategory(raw: any): Category {
     id: raw.id,
     slug: raw.slug,
     name: raw.name,
-    tagline: raw.tagline || "",
+    tagline: raw.description || raw.tagline || "",
     active: raw.is_active ?? true,
   };
 }
@@ -172,7 +172,7 @@ function normalizeProduct(raw: any): Product {
   };
 }
 
-function normalizePromotion(raw: any): Promotion {
+export function normalizePromotion(raw: any): Promotion {
   const categoryRaw = Array.isArray(raw?.categories) ? raw.categories[0] : raw?.categories;
   const promoProductsRaw = Array.isArray(raw?.promotion_products) ? raw.promotion_products : [];
 
@@ -214,10 +214,21 @@ function normalizePromotion(raw: any): Promotion {
     resolvedProductIds = applicableProductIds.filter((id) => id && id !== "*");
   }
 
+  let imageUrl: string | null = raw.imageUrl || raw.image_url || null;
+  let description = raw.description || "";
+  if (description && typeof description === "string" && description.includes("<!--promo_img:")) {
+    const match = description.match(/<!--promo_img:(.*?)-->/);
+    if (match && match[1]) {
+      imageUrl = match[1];
+      description = description.replace(/<!--promo_img:.*?-->/g, "").trim();
+    }
+  }
+
   return {
     id: raw.id,
     name: raw.name || "Special Promotion",
-    description: raw.description || "",
+    description,
+    imageUrl,
     discountType: (raw.discount_type as DiscountType) || "percentage",
     discountValue: Number(raw.discount_value) || 0,
     appliesToAll,
@@ -289,7 +300,10 @@ function normalizeOrder(raw: any): Order {
         : null,
     total: Number(raw.total_amount) || 0,
     waiterId: raw.waiter_id || null,
-    waiterName: raw.staff_profiles?.full_name || null,
+    waiterName:
+      (Array.isArray(raw.staff_profiles)
+        ? raw.staff_profiles[0]?.full_name
+        : raw.staff_profiles?.full_name) || null,
     waiterDecision: raw.waiter_decision || "pending",
     waiterRejectionReason: raw.waiter_rejection_reason || null,
     paymentProof: Array.isArray(raw.payment_proofs) && raw.payment_proofs[0]
@@ -315,10 +329,10 @@ export async function getCategories(): Promise<Category[]> {
   try {
     const { data, error } = await supabase
       .from("categories" as any)
-      .select("id, slug, name, tagline, is_active, created_at")
-      .order("name", { ascending: true });
+      .select("id, slug, name, description, is_active, sort_order, created_at")
+      .order("sort_order", { ascending: true });
 
-    if (!error && Array.isArray(data)) {
+    if (!error && Array.isArray(data) && data.length > 0) {
       return data.map(normalizeCategory);
     }
   } catch (err) {
@@ -356,7 +370,7 @@ export async function getProducts(options?: {
           id,
           slug,
           name,
-          tagline,
+          description,
           is_active
         )
       `,
@@ -410,7 +424,7 @@ export async function getProductById(id: string): Promise<Product | undefined> {
           id,
           slug,
           name,
-          tagline,
+          description,
           is_active
         )
       `,
@@ -571,6 +585,9 @@ export async function getOrders(
         customer_phone,
         method,
         status,
+        waiter_id,
+        waiter_decision,
+        waiter_rejection_reason,
         table_number,
         delivery_address,
         subtotal,
@@ -579,6 +596,11 @@ export async function getOrders(
         total_amount,
         created_at,
         updated_at,
+        staff_profiles (
+          user_id,
+          full_name,
+          role
+        ),
         order_items (
           id,
           order_id,
@@ -885,20 +907,126 @@ export async function getOrderById(id: string, client?: any): Promise<Order | un
   return local.orders.find((o) => o.id === id || o.number === id);
 }
 
+/**
+ * Concurrency-safe monotonic order number generator.
+ * Synchronizes calls using a promise queue so concurrent server requests strictly receive
+ * sequential non-colliding order numbers.
+ * Always queries the authoritative database using serverSupabase (service role) to bypass
+ * customer RLS filters, preventing maxNum from erroneously defaulting to 1000.
+ */
+let inMemorySequenceCounter = 0;
+let sequenceLock: Promise<void> = Promise.resolve();
+
+export function resetOrderSequenceForTesting(): void {
+  inMemorySequenceCounter = 0;
+  sequenceLock = Promise.resolve();
+}
+
+export async function getNextOrderNumber(forceRefresh = false): Promise<string> {
+  let releaseLock: () => void;
+  const previousLock = sequenceLock;
+  sequenceLock = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+
+  try {
+    await previousLock;
+
+    // 1. Try atomic PostgreSQL sequence RPC if present
+    if (!forceRefresh) {
+      try {
+        const { data: rpcNum, error: rpcErr } = await (supabase.rpc as any)("next_order_number");
+        if (!rpcErr && rpcNum) {
+          return String(rpcNum);
+        }
+      } catch {
+        /* RPC not available in schema cache, fallback to sequence counter */
+      }
+    }
+
+    // 2. Initialize or refresh counter from authoritative database (service role client, bypasses RLS)
+    if (inMemorySequenceCounter === 0 || forceRefresh) {
+      const { data: allNums, error } = await (supabase.from("orders" as any) as any)
+        .select("order_number");
+
+      let maxNum = 1000;
+      if (!error && Array.isArray(allNums)) {
+        for (const row of allNums) {
+          const m = String(row.order_number || "").match(/(\d+)$/);
+          if (m && m[1]) {
+            const val = parseInt(m[1], 10);
+            if (val > maxNum) maxNum = val;
+          }
+        }
+      }
+      inMemorySequenceCounter = Math.max(inMemorySequenceCounter, maxNum);
+    }
+
+    inMemorySequenceCounter += 1;
+    return `RK-${inMemorySequenceCounter}`;
+  } finally {
+    releaseLock!();
+  }
+}
+
+/** In-flight request map for client-side idempotency deduplication */
+const inFlightOrdersByRef = new Map<string, Promise<Order>>();
+
+export interface CreateOrderInput {
+  lines: { productId: string; name?: string; quantity: number; price?: number }[];
+  method: Order["method"];
+  customer: Order["customer"];
+  paymentMethod?: string;
+  paymentStatus?: "paid" | "pending" | "failed";
+  delivery?: number | undefined;
+  discount?: number | undefined;
+  authUserId?: string | undefined;
+  authUserEmail?: string | undefined;
+  waiterId?: string | undefined;
+  customerNotes?: string | undefined;
+  clientReferenceId?: string | undefined;
+}
+
 export async function createOrder(
-  input: {
-    lines: { productId: string; name?: string; quantity: number; price?: number }[];
-    method: Order["method"];
-    customer: Order["customer"];
-    paymentMethod?: string;
-    paymentStatus?: "paid" | "pending" | "failed";
-    delivery?: number | undefined;
-    discount?: number | undefined;
-    authUserId?: string | undefined;
-    authUserEmail?: string | undefined;
-    waiterId?: string | undefined;
-    customerNotes?: string | undefined;
-  },
+  input: CreateOrderInput,
+  client?: any,
+): Promise<Order> {
+  const clientRef = input.clientReferenceId?.trim();
+  if (clientRef) {
+    const existingPromise = inFlightOrdersByRef.get(clientRef);
+    if (existingPromise) {
+      return await existingPromise;
+    }
+
+    // Check if an order was already created with this clientReferenceId (network retry protection)
+    try {
+      const { data: existingOrd } = await (supabase.from("orders" as any) as any)
+        .select("id")
+        .eq("order_reference", clientRef)
+        .maybeSingle();
+
+      if (existingOrd?.id) {
+        const order = await getOrderById(existingOrd.id);
+        if (order) return order;
+      }
+    } catch (checkErr) {
+      console.warn("[db] Idempotency check error:", checkErr);
+    }
+
+    const orderPromise = createOrderInternal(input, client);
+    inFlightOrdersByRef.set(clientRef, orderPromise);
+    try {
+      return await orderPromise;
+    } finally {
+      inFlightOrdersByRef.delete(clientRef);
+    }
+  }
+
+  return await createOrderInternal(input, client);
+}
+
+async function createOrderInternal(
+  input: CreateOrderInput,
   client?: any,
 ): Promise<Order> {
   const dbClient = client || supabase;
@@ -1012,31 +1140,8 @@ export async function createOrder(
   const paymentStatus = isDineInOrWaiter ? "pending" : (input.paymentStatus || "pending");
   const paymentMethod = isDineInOrWaiter && !input.paymentMethod ? "Pending Waiter Approval" : (input.paymentMethod || "Mobile Payment");
 
-  // Atomically obtain canonical order number from PostgreSQL sequence via RPC or query latest order number.
-  let orderNumber: string | null = null;
-  try {
-    const { data: rpcNum } = await (dbClient.rpc as any)("next_order_number");
-    if (rpcNum) orderNumber = String(rpcNum);
-  } catch {
-    /* RPC unavailable, fall back to querying database */
-  }
-
-  if (!orderNumber) {
-    const { data: allNums } = await (dbClient.from("orders" as any) as any)
-      .select("order_number");
-
-    let maxNum = 1000;
-    if (Array.isArray(allNums)) {
-      for (const row of allNums) {
-        const m = String(row.order_number || "").match(/(\d+)$/);
-        if (m && m[1]) {
-          const val = parseInt(m[1], 10);
-          if (val > maxNum) maxNum = val;
-        }
-      }
-    }
-    orderNumber = `RK-${maxNum + 1}`;
-  }
+  // Atomically obtain canonical order number using authoritative sequence counter & service role
+  let orderNumber = await getNextOrderNumber(false);
 
   const orderId = crypto.randomUUID();
   const nowIso = new Date().toISOString();
@@ -1218,10 +1323,11 @@ export async function createOrder(
     }
   }
 
+  const clientRef = input.clientReferenceId?.trim();
   const orderRecord = {
     id: orderId,
     order_number: orderNumber,
-    order_reference: `REF-${orderNumber}`,
+    order_reference: clientRef || `REF-${orderNumber}`,
     customer_id: customerId,
     customer_name: customerName,
     customer_phone: customerPhone,
@@ -1241,9 +1347,38 @@ export async function createOrder(
     updated_at: nowIso,
   };
 
-  const { error: ordErr } = await (supabase.from("orders" as any) as any).insert(orderRecord);
+  const MAX_INSERT_ATTEMPTS = 5;
+  let inserted = false;
 
-  if (ordErr) {
+  for (let attempt = 1; attempt <= MAX_INSERT_ATTEMPTS; attempt++) {
+    const currentRecord = {
+      ...orderRecord,
+      order_number: orderNumber,
+      order_reference: clientRef || `REF-${orderNumber}`,
+    };
+
+    const { error: ordErr } = await (supabase.from("orders" as any) as any).insert(currentRecord);
+
+    if (!ordErr) {
+      inserted = true;
+      break;
+    }
+
+    // Only retry on genuine unique constraint collision on orders_order_number_key
+    const isOrderNumberCollision =
+      ordErr.code === "23505" &&
+      (String(ordErr.message || "").includes("orders_order_number_key") ||
+       String(ordErr.details || "").includes("orders_order_number_key"));
+
+    if (isOrderNumberCollision && attempt < MAX_INSERT_ATTEMPTS) {
+      console.warn(
+        `[db] Concurrency collision on order number ${orderNumber} (attempt ${attempt}/${MAX_INSERT_ATTEMPTS}). Refreshing next number...`,
+      );
+      await new Promise((r) => setTimeout(r, 20 + Math.floor(Math.random() * 40)));
+      orderNumber = await getNextOrderNumber(true);
+      continue;
+    }
+
     console.error(`[db] Supabase order insert error (code ${ordErr.code}):`, ordErr.message);
     throw new Error(`Failed to create order: ${ordErr.message || String(ordErr)}`);
   }
@@ -1382,6 +1517,7 @@ export async function createOrder(
  */
 export interface RawCustomerRow {
   id: string;
+  user_id?: string | null;
   name: string | null;
   phone: string | null;
   email: string | null;
@@ -1431,70 +1567,170 @@ interface RawCustomerAddressRow {
   created_at: string;
 }
 
+function normalizePhoneForStaffFilter(phone?: string | null): string {
+  if (!phone) return "";
+  let cleaned = String(phone).replace(/[\s\-().]/g, "").trim();
+  if (cleaned.startsWith("+251")) {
+    cleaned = "0" + cleaned.slice(4);
+  } else if (cleaned.startsWith("251")) {
+    cleaned = "0" + cleaned.slice(3);
+  }
+  return cleaned;
+}
+
 /**
  * Fetches all customer profiles with their full order history from Supabase
  * using the server-side service-role client (bypasses RLS).
- * This function runs on the server only — never called from the browser.
+ * Excludes all staff members (waiters, cashiers, admins, kitchen staff) and
+ * deduplicates orders inside each customer record by order.id.
+ * Throws on query error so callers receive explicit error states.
  */
 export async function getCustomers(client: any = supabase): Promise<RawCustomerRow[]> {
-  try {
-    const { data, error } = await (client.from("customers" as any) as any)
-      .select(
-        `
-        id,
-        name,
-        phone,
-        email,
-        created_at,
-        updated_at,
-        orders (
-          id,
-          order_number,
-          method,
-          status,
-          table_number,
-          delivery_address,
-          subtotal,
-          discount_amount,
-          delivery_fee,
-          total_amount,
-          created_at,
-          updated_at,
-          order_items (
-            id,
-            name,
-            quantity,
-            unit_price,
-            line_total
-          ),
-          payments (
-            id,
-            status,
-            method,
-            amount,
-            created_at
-          )
-        ),
-        customer_addresses (
-          id,
-          address_line,
-          is_default,
-          created_at
-        )
-      `,
-      )
-      .order("created_at", { ascending: false });
+  const dbClient = client || supabase;
 
-    if (error) {
-      console.error("[db] getCustomers Supabase error:", error.message);
-      return [];
+  // 1. Fetch staff identifiers to strictly exclude waiters, cashiers, admins, kitchen staff
+  const excludedUserIds = new Set<string>();
+  const excludedEmails = new Set<string>();
+  const excludedPhones = new Set<string>();
+
+  const STAFF_ROLES = new Set([
+    "admin",
+    "staff",
+    "waiter",
+    "cashier",
+    "kitchen",
+    "kitchen_staff",
+    "manager",
+    "chef",
+    "cook",
+    "barista",
+  ]);
+
+  try {
+    const [staffProfilesRes, usersRes] = await Promise.all([
+      (dbClient.from("staff_profiles" as any) as any)
+        .select("user_id, role, phone, email")
+        .then((res: any) => res)
+        .catch(() => ({ data: null })),
+      (dbClient.from("users" as any) as any)
+        .select("id, role, email, phone")
+        .then((res: any) => res)
+        .catch(() => ({ data: null })),
+    ]);
+
+    if (Array.isArray(staffProfilesRes?.data)) {
+      for (const sp of staffProfilesRes.data) {
+        if (sp.user_id) excludedUserIds.add(sp.user_id);
+        if (sp.email) excludedEmails.add(String(sp.email).trim().toLowerCase());
+        const norm = normalizePhoneForStaffFilter(sp.phone);
+        if (norm) excludedPhones.add(norm);
+      }
     }
 
-    return Array.isArray(data) ? (data as RawCustomerRow[]) : [];
-  } catch (err) {
-    console.error("[db] getCustomers exception:", err);
+    if (Array.isArray(usersRes?.data)) {
+      for (const u of usersRes.data) {
+        const roleLower = String(u.role || "").trim().toLowerCase();
+        if (STAFF_ROLES.has(roleLower) || (roleLower && roleLower !== "customer")) {
+          if (u.id) excludedUserIds.add(u.id);
+          if (u.email) excludedEmails.add(String(u.email).trim().toLowerCase());
+          const norm = normalizePhoneForStaffFilter(u.phone);
+          if (norm) excludedPhones.add(norm);
+        }
+      }
+    }
+  } catch (lookupErr) {
+    console.warn("[db] getCustomers staff resolution warning:", lookupErr);
+  }
+
+  // 2. Query customers table with full order history and addresses
+  const { data, error } = await (dbClient.from("customers" as any) as any)
+    .select(
+      `
+      id,
+      user_id,
+      name,
+      phone,
+      email,
+      created_at,
+      updated_at,
+      orders (
+        id,
+        order_number,
+        method,
+        status,
+        table_number,
+        delivery_address,
+        subtotal,
+        discount_amount,
+        delivery_fee,
+        total_amount,
+        created_at,
+        updated_at,
+        order_items (
+          id,
+          name,
+          quantity,
+          unit_price,
+          line_total
+        ),
+        payments (
+          id,
+          status,
+          method,
+          amount,
+          created_at
+        )
+      ),
+      customer_addresses (
+        id,
+        address_line,
+        is_default,
+        created_at
+      )
+    `,
+    )
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[db] getCustomers Supabase error:", error.message);
+    throw new Error(`Failed to load customer profiles: ${error.message}`);
+  }
+
+  if (!Array.isArray(data)) {
     return [];
   }
+
+  // 3. Filter out staff members and deduplicate orders by order.id
+  return (data as any[])
+    .filter((cust) => {
+      if (!cust) return false;
+      const custId = cust.id;
+      const custUserId = cust.user_id;
+      const custEmail = cust.email ? String(cust.email).trim().toLowerCase() : "";
+      const custPhone = cust.phone ? normalizePhoneForStaffFilter(cust.phone) : "";
+
+      if (custUserId && excludedUserIds.has(custUserId)) return false;
+      if (custId && excludedUserIds.has(custId)) return false;
+      if (custEmail && excludedEmails.has(custEmail)) return false;
+      if (custPhone && excludedPhones.has(custPhone)) return false;
+
+      return true;
+    })
+    .map((cust) => {
+      const rawOrders = Array.isArray(cust.orders) ? cust.orders : [];
+      const seenOrderIds = new Set<string>();
+      const deduplicatedOrders = rawOrders.filter((order: any) => {
+        if (!order || !order.id) return false;
+        if (seenOrderIds.has(order.id)) return false;
+        seenOrderIds.add(order.id);
+        return true;
+      });
+
+      return {
+        ...cust,
+        orders: deduplicatedOrders,
+      } as RawCustomerRow;
+    });
 }
 
 export async function updateOrderStatus(
@@ -2229,10 +2465,14 @@ export async function updatePromotions(promotions: Promotion[]): Promise<Promoti
   try {
     for (const promo of promotions) {
       if (promo.id) {
+        const descToSave = promo.imageUrl
+          ? `${promo.description || ""}<!--promo_img:${promo.imageUrl}-->`
+          : promo.description || null;
+
         await (supabase.from("promotions" as any) as any)
           .update({
             name: promo.name,
-            description: promo.description,
+            description: descToSave,
             discount_type: promo.discountType,
             discount_value: promo.discountValue,
             start_date: promo.startDate,
@@ -2255,12 +2495,29 @@ export async function updatePromotions(promotions: Promotion[]): Promise<Promoti
 
 export async function createPromotion(promo: Promotion): Promise<Promotion> {
   try {
+    const promoId =
+      promo.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(promo.id)
+        ? promo.id
+        : crypto.randomUUID();
+
+    const appliesToAll =
+      promo.applicableProductIds?.includes("*") ??
+      (!promo.applicableCategorySlug &&
+        (!promo.applicableProductIds || promo.applicableProductIds.length === 0));
+
+    const descToSave = promo.imageUrl
+      ? `${promo.description || ""}<!--promo_img:${promo.imageUrl}-->`
+      : promo.description || null;
+
     const { data, error } = await (supabase.from("promotions" as any) as any)
       .insert({
+        id: promoId,
         name: promo.name,
-        description: promo.description,
+        description: descToSave,
         discount_type: promo.discountType,
         discount_value: promo.discountValue,
+        applies_to_all: appliesToAll,
+        category_id: promo.applicableCategorySlug || null,
         start_date: promo.startDate,
         end_date: promo.endDate,
         status: promo.status || "active",
@@ -2270,7 +2527,21 @@ export async function createPromotion(promo: Promotion): Promise<Promotion> {
       .single();
 
     if (!error && data) {
+      if (
+        Array.isArray(promo.applicableProductIds) &&
+        !promo.applicableProductIds.includes("*") &&
+        promo.applicableProductIds.length > 0
+      ) {
+        const junctionRows = promo.applicableProductIds.map((pid) => ({
+          promotion_id: data.id,
+          product_id: pid,
+        }));
+        await (supabase.from("promotion_products" as any) as any).insert(junctionRows);
+      }
       return normalizePromotion(data);
+    }
+    if (error) {
+      console.warn("[db] Failed to insert promotion to Supabase:", error.message || error);
     }
   } catch (err) {
     console.warn("[db] Failed to insert promotion to Supabase:", err);
@@ -2308,7 +2579,7 @@ export async function getSettings(): Promise<NebaSettings> {
       .select(
         "id, cafe_name, phone, email, address, opening_hours, delivery_fee, cafe_latitude, cafe_longitude, price_per_km, min_delivery_fee, max_delivery_distance_km, delivery_enabled, rounding_rule, updated_at",
       )
-      .eq("id", 1)
+      .limit(1)
       .maybeSingle();
 
     if (!error && data) {
@@ -2365,11 +2636,16 @@ export async function updateSettings(updates: Partial<NebaSettings>): Promise<Ne
       payload["rounding_rule"] = updates.roundingRule;
     }
 
-    const { data, error } = await (supabase.from("store_settings" as any) as any)
-      .update(payload)
-      .eq("id", 1)
-      .select()
+    const { data: existing } = await (supabase.from("store_settings" as any) as any)
+      .select("id")
+      .limit(1)
       .maybeSingle();
+
+    let query = (supabase.from("store_settings" as any) as any).update(payload);
+    if (existing?.id) {
+      query = query.eq("id", existing.id);
+    }
+    const { data, error } = await query.select().maybeSingle();
 
     if (!error && data) {
       return getSettings();
@@ -2400,7 +2676,8 @@ export async function getAboutContent(): Promise<AboutContent> {
       .select(
         "id, homepage_hero_image, about_hero_image, about_title, about_description, story_title, story_content, story_image, value_1_title, value_1_description, value_2_title, value_2_description, value_3_title, value_3_description, updated_at",
       )
-      .eq("id", 1)
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (!error && data) {
@@ -2426,6 +2703,16 @@ export async function updateAboutContent(
   updates: Partial<AboutContent>,
   token?: string,
 ): Promise<AboutContent> {
+  // Validate ID if explicitly supplied
+  if (updates.id !== undefined && updates.id !== null) {
+    const idStr = String(updates.id).trim();
+    if (!isValidUUID(idStr)) {
+      throw new Error(
+        `Validation failed: invalid content record ID "${updates.id}". A valid UUID is required.`,
+      );
+    }
+  }
+
   const nowIso = new Date().toISOString();
   const payload: Record<string, any> = {
     updated_at: nowIso,
@@ -2451,48 +2738,93 @@ export async function updateAboutContent(
   if (updates.value_3_description !== undefined)
     payload["value_3_description"] = updates.value_3_description.trim();
 
-  try {
-    const client = token ? createScopedClient(token) : supabase;
-    const { data, error } = await (client.from("about_content" as any) as any)
-      .update(payload)
-      .eq("id", 1)
-      .select()
-      .maybeSingle();
-
-    if (!error && data) {
-      try {
-        const db = await readDb();
-        db.about_content = normalizeAboutContent({
-          ...(db.about_content || DEFAULT_ABOUT_CONTENT),
-          ...payload,
-        });
-        await writeDb(db);
-      } catch {
-        // ignore local mirror errors if Supabase succeeded
-      }
-      return normalizeAboutContent(data);
-    }
-    if (error) {
-      console.warn("[db] Supabase about_content update returned error:", error.message);
-      if (token) {
-        throw new Error(`Database update failed: ${error.message}`);
-      }
-    }
-  } catch (err) {
-    console.warn("[db] Failed to update about content in Supabase:", err);
-    if (token) {
-      throw err;
+  // Resolve target UUID
+  let targetId: string | null = null;
+  if (updates.id && isValidUUID(String(updates.id))) {
+    targetId = String(updates.id).trim();
+  } else {
+    const existing = await getAboutContent();
+    if (existing?.id && isValidUUID(existing.id)) {
+      targetId = existing.id;
     }
   }
 
-  // Fallback to local db.json
-  const db = await readDb();
-  db.about_content = normalizeAboutContent({
-    ...(db.about_content || DEFAULT_ABOUT_CONTENT),
-    ...payload,
-  });
-  await writeDb(db);
-  return db.about_content;
+  try {
+    let resultData: any = null;
+
+    if (targetId) {
+      let updateRes = await (supabase.from("about_content" as any) as any)
+        .update(payload)
+        .eq("id", targetId)
+        .select()
+        .maybeSingle();
+
+      if (updateRes.error && token) {
+        try {
+          const client = createScopedClient(token);
+          const scopedRes = await (client.from("about_content" as any) as any)
+            .update(payload)
+            .eq("id", targetId)
+            .select()
+            .maybeSingle();
+          if (!scopedRes.error && scopedRes.data) {
+            updateRes = scopedRes;
+          }
+        } catch {
+          /* ignore scoped fallback */
+        }
+      }
+
+      if (updateRes.error) {
+        console.error("[db] Supabase about_content update error:", updateRes.error.message);
+        throw new Error(`Database update failed: ${updateRes.error.message}`);
+      }
+
+      resultData = updateRes.data;
+    }
+
+    if (!resultData) {
+      const insertPayload = {
+        ...payload,
+        ...(targetId && isValidUUID(targetId) ? { id: targetId } : {}),
+      };
+      const { data: insertData, error: insertError } = await (
+        supabase.from("about_content" as any) as any
+      )
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("[db] Supabase about_content insert error:", insertError.message);
+        throw new Error(`Database update failed: ${insertError.message}`);
+      }
+
+      resultData = insertData;
+    }
+
+    if (!resultData) {
+      throw new Error("Database update failed: record was not updated");
+    }
+
+    // Mirror to local db.json
+    try {
+      const db = await readDb();
+      db.about_content = normalizeAboutContent({
+        ...(db.about_content || DEFAULT_ABOUT_CONTENT),
+        ...payload,
+        id: resultData.id,
+      });
+      await writeDb(db);
+    } catch {
+      /* ignore local mirror errors if Supabase succeeded */
+    }
+
+    return normalizeAboutContent(resultData);
+  } catch (err: any) {
+    console.error("[db] Failed to update about content in Supabase:", err);
+    throw err;
+  }
 }
 
 /* ==========================================================================
@@ -2536,9 +2868,19 @@ export async function createContactMessage(
  */
 export async function getContactMessages(client: any = supabase): Promise<ContactMessage[]> {
   const dbClient = client || supabase;
-  const { data, error } = await (dbClient.from("contact_messages" as any) as any)
+  let { data, error } = await (dbClient.from("contact_messages" as any) as any)
     .select("id, name, email, message, is_read, created_at")
     .order("created_at", { ascending: false });
+
+  if (error && (error.code === "42P01" || error.message?.includes("does not exist"))) {
+    const fallback = await (dbClient.from("messages" as any) as any)
+      .select("id, name, email, message, is_read, created_at")
+      .order("created_at", { ascending: false });
+    if (!fallback.error) {
+      data = fallback.data;
+      error = null;
+    }
+  }
 
   if (error) {
     console.error("[db] Failed to fetch contact messages:", error.message);
@@ -2557,11 +2899,23 @@ export async function updateContactMessageReadStatus(
   client: any = supabase,
 ): Promise<ContactMessage | null> {
   const dbClient = client || supabase;
-  const { data, error } = await (dbClient.from("contact_messages" as any) as any)
+  let { data, error } = await (dbClient.from("contact_messages" as any) as any)
     .update({ is_read: isRead })
     .eq("id", id)
     .select("id, name, email, message, is_read, created_at")
     .maybeSingle();
+
+  if (error && (error.code === "42P01" || error.message?.includes("does not exist"))) {
+    const fallback = await (dbClient.from("messages" as any) as any)
+      .update({ is_read: isRead })
+      .eq("id", id)
+      .select("id, name, email, message, is_read, created_at")
+      .maybeSingle();
+    if (!fallback.error) {
+      data = fallback.data;
+      error = null;
+    }
+  }
 
   if (error) {
     console.error(`[db] Failed to update contact message ${id}:`, error.message);
@@ -2576,7 +2930,14 @@ export async function updateContactMessageReadStatus(
  */
 export async function deleteContactMessage(id: string, client: any = supabase): Promise<boolean> {
   const dbClient = client || supabase;
-  const { error } = await (dbClient.from("contact_messages" as any) as any).delete().eq("id", id);
+  let { error } = await (dbClient.from("contact_messages" as any) as any).delete().eq("id", id);
+
+  if (error && (error.code === "42P01" || error.message?.includes("does not exist"))) {
+    const fallback = await (dbClient.from("messages" as any) as any).delete().eq("id", id);
+    if (!fallback.error) {
+      error = null;
+    }
+  }
 
   if (error) {
     console.error(`[db] Failed to delete contact message ${id}:`, error.message);

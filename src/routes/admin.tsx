@@ -1,8 +1,7 @@
 import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
-import rekikLogo from "@/assets/rekik-coffee-logo.png";
-import { fetchCashierMe } from "@/services/cashier";
 import {
   AlertCircle,
+  Boxes,
   CreditCard,
   FolderTree,
   Globe,
@@ -14,7 +13,7 @@ import {
   Settings,
   ShoppingBag,
   Tag,
-  ToggleLeft,
+  TrendingUp,
   UserCheck,
   Users,
 } from "lucide-react";
@@ -35,6 +34,7 @@ import {
 import { applyTheme, readSettings } from "@/lib/settings";
 import { supabase, type UserRole } from "@/lib/supabase";
 import { getInitials, type AdminUserData } from "@/lib/admin-account";
+import { fetchCashierMe } from "@/services/cashier";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -43,7 +43,7 @@ export const Route = createFileRoute("/admin")({
       {
         name: "description",
         content:
-          "Operations, catalog, availability, payments and settings for Rekik Café management.",
+          "Operations, catalog, inventory, availability, payments and settings for Rekik Café management.",
       },
       { name: "robots", content: "noindex" },
     ],
@@ -54,12 +54,12 @@ export const Route = createFileRoute("/admin")({
 const nav = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/admin/orders", label: "Orders", icon: ShoppingBag, exact: false },
-  { to: "/admin/payments", label: "Payments", icon: CreditCard, exact: false },
+  { to: "/admin/payments", label: "Sales & Payments", icon: CreditCard, exact: false },
+  { to: "/admin/staff", label: "Staff & Activity", icon: UserCheck, exact: false },
   { to: "/admin/promotions", label: "Promotions", icon: Tag, exact: false },
   { to: "/admin/customers", label: "Customers", icon: Users, exact: false },
   { to: "/admin/products", label: "Products", icon: Package, exact: false },
   { to: "/admin/categories", label: "Categories", icon: FolderTree, exact: false },
-  { to: "/admin/availability", label: "Availability", icon: ToggleLeft, exact: false },
   { to: "/admin/content", label: "Website Content", icon: Globe, exact: false },
   { to: "/admin/contact-messages", label: "Messages", icon: Mail, exact: false },
   { to: "/admin/settings", label: "Settings", icon: Settings, exact: false },
@@ -72,6 +72,58 @@ type VerifyAdminResult =
 
 async function verifyAdminUser(userId: string): Promise<VerifyAdminResult> {
   try {
+    let authEmail = "";
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user?.email) {
+        authEmail = authData.user.email;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 1. Check Rekik staff_profiles table first
+    const { data: staffData } = await (
+      supabase as unknown as {
+        from: (table: string) => {
+          select: (cols: string) => {
+            eq: (
+              col: string,
+              val: string,
+            ) => {
+              maybeSingle: () => Promise<{
+                data: {
+                  user_id: string;
+                  full_name: string | null;
+                  role: string | null;
+                  is_active: boolean | null;
+                } | null;
+              }>;
+            };
+          };
+        };
+      }
+    )
+      .from("staff_profiles")
+      .select("user_id, full_name, role, is_active")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (staffData && staffData.is_active !== false) {
+      const r = (staffData.role || "").toUpperCase();
+      const normalizedRole: UserRole = r === "ADMIN" ? "ADMIN" : "STAFF";
+      return {
+        success: true,
+        user: {
+          role: normalizedRole,
+          email: authEmail,
+          fullName: staffData.full_name || null,
+          avatarUrl: null,
+        },
+      };
+    }
+
+    // 2. Fall back to legacy users table
     const { data, error } = await supabase
       .from("users")
       .select("id, email, role, full_name, avatar_url")
@@ -109,11 +161,7 @@ async function verifyAdminUser(userId: string): Promise<VerifyAdminResult> {
       return { success: false, reason: "unauthorized" };
     }
 
-    if (!data) {
-      return { success: false, reason: "unauthorized" };
-    }
-
-    if (data.role === "ADMIN" || data.role === "STAFF") {
+    if (data && (data.role === "ADMIN" || data.role === "STAFF")) {
       return {
         success: true,
         user: {
@@ -123,6 +171,42 @@ async function verifyAdminUser(userId: string): Promise<VerifyAdminResult> {
           avatarUrl: data.avatar_url || null,
         },
       };
+    }
+
+    // 3. Fall back to authoritative database RPC check (handles RLS-restricted profiles)
+    try {
+      const { data: isStaff, error: rpcErr } = await (
+        supabase as unknown as {
+          rpc: (
+            name: string,
+          ) => Promise<{ data: boolean | null; error: { message: string } | null }>;
+        }
+      ).rpc("is_admin_or_staff");
+
+      if (!rpcErr && isStaff === true) {
+        const { data: authData } = await supabase.auth.getUser();
+        const authUser = authData?.user;
+        const meta = authUser?.user_metadata as Record<string, unknown> | undefined;
+        const metaRole = (typeof meta?.["role"] === "string" ? meta["role"] : "").toUpperCase();
+        const resolvedRole: UserRole = metaRole === "STAFF" ? "STAFF" : "ADMIN";
+        const metaName =
+          (typeof meta?.["full_name"] === "string" ? meta["full_name"] : null) ||
+          (typeof meta?.["name"] === "string" ? meta["name"] : null) ||
+          authUser?.email?.split("@")[0] ||
+          null;
+
+        return {
+          success: true,
+          user: {
+            role: resolvedRole,
+            email: authUser?.email || "",
+            fullName: metaName,
+            avatarUrl: null,
+          },
+        };
+      }
+    } catch {
+      // Ignore RPC fallback exception and proceed to unauthorized
     }
 
     return { success: false, reason: "unauthorized" };
@@ -161,7 +245,7 @@ function AdminLayout() {
         return;
       }
 
-      if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
+      if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
         const result = await verifyAdminUser(session.user.id);
         if (!isMounted) return;
 
@@ -194,14 +278,21 @@ function AdminLayout() {
         }
         setReady(true);
       }
-      // Note: "SIGNED_IN" is intentionally omitted here because handleSignIn
-      // serves as the single source of truth for the active login operation.
     });
 
-    // Ensure ready state resolves if no session exists
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Ensure session resolves and verifies immediately on load or reload
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!isMounted) return;
       if (!session?.user) {
+        setReady(true);
+      } else {
+        const result = await verifyAdminUser(session.user.id);
+        if (!isMounted) return;
+        if (result.success) {
+          setRole(result.user.role);
+          setAdminUser(result.user);
+          setErrorMsg(null);
+        }
         setReady(true);
       }
     });
@@ -210,7 +301,7 @@ function AdminLayout() {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, []);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -298,7 +389,7 @@ function AdminLayout() {
 
   if (!ready) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-cream px-4">
+      <div className="admin-theme flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
         <p className="p-10 text-sm text-muted-foreground animate-pulse">Verifying credentials…</p>
       </div>
     );
@@ -306,16 +397,9 @@ function AdminLayout() {
 
   if (!role) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-cream px-4">
-        <div className="surface-card w-full max-w-sm p-8 text-center sm:text-left">
-          <div className="mx-auto sm:mx-0 size-14 overflow-hidden rounded-full border-2 border-gold/70 shadow-sm bg-white mb-4">
-            <img
-              src={rekikLogo}
-              alt="Rekik Coffee logo"
-              className="size-full object-contain"
-            />
-          </div>
-          <h1 className="font-display text-2xl font-semibold">Admin Sign In</h1>
+      <div className="admin-theme flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+        <div className="surface-card w-full max-w-sm p-8 shadow-sm">
+          <h1 className="font-display text-2xl font-semibold text-foreground">Admin sign in</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Enter your Rekik staff credentials to access café operations.
           </p>
@@ -364,7 +448,11 @@ function AdminLayout() {
             </Button>
           </form>
 
-          <Button asChild variant="link" className="mt-4 w-full">
+          <Button
+            asChild
+            variant="link"
+            className="mt-4 w-full text-muted-foreground hover:text-foreground"
+          >
             <Link to="/">Back to café site</Link>
           </Button>
         </div>
@@ -373,20 +461,15 @@ function AdminLayout() {
   }
 
   return (
-    <div className="flex min-h-screen bg-cream">
-      <aside className="hidden w-60 shrink-0 flex-col bg-sidebar p-4 text-sidebar-foreground md:flex">
-        <Link to="/" className="flex items-center gap-2.5 px-2 py-3 group">
-          <div className="size-9 overflow-hidden rounded-full border border-gold/70 shrink-0 bg-white">
-            <img
-              src={rekikLogo}
-              alt="Rekik Coffee logo"
-              className="size-full object-contain"
-            />
-          </div>
-          <div>
-            <span className="font-display text-base font-bold text-sidebar-foreground">Rekik Coffee</span>
-            <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-medium">Console</span>
-          </div>
+    <div className="admin-theme flex min-h-screen bg-background text-foreground">
+      <aside className="hidden w-60 shrink-0 flex-col bg-sidebar p-4 text-sidebar-foreground md:flex border-r border-sidebar-border">
+        <Link to="/" className="px-2 py-3 flex items-center">
+          <span className="font-display text-lg font-semibold text-sidebar-foreground">
+            Rekik Café
+          </span>
+          <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/70">
+            Console
+          </span>
         </Link>
         <nav className="mt-4 flex-1 space-y-1" aria-label="Admin navigation">
           {nav.map((n) => (
@@ -394,7 +477,9 @@ function AdminLayout() {
               key={n.label}
               to={n.to}
               activeOptions={{ exact: n.exact }}
-              activeProps={{ className: "bg-sidebar-accent text-sidebar-accent-foreground" }}
+              activeProps={{
+                className: "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+              }}
               className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm opacity-90 transition-colors hover:bg-sidebar-accent"
             >
               <n.icon className="size-4" aria-hidden />
@@ -454,9 +539,11 @@ function AdminLayout() {
         <header className="sticky top-0 z-40 flex h-14 w-full items-center justify-between border-b border-sidebar-border bg-sidebar px-4 text-sidebar-foreground md:hidden">
           <Link to="/admin" className="flex items-center">
             <span className="font-display text-lg font-semibold text-sidebar-foreground">
-              REKIK
+              Rekik Café
             </span>
-            <span className="ml-2 text-[10px] uppercase tracking-[0.2em] opacity-70">Console</span>
+            <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/70">
+              Console
+            </span>
           </Link>
 
           <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
@@ -476,18 +563,11 @@ function AdminLayout() {
             >
               <div>
                 <SheetHeader className="text-left pb-3 border-b border-sidebar-border pr-6">
-                  <SheetTitle className="font-display text-lg font-semibold text-sidebar-foreground flex items-center gap-2.5">
-                    <div className="size-8 overflow-hidden rounded-full border border-gold/70 shrink-0 bg-white">
-                      <img
-                        src={rekikLogo}
-                        alt="Rekik Coffee logo"
-                        className="size-full object-contain"
-                      />
-                    </div>
-                    <div>
-                      <span className="font-display text-base font-bold">Rekik Coffee</span>
-                      <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-medium">Console</span>
-                    </div>
+                  <SheetTitle className="font-display text-lg font-semibold text-sidebar-foreground flex items-center">
+                    <span>Rekik Café</span>
+                    <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/70">
+                      Console
+                    </span>
                   </SheetTitle>
                   <SheetDescription className="sr-only">Admin navigation menu</SheetDescription>
                 </SheetHeader>

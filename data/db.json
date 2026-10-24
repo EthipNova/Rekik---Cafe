@@ -1,52 +1,87 @@
 {
   "categories": [
     {
-      "id": "cat-1",
+      "id": "b3140dbb-0692-4e00-91dd-ec85d3ae2566",
+      "slug": "coffee",
+      "name": "Coffee",
+      "tagline": "Freshly brewed coffee, traditional Ethiopian coffee, and other coffee selections.",
+      "active": true
+    },
+    {
+      "id": "a802d0f6-33ae-41b3-83be-c40f3648afea",
+      "slug": "espresso",
+      "name": "Espresso",
+      "tagline": "Espresso-based beverages, including espresso, cappuccino, and latte.",
+      "active": true
+    },
+    {
+      "id": "8818c3e4-4653-4114-b720-41116cb72d44",
+      "slug": "tea",
+      "name": "Tea",
+      "tagline": "Traditional tea and a selection of hot tea beverages.",
+      "active": true
+    },
+    {
+      "id": "3884afa0-f021-4bce-9b8e-452023c48a13",
+      "slug": "juice",
+      "name": "Juice",
+      "tagline": "Fresh fruit juices and blended fruit drinks.",
+      "active": true
+    },
+    {
+      "id": "c189c5ff-ae1f-4408-9940-4abe295ed146",
+      "slug": "soft-drinks",
+      "name": "Soft Drinks",
+      "tagline": "Bottled and canned non-alcoholic refreshments.",
+      "active": true
+    },
+    {
+      "id": "7fa2ddea-5e96-4eb3-b931-979b2684dd21",
+      "slug": "breakfast",
+      "name": "Breakfast",
+      "tagline": "Breakfast meals and morning food options.",
+      "active": true
+    },
+    {
+      "id": "51269c09-52b3-4078-acfb-3697aa453d55",
       "slug": "burgers",
       "name": "Burgers",
-      "tagline": "Classic favorites",
+      "tagline": "Burgers prepared with available toppings and accompaniments.",
       "active": true
     },
     {
-      "id": "cat-2",
+      "id": "8a389835-a0e4-45d9-8c63-8c5d9256f483",
       "slug": "pizza",
       "name": "Pizza",
-      "tagline": "Freshly prepared",
+      "tagline": "Pizza varieties with different toppings.",
       "active": true
     },
     {
-      "id": "cat-3",
-      "slug": "sides",
-      "name": "Chips & Sides",
-      "tagline": "Perfect additions",
+      "id": "68bd97da-1cfb-483c-a616-e0315d729ba0",
+      "slug": "pasta",
+      "name": "Pasta",
+      "tagline": "Pasta dishes prepared with assorted sauces.",
       "active": true
     },
     {
-      "id": "cat-4",
-      "slug": "drinks",
-      "name": "Soft Drinks",
-      "tagline": "Refresh yourself",
+      "id": "ca94a1ce-bcbd-429f-993e-58036333c31e",
+      "slug": "sandwiches",
+      "name": "Sandwiches",
+      "tagline": "Freshly prepared sandwiches and wraps.",
       "active": true
     },
     {
-      "id": "cat-5",
-      "slug": "coffee",
-      "name": "Coffee & Tea",
-      "tagline": "Artisanal roasts & blends",
+      "id": "7f079323-01ab-4f29-8f2f-1b99cb93f10f",
+      "slug": "desserts",
+      "name": "Desserts",
+      "tagline": "Cakes, pastries, and other sweet treats.",
       "active": true
     },
     {
-      "id": "cat-6",
-      "slug": "pastries",
-      "name": "Pastries",
-      "tagline": "Freshly baked daily",
-      "active": true
-    },
-    {
-      "id": "cat-7",
-      "slug": "other",
-      "name": "Other",
-      "tagline": "Seasonal picks",
+      "id": "71c15d17-4518-46f4-a1c4-2b32d2e7f3ec",
+      "slug": "combos",
+      "name": "Combos",
+      "tagline": "Bundled food and beverage offers.",
       "active": true
     }
   ],
@@ -69,7 +104,13 @@
       "slug": "classic-burger",
       "categorySlug": "burgers",
       "description": "Fresh beef patty, vegetables and special sauce.",
-      "ingredients": ["Beef patty", "Lettuce", "Tomato", "Special sauce", "Sesame bun"],
+      "ingredients": [
+        "Beef patty",
+        "Lettuce",
+        "Tomato",
+        "Special sauce",
+        "Sesame bun"
+      ],
       "price": 250,
       "image": "/images/classic-burger.jpg",
       "available": true,
@@ -81,7 +122,12 @@
       "slug": "cheese-burger",
       "categorySlug": "burgers",
       "description": "Double beef patty layered with melted cheddar cheese.",
-      "ingredients": ["Beef patty", "Cheddar cheese", "Pickles", "House sauce"],
+      "ingredients": [
+        "Beef patty",
+        "Cheddar cheese",
+        "Pickles",
+        "House sauce"
+      ],
       "price": 300,
       "image": "/images/cheese-burger.jpg",
       "available": true,
@@ -93,7 +139,12 @@
       "slug": "chicken-burger",
       "categorySlug": "burgers",
       "description": "Crispy chicken fillet with fresh slaw and mild mayo.",
-      "ingredients": ["Chicken fillet", "Cabbage slaw", "Mayo", "Brioche bun"],
+      "ingredients": [
+        "Chicken fillet",
+        "Cabbage slaw",
+        "Mayo",
+        "Brioche bun"
+      ],
       "price": 280,
       "image": "/images/chicken-burger.jpg",
       "available": false,
@@ -105,7 +156,12 @@
       "slug": "margherita-pizza",
       "categorySlug": "pizza",
       "description": "Stone-baked dough, tomato sauce, mozzarella and basil.",
-      "ingredients": ["Pizza dough", "Tomato sauce", "Mozzarella", "Fresh basil"],
+      "ingredients": [
+        "Pizza dough",
+        "Tomato sauce",
+        "Mozzarella",
+        "Fresh basil"
+      ],
       "price": 420,
       "image": "/images/margherita.jpg",
       "available": true,
@@ -117,7 +173,12 @@
       "slug": "chicken-pizza",
       "categorySlug": "pizza",
       "description": "Grilled chicken, sweet peppers and mozzarella.",
-      "ingredients": ["Pizza dough", "Grilled chicken", "Peppers", "Mozzarella"],
+      "ingredients": [
+        "Pizza dough",
+        "Grilled chicken",
+        "Peppers",
+        "Mozzarella"
+      ],
       "price": 480,
       "image": "/images/chicken-pizza.jpg",
       "available": true,
@@ -129,7 +190,11 @@
       "slug": "french-fries",
       "categorySlug": "sides",
       "description": "Golden, crispy and lightly salted.",
-      "ingredients": ["Potato", "Sunflower oil", "Sea salt"],
+      "ingredients": [
+        "Potato",
+        "Sunflower oil",
+        "Sea salt"
+      ],
       "price": 100,
       "image": "/images/fries.jpg",
       "available": false,
@@ -177,7 +242,10 @@
       "slug": "ethiopian-yirgacheffe",
       "categorySlug": "coffee",
       "description": "Single-origin pour-over with fragrant floral jasmine notes and vibrant citrus acidity.",
-      "ingredients": ["Yirgacheffe Coffee Beans", "Filtered Water"],
+      "ingredients": [
+        "Yirgacheffe Coffee Beans",
+        "Filtered Water"
+      ],
       "price": 95,
       "image": "/images/hero.jpg",
       "available": true,
@@ -189,7 +257,13 @@
       "slug": "cardamom-cinnamon-swirl",
       "categorySlug": "pastries",
       "description": "Artisan baked pastry layered with warm cardamom, Ceylon cinnamon and raw cane glaze.",
-      "ingredients": ["Flour", "Butter", "Cardamom", "Cinnamon", "Cane Sugar"],
+      "ingredients": [
+        "Flour",
+        "Butter",
+        "Cardamom",
+        "Cinnamon",
+        "Cane Sugar"
+      ],
       "price": 120,
       "image": "/images/about.jpg",
       "available": true,
@@ -198,36 +272,93 @@
   ],
   "promotions": [
     {
-      "id": "promo_mtzm5zed",
-      "name": "Pizza Special",
-      "description": "fxkghnm",
-      "discountType": "percentage",
-      "discountValue": 10,
-      "applicableProductIds": ["p-4", "p-5"],
-      "startDate": "2026-09-13",
-      "endDate": "2026-09-20",
-      "status": "active",
-      "createdAt": "2026-09-13T09:30:44.729Z"
-    },
-    {
-      "id": "promo-1",
-      "name": "Today's Special: Cheese Burger + French Fries",
-      "description": "Our double cheddar burger paired with golden fries, for a limited time.",
+      "id": "844ab7b8-4235-41d4-94d1-ab9aa925b66d",
+      "name": "holiday",
+      "description": "",
+      "imageUrl": "https://imqtqshcgvgxokojfgxv.supabase.co/storage/v1/object/public/product-images/promotions/844ab7b8-4235-41d4-94d1-ab9aa925b66d/ca7cba55-e7f1-4080-83b7-fc4c4f22cd5e.png",
       "discountType": "percentage",
       "discountValue": 15,
-      "applicableProductIds": ["p-2", "p-6"],
+      "appliesToAll": false,
+      "applicableProductIds": [
+        "da43f826-b0c2-4f0d-b837-f70073d19a13"
+      ],
+      "categoryId": null,
+      "startDate": "2026-10-24T00:00:00+00:00",
+      "endDate": "2026-10-31T00:00:00+00:00",
+      "status": "scheduled",
+      "minOrderAmount": 230,
+      "createdAt": "2026-10-24T18:27:32.585735+00:00",
+      "products": [
+        {
+          "id": "da43f826-b0c2-4f0d-b837-f70073d19a13",
+          "name": "kb fast",
+          "slug": "kb-fast",
+          "price": 2323,
+          "imageUrl": "https://imqtqshcgvgxokojfgxv.supabase.co/storage/v1/object/public/product-images/products/da43f826-b0c2-4f0d-b837-f70073d19a13/8190f0c5-11ad-4cc8-b299-d673322f52e4.jpg",
+          "isAvailable": true,
+          "categoryId": "68bd97da-1cfb-483c-a616-e0315d729ba0"
+        }
+      ]
+    },
+    {
+      "id": "fb5d6ba6-acb2-46ed-baac-c54551afad14",
+      "name": "hjghhj",
+      "description": "jth",
+      "imageUrl": "https://imqtqshcgvgxokojfgxv.supabase.co/storage/v1/object/public/product-images/promotions/fb5d6ba6-acb2-46ed-baac-c54551afad14/e8e2ab5a-58fa-4d70-a841-c9084d3261ca.png",
+      "discountType": "percentage",
+      "discountValue": 15,
+      "appliesToAll": false,
+      "applicableProductIds": [],
+      "applicableCategorySlug": "7f079323-01ab-4f29-8f2f-1b99cb93f10f",
+      "categoryId": "7f079323-01ab-4f29-8f2f-1b99cb93f10f",
+      "startDate": "2026-10-24T00:00:00+00:00",
+      "endDate": "2026-10-31T00:00:00+00:00",
+      "status": "scheduled",
+      "minOrderAmount": 5566,
+      "createdAt": "2026-10-24T15:06:56.777935+00:00",
+      "products": []
+    },
+    {
+      "id": "d8936a62-60f7-4263-99e4-aa780b11fe97",
+      "name": "defds",
+      "description": "4444",
+      "imageUrl": null,
+      "discountType": "percentage",
+      "discountValue": 15,
+      "appliesToAll": false,
+      "applicableProductIds": [],
       "applicableCategorySlug": "burgers",
-      "startDate": "2026-01-01",
-      "endDate": "2026-12-31",
+      "categoryId": "51269c09-52b3-4078-acfb-3697aa453d55",
+      "startDate": "2026-10-24T00:00:00+00:00",
+      "endDate": "2026-10-31T00:00:00+00:00",
       "status": "active",
-      "minOrderAmount": 300,
-      "createdAt": "2026-01-01T00:00:00.000Z"
+      "minOrderAmount": 444,
+      "createdAt": "2026-10-24T14:48:56.929372+00:00",
+      "products": []
+    },
+    {
+      "id": "0da05658-5e52-42a2-8b5f-ade41fa657cd",
+      "name": "jk",
+      "description": "jo",
+      "imageUrl": null,
+      "discountType": "percentage",
+      "discountValue": 15,
+      "appliesToAll": false,
+      "applicableProductIds": [],
+      "applicableCategorySlug": "pasta",
+      "categoryId": "68bd97da-1cfb-483c-a616-e0315d729ba0",
+      "startDate": "2026-10-24T00:00:00+00:00",
+      "endDate": "2026-10-31T00:00:00+00:00",
+      "status": "active",
+      "minOrderAmount": 666,
+      "createdAt": "2026-10-24T14:45:48.449054+00:00",
+      "products": []
     }
   ],
   "settings": {
-    "cafeName": "NEBA Café",
-    "phone": "+251 91 123 4567",
-    "email": "hello@nebacafe.com",
+    "cafeName": "Rekik Café",
+    "phone": "+251911999888",
+    "email": "hello@rekikcafe.com",
     "address": "Piassa, Next to Kibru Hospital, Hawassa, Ethiopia.",
     "openingHours": "Mon - Sun: 8:00 AM - 11:00 PM",
     "theme": "light",
@@ -557,8 +688,8 @@
     }
   ],
   "about_content": {
-    "id": 1,
-    "homepage_hero_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/site-images/homepage/33bd43c8-9595-49d3-9a4c-492446ad7110.jpg",
+    "id": "028a78ee-094c-4334-8512-8697b747a674",
+    "homepage_hero_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/product-images/content/homepage/test.jpg",
     "about_hero_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/site-images/about/ede63380-dd32-446e-ac85-f12e5f3bfa6a.jpg",
     "about_title": "More Than a Café. A Place to Enjoy.",
     "about_description": "At Rekik Café, we believe great food should bring people together. From freshly prepared burgers and stone-baked pizza to crisp sides and refreshing drinks, we create simple, satisfying moments with a modern touch.",
@@ -571,6 +702,6 @@
     "value_2_description": "Every guest matters. Whether you dine in, pick up, or order from home, we want you to feel welcome.",
     "value_3_title": "Modern by Design",
     "value_3_description": "From ordering to payment and delivery, we use simple technology to make your Rekik experience easier.",
-    "updated_at": "2026-09-14T14:29:12.893Z"
+    "updated_at": "2026-10-24T20:54:57.200Z"
   }
 }

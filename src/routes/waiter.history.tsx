@@ -29,6 +29,7 @@ import {
   getMethodLabel,
   getOrderStatusBadge,
   getWaiterDecisionBadge,
+  isWaiterOrderCompleted,
 } from "@/lib/waiter";
 import type { WaiterOrder } from "@/types/waiter";
 
@@ -73,10 +74,17 @@ export function WaiterHistoryPage() {
   }, [dateFilter]);
 
   const filteredOrders = orders.filter((o) => {
-    if (statusFilter === "completed" && o.status !== "completed" && o.status !== "delivered") {
+    const isCompleted = isWaiterOrderCompleted(o);
+    const isRejected =
+      o.status === "rejected" || o.status === "cancelled" || o.waiterDecision === "rejected";
+
+    if (statusFilter === "completed" && !isCompleted) {
       return false;
     }
-    if (statusFilter === "rejected" && o.status !== "rejected" && o.status !== "cancelled" && o.waiterDecision !== "rejected") {
+    if (statusFilter === "rejected" && !isRejected) {
+      return false;
+    }
+    if (statusFilter === "all" && !isCompleted && !isRejected) {
       return false;
     }
 
@@ -91,7 +99,7 @@ export function WaiterHistoryPage() {
   });
 
   const totalValue = filteredOrders.reduce((sum, o) => {
-    if (o.status === "completed" || o.status === "delivered") {
+    if (isWaiterOrderCompleted(o)) {
       return sum + o.totalAmount;
     }
     return sum;
@@ -248,6 +256,17 @@ export function WaiterHistoryPage() {
                   const method = getMethodLabel(order.method);
                   const statusBadge = getOrderStatusBadge(order.status);
                   const decisionBadge = getWaiterDecisionBadge(order.waiterDecision);
+                  const isCompleted = isWaiterOrderCompleted(order);
+                  const finalBadge =
+                    order.status === "completed" || order.status === "delivered"
+                      ? statusBadge
+                      : isCompleted
+                        ? {
+                            label: "Completed (Paid)",
+                            className:
+                              "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30",
+                          }
+                        : statusBadge;
 
                   return (
                     <tr key={order.id} className="hover:bg-muted/30 transition-colors">
@@ -270,8 +289,8 @@ export function WaiterHistoryPage() {
                         </Badge>
                       </td>
                       <td className="p-3">
-                        <Badge variant="outline" className={`text-[10px] ${statusBadge.className}`}>
-                          {statusBadge.label}
+                        <Badge variant="outline" className={`text-[10px] ${finalBadge.className}`}>
+                          {finalBadge.label}
                         </Badge>
                       </td>
                       <td className="p-3 text-right font-bold text-foreground">
@@ -328,6 +347,14 @@ export function WaiterHistoryPage() {
                   <span className="text-muted-foreground">Total:</span>
                   <span className="font-bold text-foreground">{formatETB(selectedOrder.totalAmount)}</span>
                 </div>
+                {selectedOrder.payments?.[0] && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Payment:</span>
+                    <span className="font-medium capitalize text-emerald-600 dark:text-emerald-400">
+                      {selectedOrder.payments[0].method} ({selectedOrder.payments[0].status})
+                    </span>
+                  </div>
+                )}
               </div>
 
               {selectedOrder.waiterRejectionReason && (

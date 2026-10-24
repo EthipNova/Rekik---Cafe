@@ -8,6 +8,7 @@ import {
   Pizza,
   Sparkles,
   Store,
+  Tag,
   Truck,
   Utensils,
 } from "lucide-react";
@@ -26,9 +27,9 @@ import securePaymentsImage from "@/assets/secure-payments.png";
 import shiroImage from "@/assets/shiro.png";
 import simpleCheckoutImage from "@/assets/simple-checkout.png";
 import softDrinkImage from "@/assets/soft-drink.png";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Section, SectionHeading } from "@/components/site/Section";
-import { ProductCard } from "@/components/site/ProductCard";
 import {
   categories as seedCategories,
   formatETB,
@@ -38,7 +39,14 @@ import {
   type Product,
 } from "@/lib/menu-data";
 import { DEFAULT_ABOUT_CONTENT, type AboutContent } from "@/lib/content";
-import { resolveTodaySpecial, type Promotion } from "@/lib/promotions";
+import {
+  derivePromotionStatus,
+  formatDiscount,
+  formatPromotionExpiry,
+  resolvePromotionTargetType,
+  resolveTodaySpecial,
+  type Promotion,
+} from "@/lib/promotions";
 import { cn } from "@/lib/utils";
 import { fetchAboutContent, fetchCategories, fetchProducts, fetchPromotions } from "@/services/api";
 
@@ -155,6 +163,39 @@ function getCategoryIcon(slug: string) {
     return Coffee;
   return Sparkles;
 }
+
+function getPromotionScopeLabel(
+  promo: Promotion,
+  categoriesList: Category[],
+  productsList: Product[],
+): string {
+  const targetType = resolvePromotionTargetType(promo);
+  if (targetType === "all" || promo.appliesToAll) {
+    return "All Menu Items";
+  }
+  if (targetType === "category") {
+    const cat = categoriesList.find(
+      (c) => c.id === promo.categoryId || c.slug === promo.applicableCategorySlug,
+    );
+    if (cat) return `Category: ${cat.name}`;
+    if (promo.applicableCategorySlug) return `Category: ${promo.applicableCategorySlug}`;
+    return "Category Special";
+  }
+  const targetedNames = promo.applicableProductIds
+    .filter((id) => id && id !== "*")
+    .map(
+      (id) =>
+        productsList.find((p) => p.id === id)?.name ||
+        promo.products?.find((p) => p.id === id)?.name,
+    )
+    .filter(Boolean);
+  if (targetedNames.length > 0) {
+    if (targetedNames.length <= 2) return `Selected: ${targetedNames.join(", ")}`;
+    return `Selected Items (${targetedNames.length} items)`;
+  }
+  return "Selected Menu Items";
+}
+
 function Home() {
   const loaderData = Route.useLoaderData();
   const [categoriesList, setCategoriesList] = useState<Category[]>(
@@ -221,11 +262,14 @@ function Home() {
     };
   }, []);
 
-  const featured = productsList.filter((p) => p.featured);
-  const displayFeatured = featured.length > 0 ? featured : productsList.slice(0, 3);
+
   const todaySpecial = useMemo(
     () => resolveTodaySpecial(promotionsList, productsList),
     [promotionsList, productsList],
+  );
+  const activePromotions = useMemo(
+    () => promotionsList.filter((p) => derivePromotionStatus(p) === "active"),
+    [promotionsList],
   );
 
   return (
@@ -393,15 +437,15 @@ function Home() {
       </Section>
 
       {/* ----------------------------------------------------------------------
-          SECTION 3 â€” FEATURED MENU
-          Enhanced hierarchy & spacing around the existing ProductCard
+          SECTION 3 — PROMOTIONS
+          Dedicated promotional offers and campaigns section replacing popular right now
          ---------------------------------------------------------------------- */}
-      <Section className="pt-0 pb-10 sm:pb-16 sm:pb-20">
+      <Section className="pt-0 pb-10 sm:pb-16 sm:pb-20" id="promotions">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <SectionHeading
-            eyebrow="Featured"
-            title="Popular right now"
-            description="Guest favorites prepared fresh to order in our kitchen."
+            eyebrow="Special Offers"
+            title="Promotions"
+            description="Exclusive discounts and limited-time promotional deals on our handcrafted coffee and fresh menu."
           />
           <Button
             asChild
@@ -415,11 +459,120 @@ function Home() {
           </Button>
         </div>
 
-        <div className="mt-6 sm:mt-10 grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3">
-          {displayFeatured.map((p) => (
-            <ProductCard key={p.id} product={p} />
-          ))}
-        </div>
+        {activePromotions.length === 0 ? (
+          <div className="mt-6 sm:mt-8 rounded-2xl border border-dashed border-border bg-card/60 p-8 text-center sm:p-12">
+            <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Tag className="size-6" aria-hidden />
+            </div>
+            <h3 className="mt-3 font-display text-base font-semibold text-foreground sm:text-lg">
+              No active promotions right now
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground sm:text-sm max-w-md mx-auto">
+              Check back soon for upcoming holiday specials, discount hours, and exclusive offers on our handcrafted coffee and kitchen dishes!
+            </p>
+          </div>
+        ) : (
+          <div className="mt-6 sm:mt-8 grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {activePromotions.map((promo) => {
+              const scopeLabel = getPromotionScopeLabel(promo, categoriesList, productsList);
+              const discountLabel = formatDiscount(promo);
+              const validityLabel = formatPromotionExpiry(promo.endDate);
+
+              return (
+                <div
+                  key={promo.id}
+                  className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-border/80 bg-card p-5 shadow-xs transition-all duration-300 hover:border-primary/50 hover:shadow-md"
+                >
+                  <div className="space-y-3.5">
+                    {promo.imageUrl ? (
+                      <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-muted border border-border/50">
+                        <img
+                          src={promo.imageUrl}
+                          alt={promo.name}
+                          loading="lazy"
+                          className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLElement).style.display = "none";
+                          }}
+                        />
+                        <div className="absolute top-2.5 left-2.5">
+                          <Badge className="bg-primary text-primary-foreground font-bold text-xs uppercase tracking-wider px-2.5 py-0.5 shadow-sm">
+                            <Tag className="size-3 mr-1" aria-hidden />
+                            {discountLabel}
+                          </Badge>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <Badge className="bg-primary text-primary-foreground font-bold text-xs uppercase tracking-wider px-2.5 py-0.5 shadow-sm">
+                          <Tag className="size-3 mr-1" aria-hidden />
+                          {discountLabel}
+                        </Badge>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <h3 className="font-display font-bold text-lg text-foreground group-hover:text-primary transition-colors">
+                        {promo.name}
+                      </h3>
+                      {promo.description ? (
+                        <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2">
+                          {promo.description}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-1.5 rounded-xl bg-secondary/30 p-3 text-xs text-muted-foreground">
+                      <div className="flex items-center justify-between">
+                        <span className="inline-flex items-center gap-1 font-medium text-foreground/80">
+                          <Sparkles className="size-3 text-gold" aria-hidden />
+                          Scope
+                        </span>
+                        <span className="font-medium text-foreground truncate max-w-[180px]">
+                          {scopeLabel}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="inline-flex items-center gap-1 font-medium text-foreground/80">
+                          <Clock className="size-3 text-primary" aria-hidden />
+                          Valid until
+                        </span>
+                        <span className="font-medium text-foreground">
+                          {promo.endDate} ({validityLabel})
+                        </span>
+                      </div>
+                      {promo.minOrderAmount ? (
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Min. order</span>
+                          <span className="font-semibold text-foreground">
+                            {formatETB(promo.minOrderAmount)}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-border/50 flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-success inline-flex items-center gap-1">
+                      <span className="size-1.5 rounded-full bg-success animate-pulse" aria-hidden />
+                      Active offer
+                    </span>
+                    <Button
+                      asChild
+                      size="sm"
+                      className="rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shrink-0 gap-1.5 shadow-xs"
+                    >
+                      <Link to="/menu">
+                        Order Now
+                        <ArrowRight className="size-3.5" aria-hidden />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Section>
 
       {/* ----------------------------------------------------------------------

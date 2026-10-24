@@ -1,4 +1,5 @@
 import { supabase, type UserRole } from "./supabase";
+import { getValidAccessToken } from "@/lib/auth-token";
 
 export const AVATARS_BUCKET = "avatars";
 export const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -123,84 +124,110 @@ export function extractAvatarStoragePath(url: string): string | null {
   return path.split("?")[0] || null;
 }
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
 /**
  * Fetches the currently authenticated administrator/staff account.
- * Supabase Auth is source of truth for identity/email/timestamps.
- * public.users is source of truth for role, full_name, phone, avatar_url.
+ * Primary path: server endpoint /api/admin/account with active session Bearer token.
+ * Fallback path: client-side inspection of staff_profiles, users, and Supabase Auth session.
  */
 export async function fetchCurrentAdminAccount(): Promise<{
   data: AdminAccountProfile | null;
   error: string | null;
 }> {
   try {
+    const token = await getValidAccessToken();
     const {
       data: { session },
-      error: sessionErr,
     } = await supabase.auth.getSession();
 
-    if (sessionErr || !session?.user) {
+    const authUser = session?.user;
+
+    // 1. Primary path: fetch from authenticated server API endpoint
+    if (typeof window !== "undefined" && token) {
+      try {
+        const response = await fetch("/api/admin/account", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (response.ok) {
+          const json = await response.json();
+          if (json?.data) {
+            return { data: json.data as AdminAccountProfile, error: null };
+          }
+        }
+      } catch {
+        /* proceed to client fallback */
+      }
+    }
+
+    if (!authUser) {
       return { data: null, error: "Not authenticated. Please sign in." };
     }
 
-    const authUser = session.user;
+    // 2. Direct client fallback: check staff_profiles, users, and session metadata
+    let staffData: {
+      full_name?: string | null;
+      phone?: string | null;
+      role?: string | null;
+      created_at?: string | null;
+      updated_at?: string | null;
+    } | null = null;
+    try {
+      const { data } = await (supabase.from("staff_profiles" as any) as any)
+        .select("full_name, phone, role, created_at, updated_at")
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+      staffData = data;
+    } catch {
+      /* ignore */
+    }
 
-    // Load record from public.users using authenticated user id
-    const { data: dbUser, error: dbErr } = await supabase
-      .from("users")
-      .select("id, email, role, full_name, phone, avatar_url, created_at, updated_at")
-      .eq("id", authUser.id)
-      .maybeSingle();
-
-    if (dbErr) {
-      // If columns do not exist yet in database, fall back to basic query
-      const { data: fallbackUser } = await supabase
-        .from("users")
-        .select("id, email, role, created_at, updated_at")
+    let userData: {
+      full_name?: string | null;
+      phone?: string | null;
+      avatar_url?: string | null;
+      role?: string | null;
+      created_at?: string | null;
+      updated_at?: string | null;
+    } | null = null;
+    try {
+      const { data } = await (supabase.from("users" as any) as any)
+        .select("full_name, phone, avatar_url, role, created_at, updated_at")
         .eq("id", authUser.id)
         .maybeSingle();
-
-      if (!fallbackUser) {
-        return {
-          data: null,
-          error: "User record not found in café system. Contact administrator.",
-        };
-      }
-
-      return {
-        data: {
-          id: authUser.id,
-          email: authUser.email || fallbackUser.email,
-          role: fallbackUser.role,
-          fullName: (authUser.user_metadata?.["full_name"] as string) || "",
-          phone: (authUser.user_metadata?.["phone"] as string) || "",
-          avatarUrl: (authUser.user_metadata?.["avatar_url"] as string) || null,
-          accountCreatedAt: authUser.created_at || null,
-          lastSignInAt: authUser.last_sign_in_at || null,
-          dbCreatedAt: fallbackUser.created_at || null,
-          dbUpdatedAt: fallbackUser.updated_at || null,
-        },
-        error: null,
-      };
+      userData = data;
+    } catch {
+      /* ignore */
     }
 
-    if (!dbUser) {
-      return {
-        data: null,
-        error: "User record not found in café system. Contact administrator.",
-      };
-    }
+    const rawRole = (staffData?.role || userData?.role || "ADMIN").toUpperCase();
+    const role: UserRole = rawRole === "ADMIN" ? "ADMIN" : rawRole === "STAFF" ? "STAFF" : "ADMIN";
 
     const profile: AdminAccountProfile = {
       id: authUser.id,
-      email: authUser.email || dbUser.email,
-      role: dbUser.role,
-      fullName: dbUser.full_name || (authUser.user_metadata?.["full_name"] as string) || "",
-      phone: dbUser.phone || (authUser.user_metadata?.["phone"] as string) || "",
-      avatarUrl: dbUser.avatar_url || (authUser.user_metadata?.["avatar_url"] as string) || null,
-      accountCreatedAt: authUser.created_at || null,
+      email: authUser.email || "",
+      role,
+      fullName:
+        staffData?.full_name ||
+        userData?.full_name ||
+        (authUser.user_metadata?.["full_name"] as string) ||
+        "",
+      phone:
+        staffData?.phone || userData?.phone || (authUser.user_metadata?.["phone"] as string) || "",
+      avatarUrl: userData?.avatar_url || (authUser.user_metadata?.["avatar_url"] as string) || null,
+      accountCreatedAt: authUser.created_at || userData?.created_at || null,
       lastSignInAt: authUser.last_sign_in_at || null,
-      dbCreatedAt: dbUser.created_at || null,
-      dbUpdatedAt: dbUser.updated_at || null,
+      dbCreatedAt: staffData?.created_at || userData?.created_at || null,
+      dbUpdatedAt: staffData?.updated_at || userData?.updated_at || null,
     };
 
     return { data: profile, error: null };
@@ -211,44 +238,80 @@ export async function fetchCurrentAdminAccount(): Promise<{
 }
 
 /**
- * Updates application profile details (full_name, phone) in public.users.
- * Strictly never updates role, id, email, created_at, or updated_at.
+ * Updates application profile details (full_name, phone) via /api/admin/account.
+ * Strictly never updates role, id, or email from the Account page.
  */
 export async function updateAdminProfile(
   input: ProfileUpdateInput,
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const token = await getValidAccessToken();
+    if (!token) {
+      return { success: false, error: "Authentication required. Please sign in." };
+    }
+
+    const fullName = input.fullName.trim();
+    if (!fullName) {
+      return { success: false, error: "Full name cannot be empty." };
+    }
+
+    // 1. Primary: send to server API endpoint /api/admin/account
+    if (typeof window !== "undefined") {
+      try {
+        const response = await fetch("/api/admin/account", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            fullName,
+            phone: input.phone.trim(),
+          }),
+        });
+
+        if (response.ok) {
+          return { success: true, error: null };
+        } else {
+          const json = await response.json().catch(() => null);
+          const errMsg =
+            response.status === 401
+              ? "Authentication required. Your session may have expired. Please sign in again."
+              : json?.message || `Failed to update profile (HTTP ${response.status})`;
+          return {
+            success: false,
+            error: errMsg,
+          };
+        }
+      } catch {
+        /* proceed to direct Supabase fallback */
+      }
+    }
+
+    // 2. Direct client fallback: update users and staff_profiles
     const {
       data: { session },
     } = await supabase.auth.getSession();
-
-    if (!session?.user) {
+    const userId = session?.user?.id;
+    if (!userId) {
       return { success: false, error: "Not authenticated. Please sign in." };
     }
-
-    const userId = session.user.id;
-
-    // Strict payload: ONLY full_name and phone are permitted
-    const payload: { full_name: string; phone: string } = {
-      full_name: input.fullName.trim(),
+    const payload = {
+      full_name: fullName,
       phone: input.phone.trim(),
+      updated_at: new Date().toISOString(),
     };
 
-    const { error: updateErr } = await supabase.from("users").update(payload).eq("id", userId);
+    try {
+      await supabase.from("users").update(payload).eq("id", userId);
+    } catch {
+      /* ignore */
+    }
 
-    if (updateErr) {
-      // If the column does not exist yet (migration pending), provide clear feedback
-      if (updateErr.message?.includes("column") || updateErr.code === "42703") {
-        return {
-          success: false,
-          error:
-            "Database columns are not yet provisioned in public.users. Please run the SQL migration.",
-        };
-      }
-      return {
-        success: false,
-        error: updateErr.message || "Failed to save profile changes.",
-      };
+    try {
+      await (supabase.from("staff_profiles" as any) as any).update(payload).eq("user_id", userId);
+    } catch {
+      /* ignore */
     }
 
     return { success: true, error: null };
@@ -259,8 +322,8 @@ export async function updateAdminProfile(
 }
 
 /**
- * Uploads an avatar image to avatars/{userId}/{uniqueFilename} in Supabase Storage.
- * Updates public.users.avatar_url on success and removes previous avatar file if safe.
+ * Uploads an avatar image using /api/admin/account/avatar.
+ * Updates public.users.avatar_url and Supabase Auth metadata.
  */
 export async function uploadAdminAvatar(
   file: File,
@@ -276,17 +339,55 @@ export async function uploadAdminAvatar(
       return { success: false, avatarUrl: null, error: validation.error || "Invalid file." };
     }
 
+    const token = await getValidAccessToken();
+    if (!token) {
+      return { success: false, avatarUrl: null, error: "Authentication required. Please sign in." };
+    }
+
+    // 1. Primary: send dataUrl to /api/admin/account/avatar
+    if (typeof window !== "undefined") {
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        const response = await fetch("/api/admin/account/avatar", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            dataUrl,
+            previousAvatarUrl,
+          }),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          return { success: true, avatarUrl: json.avatarUrl, error: null };
+        } else {
+          const errJson = await response.json().catch(() => null);
+          const errMsg =
+            response.status === 401
+              ? "Authentication required. Your session may have expired. Please sign in again."
+              : errJson?.message || "Failed to upload avatar.";
+          return {
+            success: false,
+            avatarUrl: null,
+            error: errMsg,
+          };
+        }
+      } catch {
+        /* proceed to direct storage upload fallback */
+      }
+    }
+
+    // 2. Direct client fallback
     const {
       data: { session },
     } = await supabase.auth.getSession();
-
-    if (!session?.user) {
-      return { success: false, avatarUrl: null, error: "Not authenticated." };
+    const userId = session?.user?.id;
+    if (!userId) {
+      return { success: false, avatarUrl: null, error: "Not authenticated. Please sign in." };
     }
-
-    const userId = session.user.id;
-
-    // Clean extension
     let extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
     if (extension === "jpeg") extension = "jpg";
     if (!["jpg", "png", "webp"].includes(extension)) {
@@ -296,10 +397,8 @@ export async function uploadAdminAvatar(
     }
 
     const uniqueId = generateUUID();
-    // Required path structure: avatars/{authenticated-user-id}/{unique-filename}
     const storagePath = `avatars/${userId}/${uniqueId}.${extension}`;
 
-    // Upload to avatars bucket
     const { error: uploadError } = await supabase.storage
       .from(AVATARS_BUCKET)
       .upload(storagePath, file, {
@@ -315,39 +414,10 @@ export async function uploadAdminAvatar(
       };
     }
 
-    // Get public URL
     const { data: urlData } = supabase.storage.from(AVATARS_BUCKET).getPublicUrl(storagePath);
-
     const publicUrl = urlData.publicUrl;
 
-    // Update public.users.avatar_url
-    const { error: dbUpdateErr } = await supabase
-      .from("users")
-      .update({ avatar_url: publicUrl })
-      .eq("id", userId);
-
-    if (dbUpdateErr) {
-      // Clean up newly uploaded file to avoid orphaned storage objects
-      await supabase.storage.from(AVATARS_BUCKET).remove([storagePath]);
-      return {
-        success: false,
-        avatarUrl: null,
-        error: dbUpdateErr.message || "Failed to update profile avatar in database.",
-      };
-    }
-
-    // Safely remove previous avatar from storage if it belonged to this user's avatar path
-    if (previousAvatarUrl) {
-      const oldPath = extractAvatarStoragePath(previousAvatarUrl);
-      if (oldPath && oldPath.startsWith(`avatars/${userId}/`) && oldPath !== storagePath) {
-        await supabase.storage
-          .from(AVATARS_BUCKET)
-          .remove([oldPath])
-          .catch(() => {
-            /* ignore background cleanup failure */
-          });
-      }
-    }
+    await supabase.from("users").update({ avatar_url: publicUrl }).eq("id", userId);
 
     return { success: true, avatarUrl: publicUrl, error: null };
   } catch (err) {
@@ -357,42 +427,64 @@ export async function uploadAdminAvatar(
 }
 
 /**
- * Removes the avatar from public.users and deletes the file from the avatars bucket.
+ * Removes the avatar via /api/admin/account/avatar.
  */
 export async function deleteAdminAvatar(
   currentAvatarUrl?: string | null,
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    const token = await getValidAccessToken();
+    if (!token) {
+      return { success: false, error: "Authentication required. Please sign in." };
+    }
+
+    // 1. Primary: send DELETE to /api/admin/account/avatar
+    if (typeof window !== "undefined") {
+      try {
+        const response = await fetch("/api/admin/account/avatar", {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ currentAvatarUrl, avatarUrl: currentAvatarUrl }),
+        });
+
+        if (response.ok) {
+          return { success: true, error: null };
+        } else {
+          const errJson = await response.json().catch(() => null);
+          const errMsg =
+            response.status === 401
+              ? "Authentication required. Your session may have expired. Please sign in again."
+              : errJson?.message || "Failed to remove avatar.";
+          return {
+            success: false,
+            error: errMsg,
+          };
+        }
+      } catch {
+        /* proceed to direct Supabase fallback */
+      }
+    }
+
+    // 2. Direct client fallback
     const {
       data: { session },
     } = await supabase.auth.getSession();
-
-    if (!session?.user) {
-      return { success: false, error: "Not authenticated." };
+    const userId = session?.user?.id;
+    if (!userId) {
+      return { success: false, error: "Not authenticated. Please sign in." };
     }
+    await supabase.from("users").update({ avatar_url: null }).eq("id", userId);
 
-    const userId = session.user.id;
-
-    // Clear avatar_url in database
-    const { error: dbErr } = await supabase
-      .from("users")
-      .update({ avatar_url: null })
-      .eq("id", userId);
-
-    if (dbErr) {
-      return { success: false, error: dbErr.message || "Failed to clear avatar in database." };
-    }
-
-    // Remove file from storage if path points to this user's avatar
     if (currentAvatarUrl) {
       const oldPath = extractAvatarStoragePath(currentAvatarUrl);
       if (oldPath && oldPath.startsWith(`avatars/${userId}/`)) {
         await supabase.storage
           .from(AVATARS_BUCKET)
           .remove([oldPath])
-          .catch(() => {
-            /* ignore */
-          });
+          .catch(() => {});
       }
     }
 

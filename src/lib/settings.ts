@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { getAuthHeaders, getValidAccessToken } from "@/lib/auth-token";
 import type { DeliveryRoundingRule } from "./distance";
 
 export type ThemePreference = "light" | "dark" | "system";
@@ -27,7 +28,7 @@ export type NebaSettings = {
 };
 
 export type StoreSettingsRow = {
-  id: number;
+  id: string | number;
   cafe_name: string | null;
   phone: string | null;
   email: string | null;
@@ -319,38 +320,59 @@ const STORE_SETTINGS_COLUMNS =
   "id, cafe_name, phone, email, address, opening_hours, delivery_fee, cafe_latitude, cafe_longitude, price_per_km, min_delivery_fee, max_delivery_distance_km, delivery_enabled, rounding_rule, updated_at";
 
 /**
- * Fetches the singleton store settings row (id = 1) from Supabase public.store_settings.
- * If no record exists yet, returns default settings without inserting anything.
+ * Fetches store settings from the server API (/api/settings) which accesses public.store_settings.
  * Merges with local browser preferences (theme, showToasts).
+ * Falls back to direct Supabase client query or defaults gracefully.
  */
 export async function fetchStoreSettings(): Promise<{
   data: NebaSettings | null;
   error: Error | null;
 }> {
   try {
+    // 1. Primary: fetch via server API endpoint /api/settings
+    if (typeof window !== "undefined") {
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetch("/api/settings", {
+          credentials: "same-origin",
+          headers,
+        });
+        if (response.ok) {
+          const raw = await response.json();
+          const localPrefs = readSettings();
+          const settings = normalizeStoreSettings(raw, localPrefs);
+          return { data: settings, error: null };
+        }
+      } catch {
+        /* proceed to direct Supabase query fallback */
+      }
+    }
+
+    // 2. Fallback: query Supabase public.store_settings singleton row
     const { data, error } = await (supabase.from("store_settings" as any) as any)
       .select(STORE_SETTINGS_COLUMNS)
-      .eq("id", 1)
+      .limit(1)
       .maybeSingle();
 
     if (error) {
-      return { data: null, error: new Error(error.message) };
+      console.warn("[settings] Direct store_settings query error:", error.message);
     }
 
     const localPrefs = readSettings();
     const settings = normalizeStoreSettings(data, localPrefs);
     return { data: settings, error: null };
   } catch (err: any) {
+    console.error("[settings] Failed to load store settings:", err);
     return {
-      data: null,
-      error: err instanceof Error ? err : new Error("Failed to load store settings"),
+      data: normalizeStoreSettings(null, readSettings()),
+      error: null,
     };
   }
 }
 
 /**
- * Upserts the singleton store settings row (id = 1) in Supabase public.store_settings.
- * Persists business fields to the database and saves browser preferences locally.
+ * Persists store settings via server API (/api/settings) with active admin Bearer token.
+ * Persists business fields to Supabase and saves browser preferences locally.
  */
 export async function updateStoreSettings(settings: NebaSettings): Promise<{
   data: NebaSettings | null;
@@ -361,46 +383,115 @@ export async function updateStoreSettings(settings: NebaSettings): Promise<{
     const safeDeliveryFee = isNaN(deliveryFeeNum) || deliveryFeeNum < 0 ? 0 : deliveryFeeNum;
 
     const payload = {
-      id: 1,
-      cafe_name: settings.cafeName.trim() || DEFAULT_SETTINGS.cafeName,
+      cafeName: settings.cafeName.trim() || DEFAULT_SETTINGS.cafeName,
       phone: settings.phone.trim() || DEFAULT_SETTINGS.phone,
       email: settings.email.trim() || DEFAULT_SETTINGS.email,
       address: settings.address.trim() || DEFAULT_SETTINGS.address,
-      opening_hours: settings.openingHours.trim() || DEFAULT_SETTINGS.openingHours,
-      delivery_fee: safeDeliveryFee,
-      cafe_latitude:
+      openingHours: settings.openingHours.trim() || DEFAULT_SETTINGS.openingHours,
+      deliveryFee: safeDeliveryFee,
+      cafeLatitude:
         settings.cafeLatitude !== null && !isNaN(Number(settings.cafeLatitude))
           ? Number(settings.cafeLatitude)
           : null,
-      cafe_longitude:
+      cafeLongitude:
         settings.cafeLongitude !== null && !isNaN(Number(settings.cafeLongitude))
           ? Number(settings.cafeLongitude)
           : null,
-      price_per_km: Math.max(0, Number(settings.pricePerKm) || 0),
-      min_delivery_fee: Math.max(0, Number(settings.minDeliveryFee) || 0),
-      max_delivery_distance_km: Math.max(0.1, Number(settings.maxDeliveryDistanceKm) || 15),
-      delivery_enabled: Boolean(settings.deliveryEnabled),
-      rounding_rule: settings.roundingRule || "nearest_5",
+      pricePerKm: Math.max(0, Number(settings.pricePerKm) || 0),
+      minDeliveryFee: Math.max(0, Number(settings.minDeliveryFee) || 0),
+      maxDeliveryDistanceKm: Math.max(0.1, Number(settings.maxDeliveryDistanceKm) || 15),
+      deliveryEnabled: Boolean(settings.deliveryEnabled),
+      roundingRule: settings.roundingRule || "nearest_5",
+    };
+
+    // 1. Primary: send via authenticated server API /api/settings
+    if (typeof window !== "undefined") {
+      const token = await getValidAccessToken();
+      if (!token) {
+        return {
+          data: null,
+          error: new Error("Authentication required. Please sign in as an administrator."),
+        };
+      }
+
+      const headers = await getAuthHeaders({
+        "Content-Type": "application/json",
+      });
+
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        const savedData = await response.json();
+        // Save browser workspace preferences locally
+        writeSettings(settings);
+
+        const updated = normalizeStoreSettings(savedData, {
+          theme: settings.theme,
+          showToasts: settings.showToasts,
+        });
+
+        return { data: updated, error: null };
+      } else {
+        const errPayload = await response.json().catch(() => null);
+        const errMsg =
+          response.status === 401
+            ? "Authentication required. Your session may have expired. Please sign in again."
+            : errPayload?.message || `Failed to save settings (HTTP ${response.status})`;
+        return { data: null, error: new Error(errMsg) };
+      }
+    }
+
+    // 2. Server/non-browser fallback: direct Supabase query with singleton row
+    const dbPayload = {
+      cafe_name: payload.cafeName,
+      phone: payload.phone,
+      email: payload.email,
+      address: payload.address,
+      opening_hours: payload.openingHours,
+      delivery_fee: payload.deliveryFee,
+      cafe_latitude: payload.cafeLatitude,
+      cafe_longitude: payload.cafeLongitude,
+      price_per_km: payload.pricePerKm,
+      min_delivery_fee: payload.minDeliveryFee,
+      max_delivery_distance_km: payload.maxDeliveryDistanceKm,
+      delivery_enabled: payload.deliveryEnabled,
+      rounding_rule: payload.roundingRule,
       updated_at: new Date().toISOString(),
     };
 
-    const { data, error } = await (supabase.from("store_settings" as any) as any)
-      .upsert(payload, { onConflict: "id" })
-      .select(STORE_SETTINGS_COLUMNS)
-      .single();
+    const { data: existing } = await (supabase.from("store_settings" as any) as any)
+      .select("id")
+      .limit(1)
+      .maybeSingle();
 
+    let query;
+    if (existing?.id) {
+      query = (supabase.from("store_settings" as any) as any)
+        .update(dbPayload)
+        .eq("id", existing.id)
+        .select(STORE_SETTINGS_COLUMNS)
+        .single();
+    } else {
+      query = (supabase.from("store_settings" as any) as any)
+        .insert(dbPayload)
+        .select(STORE_SETTINGS_COLUMNS)
+        .single();
+    }
+
+    const { data, error } = await query;
     if (error) {
       return { data: null, error: new Error(error.message) };
     }
 
-    // Save browser workspace preferences locally
     writeSettings(settings);
-
     const updated = normalizeStoreSettings(data, {
       theme: settings.theme,
       showToasts: settings.showToasts,
     });
-
     return { data: updated, error: null };
   } catch (err: any) {
     return {

@@ -60,6 +60,9 @@ function apiDevMiddleware(): Plugin {
       const root = server.config?.root ?? process.cwd();
       loadEnvIntoProcess(root);
 
+      // Watch src/server directory for immediate HMR/reloads
+      server.watcher.add(path.resolve(root, "src/server"));
+
       const middleware: import("vite").Connect.NextHandleFunction = async (req, res, next) => {
         const url = req.url ?? "";
         if (!url.startsWith("/api/") && url !== "/api") {
@@ -67,7 +70,25 @@ function apiDevMiddleware(): Plugin {
         }
 
         try {
-          const apiModule = await server.ssrLoadModule("/src/server/api.ts");
+          const apiFilePath = path.resolve(root, "src/server/api.ts");
+          // Invalidate module graph entries for server modules so changes take effect immediately
+          if (server.moduleGraph) {
+            for (const [, mod] of server.moduleGraph.idToModuleMap) {
+              if (
+                mod.id &&
+                (mod.id.includes("src/server") ||
+                  mod.id.includes("src\\server") ||
+                  mod.id.includes("server/api") ||
+                  mod.id.includes("server/staff") ||
+                  mod.id.includes("server/cashier") ||
+                  mod.id.includes("server/waiter"))
+              ) {
+                server.moduleGraph.invalidateModule(mod);
+              }
+            }
+          }
+
+          const apiModule = await server.ssrLoadModule(apiFilePath);
           const { handleApiRequest } = apiModule;
           if (typeof handleApiRequest !== "function") {
             return next();
@@ -135,11 +156,9 @@ function apiDevMiddleware(): Plugin {
   };
 }
 
-const nitroPreset =
-  process.env["NITRO_PRESET"] || (process.env["VERCEL"] ? "vercel" : undefined);
+const nitroPreset = process.env["NITRO_PRESET"] || (process.env["VERCEL"] ? "vercel" : undefined);
 
 export default defineConfig({
-  plugins: [apiDevMiddleware()],
   vite: {
     plugins: [apiDevMiddleware()],
     // Restrict client-side exposed env vars so SUPABASE_SERVICE_ROLE_KEY is never leaked to client bundles

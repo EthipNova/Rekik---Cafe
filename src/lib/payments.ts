@@ -75,7 +75,7 @@ export type PaymentSummaryMetrics = {
  * Normalizes raw relational response from Supabase/PostgREST
  * to handle single-object or array relation shapes safely.
  */
-function normalizePaymentRecord(raw: any): PaymentRecord {
+export function normalizePaymentRecord(raw: any): PaymentRecord {
   const orderRaw = Array.isArray(raw.orders) ? raw.orders[0] : raw.orders;
   let normalizedOrder: PaymentOrder | null = null;
 
@@ -211,6 +211,31 @@ export async function fetchAdminPayments(): Promise<{
       `,
       )
       .order("created_at", { ascending: false });
+
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const records = data.map(normalizePaymentRecord);
+      return { data: records, error: null };
+    }
+
+    // Fallback: If direct client query returns 0 rows (due to restrictive RLS) or error,
+    // fetch through authorized backend API endpoint /api/admin/payments
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const res = await fetch("/api/admin/payments", { headers });
+      if (res.ok) {
+        const apiData = await res.json();
+        if (Array.isArray(apiData) && apiData.length > 0) {
+          const records = apiData.map(normalizePaymentRecord);
+          return { data: records, error: null };
+        }
+      }
+    } catch (apiErr) {
+      console.warn("[payments] Fallback to /api/admin/payments failed:", apiErr);
+    }
 
     if (error) {
       return { data: null, error: new Error(error.message) };

@@ -20,24 +20,71 @@ export type CashierMeResult =
   | { success: false; status: "role_mismatch"; role: string; message: string };
 
 /**
+ * Extracts Supabase access token from Authorization header or cookie fallback.
+ */
+function extractTokenFromRequest(request: Request): string | null {
+  const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
+  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+    return authHeader.replace(/^Bearer\s+/i, "").trim();
+  }
+
+  const cookieHeader = request.headers.get("cookie") || request.headers.get("Cookie");
+  if (cookieHeader) {
+    const cookies = cookieHeader.split(";").map((c) => c.trim());
+    for (const cookie of cookies) {
+      const [name, ...rest] = cookie.split("=");
+      if (!name) continue;
+      const val = decodeURIComponent(rest.join("="));
+      if (!val) continue;
+
+      if (name.startsWith("sb-") && name.endsWith("-auth-token")) {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed) && parsed[0]) return parsed[0];
+          if (parsed.access_token) return parsed.access_token;
+        } catch {
+          if (val.startsWith("base64-")) {
+            try {
+              const decoded = Buffer.from(val.replace("base64-", ""), "base64").toString("utf-8");
+              const parsed = JSON.parse(decoded);
+              if (parsed.access_token) return parsed.access_token;
+            } catch {
+              /* ignore decode error */
+            }
+          }
+        }
+      } else if (name === "sb-access-token" || name === "supabase-auth-token") {
+        return val;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Resolves the authenticated user's staff status for /api/cashier/me
  * Distinguishes between cashier, admin, waiter, inactive, or no staff profile.
  */
 export async function resolveCashierMe(request: Request): Promise<CashierMeResult> {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const token = extractTokenFromRequest(request);
+  if (!token) {
     return { success: false, status: "unauthenticated", message: "Sign in is required." };
   }
 
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  if (!token) {
-    return { success: false, status: "unauthenticated", message: "Missing token." };
-  }
+  let user = null;
+  let userErr = null;
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser(token);
+  if (serverSupabase?.auth) {
+    const res = await serverSupabase.auth.getUser(token);
+    user = res.data?.user;
+    userErr = res.error;
+  }
+  if (!user && supabase?.auth) {
+    const res = await supabase.auth.getUser(token);
+    user = res.data?.user;
+    userErr = res.error || userErr;
+  }
 
   if (userErr || !user || !user.id) {
     return { success: false, status: "unauthenticated", message: "Invalid or expired session." };
@@ -88,12 +135,15 @@ export async function resolveCashierMe(request: Request): Promise<CashierMeResul
     updated_at: staffRow.updated_at,
   };
 
-  if (role !== "cashier" && role !== "admin") {
+  if (role !== "cashier") {
     return {
       success: false,
       status: "role_mismatch",
       role,
-      message: `Access denied. Users with '${staffRow.role}' role cannot access the Cashier dashboard.`,
+      message:
+        role === "admin"
+          ? "This account has Administrator privileges. Cashier dashboard is for cashier staff."
+          : `Access denied. Users with '${staffRow.role}' role cannot access the Cashier dashboard.`,
     };
   }
 
@@ -103,18 +153,17 @@ export async function resolveCashierMe(request: Request): Promise<CashierMeResul
 /**
  * Validates request Bearer token against Supabase Auth,
  * looks up the staff profile in staff_profiles,
- * and asserts that the user is an active cashier (or admin supervisor).
- * Throws an Error if unauthorized.
+ * and asserts that the user is an active cashier.
+ * Throws an Error if unauthorized or forbidden.
  */
 export async function authenticateCashier(request: Request): Promise<{
   profile: CashierStaffProfile;
   token: string;
 }> {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const token = extractTokenFromRequest(request);
+  if (!token) {
     throw new Error("UNAUTHORIZED: Missing or malformed authorization header.");
   }
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
 
   const meResult = await resolveCashierMe(request);
   if (!meResult.success) {

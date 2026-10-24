@@ -242,6 +242,8 @@ function AdminSettings() {
           description: "Store settings saved to Supabase and preferences updated.",
         });
       }
+      // Reload persisted values from database to confirm update
+      void loadData();
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : "An unexpected error occurred while saving";
       toast.error(msg);

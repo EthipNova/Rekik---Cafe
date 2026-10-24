@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { DEFAULT_ABOUT_CONTENT, type AboutContent } from "@/lib/content";
+import { DEFAULT_ABOUT_CONTENT, isValidUUID, type AboutContent } from "@/lib/content";
 import { uploadSiteImage, validateSiteImageFile, type SiteImageCategory } from "@/lib/site-images";
 import { fetchAboutContent, updateAboutContent } from "@/services/api";
 
@@ -369,9 +369,15 @@ function AdminContentPage() {
       return;
     }
 
+    if (form.id && !isValidUUID(form.id)) {
+      toast.error(`Invalid content record ID: "${form.id}". A valid UUID is required.`);
+      return;
+    }
+
     setIsSaving(true);
     try {
       const payload: Partial<AboutContent> = {
+        id: form.id,
         homepage_hero_image: form.homepage_hero_image?.trim() || null,
         about_hero_image: form.about_hero_image?.trim() || null,
         about_title: form.about_title.trim(),

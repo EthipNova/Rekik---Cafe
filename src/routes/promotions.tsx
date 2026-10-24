@@ -104,7 +104,11 @@ function PromotionProductCard({
 }
 
 function PromotionsPage() {
-  const { promotions, products, categories } = Route.useLoaderData();
+  const { promotions, products, categories } = Route.useLoaderData() as {
+    promotions: Promotion[];
+    products: Product[];
+    categories: Category[];
+  };
 
   // 1. Build lookup map for products
   const productById = useMemo(() => {

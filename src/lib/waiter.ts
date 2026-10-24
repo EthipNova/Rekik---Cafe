@@ -262,6 +262,22 @@ export async function fetchAvailableWaiters(): Promise<AvailableWaiterClient[]> 
   }
 }
 
+/**
+ * Authoritatively determines whether a waiter order is completed / settled.
+ * In Rekik Café, orders are completed if their status is 'completed' or 'delivered',
+ * or if they are confirmed/approved with verified 'paid' payment status.
+ */
+export function isWaiterOrderCompleted(order: WaiterOrder): boolean {
+  if (order.status === "completed" || order.status === "delivered") {
+    return true;
+  }
+  const isPaid = Array.isArray(order.payments) && order.payments.some((p) => p.status === "paid");
+  if (isPaid && (order.status === "confirmed" || order.waiterDecision === "approved")) {
+    return true;
+  }
+  return false;
+}
+
 /* ==========================================================================
    Display and Badge Helpers
    ========================================================================== */

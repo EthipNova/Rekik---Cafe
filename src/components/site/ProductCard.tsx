@@ -5,9 +5,22 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useCart } from "@/lib/cart";
 import { formatETB, type Product } from "@/lib/menu-data";
+import { calculateDiscountedPrice, formatDiscount, type Promotion } from "@/lib/promotions";
 
-export function ProductCard({ product }: { product: Product }) {
+export function ProductCard({
+  product,
+  promotion,
+}: {
+  product: Product;
+  promotion?: Promotion | null;
+}) {
   const { add } = useCart();
+
+  const originalPrice = Number(product.price) || 0;
+  const discountedPrice = promotion
+    ? calculateDiscountedPrice(originalPrice, promotion.discountType, promotion.discountValue)
+    : originalPrice;
+  const hasDiscount = discountedPrice < originalPrice;
 
   return (
     <article className="group surface-card hover-lift flex flex-col overflow-hidden border border-border/80 bg-card rounded-2xl transition-all duration-300 hover:border-gold/50 hover:shadow-md">
@@ -27,6 +40,11 @@ export function ProductCard({ product }: { product: Product }) {
         {product.featured && (
           <span className="absolute top-2.5 left-2.5 rounded-full bg-gold/95 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-espresso shadow-xs">
             Signature
+          </span>
+        )}
+        {hasDiscount && (
+          <span className="absolute top-2.5 right-2.5 rounded-full bg-primary px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary-foreground shadow-sm">
+            {formatDiscount(promotion!)}
           </span>
         )}
         {!product.available && (
@@ -50,9 +68,16 @@ export function ProductCard({ product }: { product: Product }) {
                 {product.name}
               </Link>
             </h3>
-            <span className="whitespace-nowrap text-sm font-bold text-primary font-display sm:text-base">
-              {formatETB(product.price)}
-            </span>
+            <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+              <span className="text-sm font-bold text-primary font-display sm:text-base">
+                {formatETB(discountedPrice)}
+              </span>
+              {hasDiscount && (
+                <span className="text-xs text-muted-foreground line-through">
+                  {formatETB(originalPrice)}
+                </span>
+              )}
+            </div>
           </div>
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground sm:mt-1.5 sm:text-sm leading-relaxed">
             {product.description}

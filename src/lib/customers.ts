@@ -36,7 +36,7 @@ export async function fetchAdminCustomers(): Promise<{
       return {
         data: null,
         error: new Error(
-          (body as any)?.message || `GET /api/customers returned HTTP ${response.status}`,
+          (body as any)?.error || (body as any)?.message || `GET /api/customers returned HTTP ${response.status}`,
         ),
       };
     }
@@ -267,9 +267,16 @@ function normalizeCustomerOrder(rawCustomer: any, rawOrder: any): Order {
  */
 function normalizeCustomerRecord(rawCustomer: any): DerivedCustomer {
   const rawOrders = Array.isArray(rawCustomer.orders) ? rawCustomer.orders : [];
+  const seenOrderIds = new Set<string>();
+  const deduplicatedRawOrders = rawOrders.filter((o: any) => {
+    if (!o || !o.id) return false;
+    if (seenOrderIds.has(o.id)) return false;
+    seenOrderIds.add(o.id);
+    return true;
+  });
 
   // Normalize each order and sort newest first
-  const normalizedOrders: Order[] = rawOrders
+  const normalizedOrders: Order[] = deduplicatedRawOrders
     .map((o: any) => normalizeCustomerOrder(rawCustomer, o))
     .sort((a: Order, b: Order) => {
       const timeA = new Date(a.createdAt || 0).getTime() || 0;

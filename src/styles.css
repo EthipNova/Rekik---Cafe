@@ -175,6 +175,105 @@
   --gold-deep: #B8872F;
 }
 
+/* ============================================================================
+ * Rekik Café Admin Theme — Professional Brown-and-White Palette
+ * Strictly scoped to admin pages (.admin-theme) so customer site is untouched.
+ * ============================================================================ */
+.admin-theme {
+  --radius: 0.75rem;
+
+  /* Warm white background #FAF8F5, Pure White Cards #FFFFFF, Main Text #2D2522 */
+  --background: #faf8f5;
+  --foreground: #2d2522;
+  --card: #ffffff;
+  --card-foreground: #2d2522;
+  --popover: #ffffff;
+  --popover-foreground: #2d2522;
+
+  /* Primary Dark Brown: #4E342E, White Text */
+  --primary: #4e342e;
+  --primary-foreground: #ffffff;
+
+  /* Secondary Brown: #795548, Soft Warm Beige for secondary buttons/elements */
+  --secondary: #f0e8e2;
+  --secondary-foreground: #2d2522;
+
+  /* Muted & Secondary Text: #756B66 */
+  --muted: #f0e8e2;
+  --muted-foreground: #756b66;
+
+  /* Hover & Accent: #F0E8E2 */
+  --accent: #f0e8e2;
+  --accent-foreground: #2d2522;
+
+  /* Borders & Inputs: #E7DED7 */
+  --border: #e7ded7;
+  --input: #e7ded7;
+  --ring: #795548;
+
+  /* Brand Compatibility Tokens */
+  --cream: #faf8f5;
+  --espresso: #2d2522;
+  --espresso-foreground: #faf8f5;
+
+  /* Charts: Professional, coordinated brown & warm palette */
+  --chart-1: #4e342e;
+  --chart-2: #795548;
+  --chart-3: #a1887f;
+  --chart-4: #bcaaa4;
+  --chart-5: #6d4c41;
+
+  /* Admin Sidebar: Professional Dark Brown #3E2723 */
+  --sidebar: #3e2723;
+  --sidebar-foreground: #f5efeb;
+  --sidebar-primary: #795548;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #4e342e;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(231, 222, 215, 0.15);
+  --sidebar-ring: #a1887f;
+
+  /* Preserve distinct operational & semantic status colors */
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --success: #16a34a;
+  --success-foreground: #ffffff;
+  --warning: #d97706;
+  --warning-foreground: #ffffff;
+}
+
+.admin-theme.dark,
+.admin-theme .dark {
+  --background: #1c1715;
+  --foreground: #f5efeb;
+  --card: #28211e;
+  --card-foreground: #f5efeb;
+  --popover: #28211e;
+  --popover-foreground: #f5efeb;
+  --primary: #a1887f;
+  --primary-foreground: #1c1715;
+  --secondary: #362d29;
+  --secondary-foreground: #f5efeb;
+  --muted: #362d29;
+  --muted-foreground: #bcaaa4;
+  --accent: #362d29;
+  --accent-foreground: #f5efeb;
+  --border: rgba(231, 222, 215, 0.15);
+  --input: rgba(231, 222, 215, 0.15);
+  --ring: #a1887f;
+  --cream: #1c1715;
+  --espresso: #14100e;
+  --espresso-foreground: #f5efeb;
+  --sidebar: #191412;
+  --sidebar-foreground: #f5efeb;
+  --sidebar-primary: #8d6e63;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2c221f;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #8d6e63;
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;

@@ -326,9 +326,15 @@ function AdminCustomers() {
               <Users className="size-4" aria-hidden />
             </div>
           </div>
-          <p className="font-display text-2xl font-bold text-foreground">{totalCustomersCount}</p>
+          <p className="font-display text-2xl font-bold text-foreground">
+            {error ? "—" : totalCustomersCount}
+          </p>
           <p className="text-xs text-muted-foreground">
-            {totalCustomersCount === 1 ? "Customer profile" : "Customer profiles"} in database
+            {error
+              ? "Unavailable due to database error"
+              : totalCustomersCount === 1
+                ? "Customer profile in database"
+                : "Customer profiles in database"}
           </p>
         </div>
 
@@ -342,8 +348,12 @@ function AdminCustomers() {
               <UserCheck className="size-4" aria-hidden />
             </div>
           </div>
-          <p className="font-display text-2xl font-bold text-foreground">{activeCustomersCount}</p>
-          <p className="text-xs text-muted-foreground">Ordered within the last 30 days</p>
+          <p className="font-display text-2xl font-bold text-foreground">
+            {error ? "—" : activeCustomersCount}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {error ? "Unavailable due to database error" : "Ordered within the last 30 days"}
+          </p>
         </div>
 
         {/* Total Orders */}
@@ -356,8 +366,12 @@ function AdminCustomers() {
               <ShoppingBag className="size-4" aria-hidden />
             </div>
           </div>
-          <p className="font-display text-2xl font-bold text-foreground">{totalOrdersCount}</p>
-          <p className="text-xs text-muted-foreground">Recorded across all customer orders</p>
+          <p className="font-display text-2xl font-bold text-foreground">
+            {error ? "—" : totalOrdersCount}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {error ? "Unavailable due to database error" : "Recorded across all customer orders"}
+          </p>
         </div>
 
         {/* Total Customer Spending */}
@@ -371,9 +385,11 @@ function AdminCustomers() {
             </div>
           </div>
           <p className="font-display text-2xl font-bold text-foreground">
-            {formatETB(totalSpendingAmount)}
+            {error ? "—" : formatETB(totalSpendingAmount)}
           </p>
-          <p className="text-xs text-muted-foreground">Cumulative client order volume</p>
+          <p className="text-xs text-muted-foreground">
+            {error ? "Unavailable due to database error" : "Cumulative client order volume"}
+          </p>
         </div>
       </div>
 

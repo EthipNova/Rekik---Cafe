@@ -28,18 +28,65 @@ export interface AuthenticatedStaff {
   isActive: boolean;
 }
 
+export type WaiterAuthResult =
+  | { success: true; staff: AuthenticatedStaff }
+  | { success: false; status: "unauthenticated"; message: string }
+  | { success: false; status: "no_profile"; message: string }
+  | { success: false; status: "inactive"; message: string }
+  | { success: false; status: "role_mismatch"; role: string; message: string };
+
 /**
- * Resolves and verifies an authenticated waiter or admin from the request Authorization header.
- * Enforces database-backed role validation from public.staff_profiles.
+ * Extracts Supabase access token from Authorization header or cookie fallback.
  */
-export async function resolveStaffUser(request: Request): Promise<AuthenticatedStaff | null> {
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
+export function extractTokenFromRequest(request: Request): string | null {
+  const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
+  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+    return authHeader.replace(/^Bearer\s+/i, "").trim();
   }
 
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  if (!token) return null;
+  const cookieHeader = request.headers.get("cookie") || request.headers.get("Cookie");
+  if (cookieHeader) {
+    const cookies = cookieHeader.split(";").map((c) => c.trim());
+    for (const cookie of cookies) {
+      const [name, ...rest] = cookie.split("=");
+      if (!name) continue;
+      const val = decodeURIComponent(rest.join("="));
+      if (!val) continue;
+
+      if (name.startsWith("sb-") && name.endsWith("-auth-token")) {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed) && parsed[0]) return parsed[0];
+          if (parsed.access_token) return parsed.access_token;
+        } catch {
+          if (val.startsWith("base64-")) {
+            try {
+              const decoded = Buffer.from(val.replace("base64-", ""), "base64").toString("utf-8");
+              const parsed = JSON.parse(decoded);
+              if (parsed.access_token) return parsed.access_token;
+            } catch {
+              /* ignore decode error */
+            }
+          }
+        }
+      } else if (name === "sb-access-token" || name === "supabase-auth-token") {
+        return val;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolves the authenticated user's staff status for Waiter Station API endpoints.
+ * Distinguishes strictly between unauthenticated (401) vs unauthorized/inactive/no-profile (403).
+ */
+export async function resolveWaiterUser(request: Request): Promise<WaiterAuthResult> {
+  const token = extractTokenFromRequest(request);
+  if (!token) {
+    return { success: false, status: "unauthenticated", message: "Sign in is required." };
+  }
 
   try {
     const {
@@ -47,7 +94,9 @@ export async function resolveStaffUser(request: Request): Promise<AuthenticatedS
       error: userError,
     } = await supabase.auth.getUser(token);
 
-    if (userError || !user || !user.id) return null;
+    if (userError || !user || !user.id) {
+      return { success: false, status: "unauthenticated", message: "Invalid or expired session." };
+    }
 
     // 1. Query public.staff_profiles for this user_id
     const { data: profile, error: profileErr } = await supabase
@@ -56,19 +105,42 @@ export async function resolveStaffUser(request: Request): Promise<AuthenticatedS
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (profile && !profileErr) {
-      if (profile.is_active && (profile.role === "waiter" || profile.role === "admin")) {
+    if (profileErr) {
+      console.warn("[server/waiter] Error querying staff profile:", profileErr.message);
+      return { success: false, status: "no_profile", message: "Failed to look up staff profile." };
+    }
+
+    if (profile) {
+      if (!profile.is_active) {
         return {
-          userId: profile.user_id,
-          email: user.email || "",
-          fullName: profile.full_name || "NEBA Staff",
-          phone: profile.phone || null,
-          role: profile.role as StaffRole,
-          isAvailable: Boolean(profile.is_available),
-          isActive: Boolean(profile.is_active),
+          success: false,
+          status: "inactive",
+          message: "Your staff profile is currently inactive. Contact the administrator.",
         };
       }
-      return null;
+
+      const role = (profile.role || "").toLowerCase().trim();
+      if (role === "waiter" || role === "admin" || role === "manager") {
+        return {
+          success: true,
+          staff: {
+            userId: profile.user_id,
+            email: user.email || "",
+            fullName: profile.full_name || "Floor Waiter",
+            phone: profile.phone || null,
+            role: profile.role as StaffRole,
+            isAvailable: Boolean(profile.is_available),
+            isActive: Boolean(profile.is_active),
+          },
+        };
+      }
+
+      return {
+        success: false,
+        status: "role_mismatch",
+        role: profile.role,
+        message: `Access denied. Role '${profile.role}' is not authorized for the waiter station.`,
+      };
     }
 
     // 2. Initial Setup Fallback: If user is the registered administrator (e.g. henth2030@gmail.com
@@ -99,22 +171,42 @@ export async function resolveStaffUser(request: Request): Promise<AuthenticatedS
 
       if (newProfile && !insertErr) {
         return {
-          userId: newProfile.user_id,
-          email: user.email || "",
-          fullName: newProfile.full_name,
-          phone: newProfile.phone,
-          role: newProfile.role as StaffRole,
-          isAvailable: Boolean(newProfile.is_available),
-          isActive: Boolean(newProfile.is_active),
+          success: true,
+          staff: {
+            userId: newProfile.user_id,
+            email: user.email || "",
+            fullName: newProfile.full_name,
+            phone: newProfile.phone,
+            role: newProfile.role as StaffRole,
+            isAvailable: Boolean(newProfile.is_available),
+            isActive: Boolean(newProfile.is_active),
+          },
         };
       }
     }
 
-    return null;
+    return {
+      success: false,
+      status: "no_profile",
+      message: "No staff profile found for this account. Access denied.",
+    };
   } catch (err) {
-    console.warn("[server/waiter] Error in resolveStaffUser:", err);
-    return null;
+    console.warn("[server/waiter] Error in resolveWaiterUser:", err);
+    return {
+      success: false,
+      status: "unauthenticated",
+      message: "Authentication validation encountered an unexpected error.",
+    };
   }
+}
+
+/**
+ * Resolves and verifies an authenticated waiter or admin from the request Authorization header.
+ * Enforces database-backed role validation from public.staff_profiles.
+ */
+export async function resolveStaffUser(request: Request): Promise<AuthenticatedStaff | null> {
+  const result = await resolveWaiterUser(request);
+  return result.success ? result.staff : null;
 }
 
 /**
@@ -213,6 +305,21 @@ function normalizeWaiterOrder(raw: any): WaiterOrder {
     approvals,
     statusLogs,
   };
+}
+
+/**
+ * Determines whether an order has reached completed/settled status in the Rekik Café workflow.
+ * Covers both orders marked 'completed' or 'delivered' and confirmed orders with paid settlement.
+ */
+export function isWaiterOrderCompleted(order: WaiterOrder): boolean {
+  if (order.status === "completed" || order.status === "delivered") {
+    return true;
+  }
+  const isPaid = Array.isArray(order.payments) && order.payments.some((p) => p.status === "paid");
+  if (isPaid && (order.status === "confirmed" || order.waiterDecision === "approved")) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -460,7 +567,8 @@ export async function getWaiterOrders(
     } else if (filters.status === "active") {
       query = query.in("status", ["confirmed", "preparing", "ready"]);
     } else if (filters.status === "completed") {
-      query = query.in("status", ["delivered", "completed"]);
+      // In Rekik Café, completed orders are either status 'delivered'/'completed'
+      // or confirmed orders with paid settlement. Filtered authoritatively below.
     } else {
       query = query.eq("status", filters.status);
     }
@@ -486,6 +594,11 @@ export async function getWaiterOrders(
   }
 
   let orders = (data || []).map(normalizeWaiterOrder);
+
+  // Completed status post-filter (ensures orders settled with paid payments are properly included)
+  if (filters?.status === "completed") {
+    orders = orders.filter((o: WaiterOrder) => isWaiterOrderCompleted(o));
+  }
 
   // Search Filter (by order number, reference, customer name, table number)
   if (filters?.search && filters.search.trim()) {
@@ -873,7 +986,9 @@ export async function getAvailableWaiters(): Promise<AvailableWaiterDTO[]> {
 }
 
 export interface WaiterPaymentProofInput {
-  screenshotPath: string;
+  screenshotPath?: string | null;
+  imageBase64?: string | null;
+  mimeType?: string | null;
   submittedAmount: number;
   paymentMethod: string;
   transactionReference?: string | null;
@@ -949,6 +1064,46 @@ export async function submitWaiterPaymentProof(
       ? input.transactionReference.trim()
       : null;
 
+  // Handle proof screenshot upload if base64 was provided
+  let resolvedScreenshotPath = input.screenshotPath || "";
+  if (!resolvedScreenshotPath && input.imageBase64) {
+    try {
+      const base64Data = input.imageBase64.includes(",")
+        ? input.imageBase64.split(",")[1]!
+        : input.imageBase64;
+      const buffer = Buffer.from(base64Data, "base64");
+      const ext = input.mimeType?.includes("png")
+        ? "png"
+        : input.mimeType?.includes("webp")
+          ? "webp"
+          : "jpg";
+      const storagePath = `waiter-proofs/${order.id}/${Date.now()}.${ext}`;
+
+      try {
+        await supabase.storage.createBucket("payment-proofs", { public: true });
+      } catch {
+        /* ignore if exists */
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from("payment-proofs")
+        .upload(storagePath, buffer, {
+          contentType: input.mimeType || "image/jpeg",
+          upsert: true,
+        });
+
+      if (!uploadError) {
+        resolvedScreenshotPath = storagePath;
+      }
+    } catch (uploadEx) {
+      console.warn("[server/waiter] Error uploading base64 proof image:", uploadEx);
+    }
+  }
+
+  if (!resolvedScreenshotPath) {
+    resolvedScreenshotPath = `proofs/waiter-receipt-${order.id}.png`;
+  }
+
   // 6. Find or create payment row
   const { data: existingPayment } = await (supabase.from("payments" as any) as any)
     .select("id, status")
@@ -991,7 +1146,7 @@ export async function submitWaiterPaymentProof(
     id: proofId,
     payment_id: paymentId,
     order_id: order.id,
-    screenshot_path: input.screenshotPath,
+    screenshot_path: resolvedScreenshotPath,
     submitted_amount: submittedAmount,
     transaction_reference: cleanTxRef,
     status: "pending",

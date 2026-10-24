@@ -305,6 +305,11 @@ function OrdersPage() {
                     </span>
                   </p>
 
+                  {order.customer.table && (
+                    <p className="text-xs text-muted-foreground">
+                      Table: <strong className="text-foreground">#{order.customer.table}</strong>
+                    </p>
+                  )}
 
                   {order.customer.address && (
                     <p className="text-xs text-muted-foreground">

@@ -97,7 +97,7 @@ function ProductPage() {
             <div className="mt-6">
               <h2 className="font-display text-base font-semibold">Ingredients</h2>
               <ul className="mt-2 flex flex-wrap gap-2">
-                {product.ingredients.map((i) => (
+                {product.ingredients.map((i: string) => (
                   <li key={i} className="rounded-full bg-secondary px-3 py-1 text-sm">
                     {i}
                   </li>
