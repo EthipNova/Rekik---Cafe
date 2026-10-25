@@ -1,6 +1,6 @@
 import { Home, Layers, Clock, LogOut, User, X, CreditCard } from "lucide-react";
 import type { CashierStaffProfile } from "@/lib/cashier";
-import rekikLogo from "@/assets/rekik-coffee-logo.png";
+import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 
 interface CashierSidebarProps {
   activeTab: string;

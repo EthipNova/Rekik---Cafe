@@ -22,6 +22,9 @@ import {
   Sun,
   Truck,
   Utensils,
+  CreditCard,
+  Smartphone,
+  Building2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -53,6 +56,11 @@ import {
   type NebaSettings,
   type ThemePreference,
 } from "@/lib/settings";
+import {
+  fetchPaymentAccountSettings,
+  updatePaymentAccountSetting,
+  type PaymentAccountSettingsMap,
+} from "@/lib/payment-settings";
 import type { DeliveryRoundingRule } from "@/lib/distance";
 import {
   Select,
@@ -80,6 +88,26 @@ export const Route = createFileRoute("/admin/settings")({
 function AdminSettings() {
   const [savedSettings, setSavedSettings] = useState<NebaSettings>(DEFAULT_SETTINGS);
   const [form, setForm] = useState<NebaSettings>(DEFAULT_SETTINGS);
+  const [savedPaymentAccounts, setSavedPaymentAccounts] = useState<PaymentAccountSettingsMap>({
+    cbe: null,
+    telebirr: null,
+  });
+  const [paymentForm, setPaymentForm] = useState<{
+    cbeAccountNumber: string;
+    cbeAccountOwner: string;
+    cbeIsActive: boolean;
+    telebirrNumber: string;
+    telebirrAccountOwner: string;
+    telebirrIsActive: boolean;
+  }>({
+    cbeAccountNumber: "",
+    cbeAccountOwner: "",
+    cbeIsActive: true,
+    telebirrNumber: "",
+    telebirrAccountOwner: "",
+    telebirrIsActive: true,
+  });
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +121,7 @@ function AdminSettings() {
     setError(null);
     setSupabaseStatus("loading");
     try {
+      // 1. Fetch store profile settings
       const { data, error: fetchErr } = await fetchStoreSettings();
       if (fetchErr) {
         setError(fetchErr.message);
@@ -102,6 +131,21 @@ function AdminSettings() {
       const loaded = data || DEFAULT_SETTINGS;
       setSavedSettings(loaded);
       setForm(loaded);
+
+      // 2. Fetch live payment account settings (CBE & Telebirr)
+      const { data: payData } = await fetchPaymentAccountSettings();
+      if (payData) {
+        setSavedPaymentAccounts(payData);
+        setPaymentForm({
+          cbeAccountNumber: payData.cbe?.account_number || "",
+          cbeAccountOwner: payData.cbe?.account_owner_name || "",
+          cbeIsActive: payData.cbe ? payData.cbe.is_active : true,
+          telebirrNumber: payData.telebirr?.account_number || "",
+          telebirrAccountOwner: payData.telebirr?.account_owner_name || "",
+          telebirrIsActive: payData.telebirr ? payData.telebirr.is_active : true,
+        });
+      }
+
       setSupabaseStatus("connected");
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : "Failed to load store settings";
@@ -118,6 +162,9 @@ function AdminSettings() {
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
+        if (session.access_token) {
+          setAuthToken(session.access_token);
+        }
         const { data } = await supabase
           .from("users")
           .select("role")
@@ -149,8 +196,8 @@ function AdminSettings() {
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
-  // Dirty state tracking to prevent accidental saves or confusion
-  const isDirty =
+  // Dirty state tracking for store profile settings
+  const isStoreDirty =
     form.cafeName !== savedSettings.cafeName ||
     form.phone !== savedSettings.phone ||
     form.email !== savedSettings.email ||
@@ -166,6 +213,17 @@ function AdminSettings() {
     form.cafeLongitude !== savedSettings.cafeLongitude ||
     form.theme !== savedSettings.theme ||
     form.showToasts !== savedSettings.showToasts;
+
+  // Dirty state tracking for payment accounts (CBE & Telebirr)
+  const isPaymentDirty =
+    paymentForm.cbeAccountNumber !== (savedPaymentAccounts.cbe?.account_number || "") ||
+    paymentForm.cbeAccountOwner !== (savedPaymentAccounts.cbe?.account_owner_name || "") ||
+    paymentForm.cbeIsActive !== (savedPaymentAccounts.cbe ? savedPaymentAccounts.cbe.is_active : true) ||
+    paymentForm.telebirrNumber !== (savedPaymentAccounts.telebirr?.account_number || "") ||
+    paymentForm.telebirrAccountOwner !== (savedPaymentAccounts.telebirr?.account_owner_name || "") ||
+    paymentForm.telebirrIsActive !== (savedPaymentAccounts.telebirr ? savedPaymentAccounts.telebirr.is_active : true);
+
+  const isDirty = isStoreDirty || isPaymentDirty;
 
   const handleFieldChange = <K extends keyof NebaSettings>(key: K, value: NebaSettings[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -225,25 +283,81 @@ function AdminSettings() {
       return;
     }
 
+    // Validate payment accounts if modified
+    if (paymentForm.cbeIsActive && !paymentForm.cbeAccountNumber.trim()) {
+      toast.error("CBE Bank Account number is required when CBE payment is enabled.");
+      return;
+    }
+    if (paymentForm.telebirrIsActive && !paymentForm.telebirrNumber.trim()) {
+      toast.error("Telebirr Till / Phone number is required when Telebirr payment is enabled.");
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const { data, error: saveErr } = await updateStoreSettings(form);
-      if (saveErr || !data) {
-        toast.error(saveErr?.message || "Failed to save settings to Supabase");
-        setSupabaseStatus("error");
-        return;
+      // 1. Save store profile settings if changed
+      if (isStoreDirty) {
+        const { data, error: saveErr } = await updateStoreSettings(form);
+        if (saveErr || !data) {
+          toast.error(saveErr?.message || "Failed to save store settings to Supabase");
+          setSupabaseStatus("error");
+          return;
+        }
+        setSavedSettings(data);
+        setForm(data);
       }
 
-      setSavedSettings(data);
-      setForm(data);
+      // 2. Save payment account settings if changed
+      if (isPaymentDirty) {
+        const cbeRes = await updatePaymentAccountSetting(
+          {
+            payment_method: "cbe",
+            account_number: paymentForm.cbeAccountNumber,
+            account_owner_name: paymentForm.cbeAccountOwner || "Commercial Bank of Ethiopia (CBE)",
+            is_active: paymentForm.cbeIsActive,
+          },
+          authToken || undefined,
+        );
+        if (!cbeRes.success) {
+          toast.error(cbeRes.error?.message || "Failed to save CBE payment account settings.");
+          return;
+        }
+
+        const telebirrRes = await updatePaymentAccountSetting(
+          {
+            payment_method: "telebirr",
+            account_number: paymentForm.telebirrNumber,
+            account_owner_name: paymentForm.telebirrAccountOwner || "Telebirr Mobile Payment",
+            is_active: paymentForm.telebirrIsActive,
+          },
+          authToken || undefined,
+        );
+        if (!telebirrRes.success) {
+          toast.error(telebirrRes.error?.message || "Failed to save Telebirr payment account settings.");
+          return;
+        }
+
+        // Refresh saved payment accounts state
+        const { data: updatedPayData } = await fetchPaymentAccountSettings();
+        if (updatedPayData) {
+          setSavedPaymentAccounts(updatedPayData);
+          setPaymentForm({
+            cbeAccountNumber: updatedPayData.cbe?.account_number || "",
+            cbeAccountOwner: updatedPayData.cbe?.account_owner_name || "",
+            cbeIsActive: updatedPayData.cbe ? updatedPayData.cbe.is_active : true,
+            telebirrNumber: updatedPayData.telebirr?.account_number || "",
+            telebirrAccountOwner: updatedPayData.telebirr?.account_owner_name || "",
+            telebirrIsActive: updatedPayData.telebirr ? updatedPayData.telebirr.is_active : true,
+          });
+        }
+      }
+
       setSupabaseStatus("connected");
       if (form.showToasts) {
         toast.success("Settings saved successfully", {
-          description: "Store settings saved to Supabase and preferences updated.",
+          description: "Store settings and payment accounts updated in Supabase.",
         });
       }
-      // Reload persisted values from database to confirm update
-      void loadData();
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : "An unexpected error occurred while saving";
       toast.error(msg);
@@ -255,6 +369,14 @@ function AdminSettings() {
   const handleCancel = () => {
     setForm(savedSettings);
     applyTheme(savedSettings.theme);
+    setPaymentForm({
+      cbeAccountNumber: savedPaymentAccounts.cbe?.account_number || "",
+      cbeAccountOwner: savedPaymentAccounts.cbe?.account_owner_name || "",
+      cbeIsActive: savedPaymentAccounts.cbe ? savedPaymentAccounts.cbe.is_active : true,
+      telebirrNumber: savedPaymentAccounts.telebirr?.account_number || "",
+      telebirrAccountOwner: savedPaymentAccounts.telebirr?.account_owner_name || "",
+      telebirrIsActive: savedPaymentAccounts.telebirr ? savedPaymentAccounts.telebirr.is_active : true,
+    });
     if (savedSettings.showToasts) {
       toast.info("Unsaved changes discarded");
     }
@@ -487,6 +609,192 @@ function AdminSettings() {
                     required
                   />
                 </div>
+              </div>
+            </div>
+          </section>
+
+          {/* 2b. SECTION: PAYMENT ACCOUNT SETTINGS (CBE & TELEBIRR) */}
+          <section aria-labelledby="payment-accounts-heading" className="surface-card p-6 space-y-6">
+            <div className="flex items-start justify-between gap-4 border-b border-border/50 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CreditCard className="size-5 text-primary" aria-hidden />
+                  <h2 id="payment-accounts-heading" className="font-display text-xl font-semibold">
+                    Payment Account Settings
+                  </h2>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Configure live Commercial Bank of Ethiopia (CBE) and Telebirr payment receiver accounts displayed to customers during checkout and order tracking.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-xs text-primary border-primary/30">
+                  Authoritative (public.payment_account_settings)
+                </Badge>
+              </div>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Commercial Bank of Ethiopia (CBE) */}
+              <div className="rounded-xl border border-border bg-card/60 p-5 space-y-4">
+                <div className="flex items-start justify-between gap-3 border-b border-border/50 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Building2 className="size-5" aria-hidden />
+                    </div>
+                    <div>
+                      <h3 className="font-display text-sm font-semibold text-foreground">
+                        Commercial Bank of Ethiopia (CBE)
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground">
+                        Bank transfer and CBE Birr settlement
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="cbe-active-toggle" className="text-xs text-muted-foreground cursor-pointer">
+                      {paymentForm.cbeIsActive ? "Active" : "Disabled"}
+                    </Label>
+                    <Switch
+                      id="cbe-active-toggle"
+                      checked={paymentForm.cbeIsActive}
+                      onCheckedChange={(checked) =>
+                        setPaymentForm((prev) => ({ ...prev, cbeIsActive: checked }))
+                      }
+                      disabled={isSaving}
+                      aria-label="Enable or disable CBE payment method"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="cbe-account-number" className="text-xs font-medium">
+                      CBE Bank Account Number <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="cbe-account-number"
+                      value={paymentForm.cbeAccountNumber}
+                      onChange={(e) =>
+                        setPaymentForm((prev) => ({ ...prev, cbeAccountNumber: e.target.value }))
+                      }
+                      placeholder="e.g. 1000 2345 67890"
+                      className="font-mono text-sm h-9"
+                      disabled={isSaving}
+                      required={paymentForm.cbeIsActive}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Shown to customers during checkout and copied to their clipboard.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="cbe-account-owner" className="text-xs font-medium">
+                      Account Holder / Business Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="cbe-account-owner"
+                      value={paymentForm.cbeAccountOwner}
+                      onChange={(e) =>
+                        setPaymentForm((prev) => ({ ...prev, cbeAccountOwner: e.target.value }))
+                      }
+                      placeholder="e.g. Rekik Coffee"
+                      className="text-sm h-9"
+                      disabled={isSaving}
+                      required={paymentForm.cbeIsActive}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Exact name registered on the CBE bank account.
+                    </p>
+                  </div>
+                </div>
+
+                {savedPaymentAccounts.cbe?.updated_at && (
+                  <p className="text-[10px] text-muted-foreground border-t border-border/40 pt-2">
+                    Last updated: {new Date(savedPaymentAccounts.cbe.updated_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+
+              {/* Telebirr Mobile Payment */}
+              <div className="rounded-xl border border-border bg-card/60 p-5 space-y-4">
+                <div className="flex items-start justify-between gap-3 border-b border-border/50 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Smartphone className="size-5" aria-hidden />
+                    </div>
+                    <div>
+                      <h3 className="font-display text-sm font-semibold text-foreground">
+                        Telebirr Mobile Payment
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground">
+                        Instant mobile wallet / USSD *127# settlement
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="telebirr-active-toggle" className="text-xs text-muted-foreground cursor-pointer">
+                      {paymentForm.telebirrIsActive ? "Active" : "Disabled"}
+                    </Label>
+                    <Switch
+                      id="telebirr-active-toggle"
+                      checked={paymentForm.telebirrIsActive}
+                      onCheckedChange={(checked) =>
+                        setPaymentForm((prev) => ({ ...prev, telebirrIsActive: checked }))
+                      }
+                      disabled={isSaving}
+                      aria-label="Enable or disable Telebirr payment method"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="telebirr-number" className="text-xs font-medium">
+                      Telebirr Merchant / Phone Number <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="telebirr-number"
+                      value={paymentForm.telebirrNumber}
+                      onChange={(e) =>
+                        setPaymentForm((prev) => ({ ...prev, telebirrNumber: e.target.value }))
+                      }
+                      placeholder="e.g. 0911 234 567"
+                      className="font-mono text-sm h-9"
+                      disabled={isSaving}
+                      required={paymentForm.telebirrIsActive}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Merchant code or registered mobile number to receive customer transfers.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="telebirr-account-owner" className="text-xs font-medium">
+                      Merchant / Account Holder Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="telebirr-account-owner"
+                      value={paymentForm.telebirrAccountOwner}
+                      onChange={(e) =>
+                        setPaymentForm((prev) => ({ ...prev, telebirrAccountOwner: e.target.value }))
+                      }
+                      placeholder="e.g. Rekik Coffee"
+                      className="text-sm h-9"
+                      disabled={isSaving}
+                      required={paymentForm.telebirrIsActive}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Display name shown on Telebirr verification receipts.
+                    </p>
+                  </div>
+                </div>
+
+                {savedPaymentAccounts.telebirr?.updated_at && (
+                  <p className="text-[10px] text-muted-foreground border-t border-border/40 pt-2">
+                    Last updated: {new Date(savedPaymentAccounts.telebirr.updated_at).toLocaleString()}
+                  </p>
+                )}
               </div>
             </div>
           </section>

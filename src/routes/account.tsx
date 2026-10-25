@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import rekikLogo from "@/assets/rekik-coffee-logo.png";
+import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 import { fetchCashierMe } from "@/services/cashier";
 import {
   AlertCircle,
@@ -87,7 +87,19 @@ function AccountPage() {
   const [filter, setFilter] = useState<"all" | "active" | "completed">("all");
 
   // Auth UI state (when not signed in)
-  const [authMode, setAuthMode] = useState<"signin" | "register">("signin");
+  const [authMode, setAuthMode] = useState<"signin" | "register" | "awaiting-confirmation">("signin");
+  const [lastRegisteredEmail, setLastRegisteredEmail] = useState("");
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
   const [signInForm, setSignInForm] = useState({ email: "", password: "" });
   const [registerForm, setRegisterForm] = useState({
     fullName: "",
@@ -323,6 +335,36 @@ function AccountPage() {
     };
   }, [session]);
 
+  
+  const handleResendConfirmation = async (targetEmail: string) => {
+    const emailToUse = targetEmail.trim();
+    if (!emailToUse) {
+      toast.error("Please enter a valid email address to resend confirmation.");
+      return;
+    }
+    setResendLoading(true);
+    try {
+      const redirectUrl = typeof window !== "undefined" ? `${window.location.origin}/account` : "";
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: emailToUse,
+        options: {
+          ...(redirectUrl ? { emailRedirectTo: redirectUrl } : {}),
+        },
+      });
+      if (error) {
+        toast.error(error.message || "Failed to resend confirmation email.");
+      } else {
+        toast.success(`Verification link resent to ${emailToUse}. Please check your inbox.`);
+        setResendCooldown(60);
+      }
+    } catch {
+      toast.error("Network error while resending confirmation. Please try again.");
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
@@ -342,13 +384,22 @@ function AccountPage() {
       });
 
       if (error) {
-        if (error.message.toLowerCase().includes("invalid login credentials")) {
+        const msg = error.message.toLowerCase();
+        if (msg.includes("email not confirmed") || msg.includes("email_not_confirmed")) {
+          setUnconfirmedEmail(email);
+          setAuthError(
+            "Your email address has not been confirmed yet. Please verify your email before logging in.",
+          );
+        } else if (msg.includes("invalid login credentials")) {
+          setUnconfirmedEmail(null);
           setAuthError("Invalid email or password. Please check your credentials.");
         } else {
+          setUnconfirmedEmail(null);
           setAuthError(error.message || "Failed to sign in.");
         }
         return;
       }
+      setUnconfirmedEmail(null);
 
       if (data.session) {
         setSession(data.session);
@@ -627,6 +678,102 @@ function AccountPage() {
             <span>{authError}</span>
           </div>
         )}
+
+        {/* Unconfirmed Email Action Banner */}
+        {unconfirmedEmail && authMode === "signin" && (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-700 dark:text-amber-400 space-y-2">
+            <p className="font-semibold flex items-center gap-1.5">
+              <Mail className="size-4 shrink-0" />
+              Need a new confirmation link?
+            </p>
+            <p className="text-[11px] leading-relaxed">
+              Click below to send a fresh confirmation link to <strong>{unconfirmedEmail}</strong>.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={resendLoading || resendCooldown > 0}
+              onClick={() => void handleResendConfirmation(unconfirmedEmail)}
+              className="mt-1 h-8 text-xs font-semibold border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+            >
+              {resendLoading ? (
+                <>
+                  <RefreshCw className="size-3.5 mr-1.5 animate-spin" />
+                  Sending...
+                </>
+              ) : resendCooldown > 0 ? (
+                `Resend available in ${resendCooldown}s`
+              ) : (
+                "Resend Confirmation Email"
+              )}
+            </Button>
+          </div>
+        )}
+
+        {/* AWAITING CONFIRMATION SCREEN */}
+        {authMode === "awaiting-confirmation" ? (
+          <div className="surface-card mt-6 p-6 sm:p-8 space-y-5 text-center">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary border border-primary/20">
+              <Mail className="size-7 animate-pulse" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-display font-semibold text-foreground">
+                Check your email
+              </h2>
+              <p className="text-xs text-muted-foreground leading-relaxed max-w-sm mx-auto">
+                We've sent a verification link to{" "}
+                <strong className="text-foreground font-mono">{lastRegisteredEmail || registerForm.email}</strong>.
+                Please check your inbox and click the link to activate your account.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-secondary/30 p-3.5 text-left text-xs text-muted-foreground space-y-1.5">
+              <p className="font-semibold text-foreground flex items-center gap-1.5">
+                <CheckCircle2 className="size-3.5 text-primary" />
+                Helpful tips:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-[11px]">
+                <li>Allow 1 to 2 minutes for the email to arrive.</li>
+                <li>Check your Spam, Junk, or Promotions folder.</li>
+                <li>Once confirmed, return here to sign in with your password.</li>
+              </ul>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={resendLoading || resendCooldown > 0}
+                onClick={() => void handleResendConfirmation(lastRegisteredEmail || registerForm.email)}
+                className="w-full text-xs font-semibold"
+              >
+                {resendLoading ? (
+                  <>
+                    <RefreshCw className="size-3.5 mr-2 animate-spin" />
+                    Resending verification link...
+                  </>
+                ) : resendCooldown > 0 ? (
+                  `Resend link available in ${resendCooldown}s`
+                ) : (
+                  "Resend Confirmation Email"
+                )}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setAuthMode("signin");
+                  setAuthError(null);
+                }}
+                className="w-full text-xs text-muted-foreground hover:text-foreground"
+              >
+                Back to Sign In
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         {/* SIGN IN FORM */}
         {authMode === "signin" ? (

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import rekikLogo from "@/assets/rekik-coffee-logo.png";
+import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 
 const columns = [
   {

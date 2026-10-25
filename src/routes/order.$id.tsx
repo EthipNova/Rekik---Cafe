@@ -34,6 +34,10 @@ import { findOrder, methodLabels, statusLabels, type Order } from "@/lib/orders"
 import { fetchOrderById, submitPaymentProof, updateOrderPayment } from "@/services/api";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import {
+  fetchPaymentAccountSettings,
+  type PaymentAccountSettingsMap,
+} from "@/lib/payment-settings";
 
 export const Route = createFileRoute("/order/$id")({
   loader: async ({ params }) => {
@@ -77,9 +81,35 @@ function OrderPage() {
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofPreview, setProofPreview] = useState<string | null>(null);
   const [submittingProof, setSubmittingProof] = useState(false);
+  const [paymentSettings, setPaymentSettings] = useState<PaymentAccountSettingsMap>({
+    cbe: null,
+    telebirr: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
+
+    async function loadSettings() {
+      try {
+        const { data } = await fetchPaymentAccountSettings();
+        if (!cancelled) {
+          setPaymentSettings(data);
+          // If current selection is telebirr but telebirr is inactive, default to cbe or cash
+          if (data.telebirr && !data.telebirr.is_active) {
+            setPaymentMethod((cur) => (cur === "telebirr" ? (data.cbe?.is_active ? "cbe" : "cash") : cur));
+          }
+        }
+      } catch {
+        /* fallback to defaults */
+      }
+    }
+    void loadSettings();
+
+    const handleFocus = () => {
+      void loadSettings();
+    };
+    window.addEventListener("focus", handleFocus);
+
     async function load() {
       try {
         const remote = await fetchOrderById(id);
@@ -120,6 +150,13 @@ function OrderPage() {
           void load();
         },
       )
+      .on(
+        "postgres_changes" as any,
+        { event: "*", schema: "public", table: "payment_account_settings" },
+        () => {
+          void loadSettings();
+        },
+      )
       .subscribe();
 
     // Multi-tab storage sync
@@ -139,6 +176,7 @@ function OrderPage() {
       cancelled = true;
       void supabase.removeChannel(channel);
       window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", handleFocus);
       clearInterval(pollInterval);
     };
   }, [id]);
@@ -869,14 +907,20 @@ function OrderPage() {
                       {
                         id: "telebirr" as const,
                         name: "Telebirr Mobile Payment",
-                        info: "Till: 0911 234 567 (Rekik Café)",
+                        info: paymentSettings.telebirr?.account_number
+                          ? `Merchant/Till: ${paymentSettings.telebirr.account_number} (${paymentSettings.telebirr.account_owner_name})`
+                          : "Temporarily unavailable",
                         icon: Smartphone,
+                        isActive: paymentSettings.telebirr ? paymentSettings.telebirr.is_active : true,
                       },
                       {
                         id: "cbe" as const,
                         name: "CBE Birr / Mobile Banking",
-                        info: "Account: 1000 2345 67890 · Shortcode: 123456",
+                        info: paymentSettings.cbe?.account_number
+                          ? `Account: ${paymentSettings.cbe.account_number} (${paymentSettings.cbe.account_owner_name})`
+                          : "Temporarily unavailable",
                         icon: CreditCard,
+                        isActive: paymentSettings.cbe ? paymentSettings.cbe.is_active : true,
                       },
                       {
                         id: "cash" as const,
@@ -889,36 +933,51 @@ function OrderPage() {
                           ? (order.customer.table ? `Server will settle payment at Table #${order.customer.table}` : "Server will settle payment at your table")
                           : "Pay in person upon receipt",
                         icon: Banknote,
+                        isActive: true,
                       },
-                    ].map((opt) => (
-                      <label
-                        key={opt.id}
-                        className={cn(
-                          "flex items-start gap-2.5 rounded-lg border p-2.5 text-xs cursor-pointer transition-all",
-                          paymentMethod === opt.id
-                            ? "border-primary bg-accent/60 ring-1 ring-primary"
-                            : "border-border hover:bg-secondary/40",
-                        )}
-                      >
-                        <input
-                          type="radio"
-                          name="order-pay-method"
-                          value={opt.id}
-                          checked={paymentMethod === opt.id}
-                          onChange={() => setPaymentMethod(opt.id)}
-                          className="mt-0.5 size-3.5 accent-[var(--primary)]"
-                        />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1.5 font-medium text-foreground">
-                            <opt.icon className="size-3.5 text-primary" />
-                            <span>{opt.name}</span>
+                    ].map((opt) => {
+                      const isDisabled = !opt.isActive;
+                      return (
+                        <label
+                          key={opt.id}
+                          className={cn(
+                            "flex items-start gap-2.5 rounded-lg border p-2.5 text-xs transition-all",
+                            isDisabled
+                              ? "opacity-60 bg-muted/30 cursor-not-allowed border-border/60"
+                              : "cursor-pointer hover:bg-secondary/40",
+                            paymentMethod === opt.id && !isDisabled
+                              ? "border-primary bg-accent/60 ring-1 ring-primary"
+                              : "border-border",
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name="order-pay-method"
+                            value={opt.id}
+                            disabled={isDisabled}
+                            checked={paymentMethod === opt.id}
+                            onChange={() => {
+                              if (!isDisabled) setPaymentMethod(opt.id);
+                            }}
+                            className="mt-0.5 size-3.5 accent-[var(--primary)] disabled:opacity-50"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-1.5 font-medium text-foreground">
+                              <opt.icon className="size-3.5 text-primary" />
+                              <span>{opt.name}</span>
+                              {isDisabled && (
+                                <span className="text-[10px] text-destructive bg-destructive/10 px-1.5 py-0.2 rounded font-normal">
+                                  Unavailable
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-0.5 text-[11px] text-muted-foreground font-mono">
+                              {opt.info}
+                            </p>
                           </div>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground font-mono">
-                            {opt.info}
-                          </p>
-                        </div>
-                      </label>
-                    ))}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
 

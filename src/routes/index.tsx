@@ -15,7 +15,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import heroFallback from "@/assets/rekik-hero.jpg";
-import rekikLogo from "@/assets/rekik-coffee-logo.png";
+import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 import rekikStory from "@/assets/rekik-story.jpg";
 import burgersImage from "@/assets/burgers.png";
 import clubSandwichImage from "@/assets/club-sandwich.png";
