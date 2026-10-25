@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import rekikLogo from "@/assets/rekik-coffee-logo.png";
+import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 
 const links = [
   { to: "/", label: "Home" },

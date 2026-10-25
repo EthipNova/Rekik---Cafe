@@ -57,6 +57,10 @@ import {
   isValidCoordinate,
 } from "@/lib/distance";
 import { DEFAULT_SETTINGS, type NebaSettings } from "@/lib/settings";
+import {
+  fetchPaymentAccountSettings,
+  type PaymentAccountSettingsMap,
+} from "@/lib/payment-settings";
 
 export const Route = createFileRoute("/checkout")({
   loader: async () => {
@@ -111,6 +115,66 @@ function Checkout() {
   const [checkoutReferenceId] = useState(
     () => `chk_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
   );
+
+  const [paymentSettings, setPaymentSettings] = useState<PaymentAccountSettingsMap>({
+    cbe: null,
+    telebirr: null,
+  });
+  const [paymentSettingsLoading, setPaymentSettingsLoading] = useState(true);
+  const [paymentSettingsError, setPaymentSettingsError] = useState<string | null>(null);
+
+  const loadPaymentSettings = async () => {
+    setPaymentSettingsLoading(true);
+    setPaymentSettingsError(null);
+    try {
+      const { data, error } = await fetchPaymentAccountSettings();
+      if (error && !data.cbe && !data.telebirr) {
+        setPaymentSettingsError(error.message);
+      } else {
+        setPaymentSettings(data);
+        // If the previously selected payment method has become disabled, deselect it
+        setPayment((current) => {
+          if (current === "cbe" && data.cbe && !data.cbe.is_active) return null;
+          if (current === "telebirr" && data.telebirr && !data.telebirr.is_active) return null;
+          return current;
+        });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load payment account settings";
+      setPaymentSettingsError(msg);
+    } finally {
+      setPaymentSettingsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPaymentSettings();
+
+    // Refetch when browser window or tab regains focus or visibility
+    const handleFocus = () => {
+      void loadPaymentSettings();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    // Realtime subscription for administrative updates to payment_account_settings
+    const channel = supabase
+      .channel("checkout-payment-settings-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "payment_account_settings" },
+        () => {
+          void loadPaymentSettings();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+      void supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     fetchSettings()
@@ -401,6 +465,14 @@ function Checkout() {
     if (step === 3) {
       if (!payment) {
         toast.error("Please select a payment method.");
+        return false;
+      }
+      if (payment === "cbe" && paymentSettings.cbe && !paymentSettings.cbe.is_active) {
+        toast.error("Commercial Bank of Ethiopia (CBE) payment is currently disabled. Please select another payment option.");
+        return false;
+      }
+      if (payment === "telebirr" && paymentSettings.telebirr && !paymentSettings.telebirr.is_active) {
+        toast.error("Telebirr Mobile Payment is currently disabled. Please select another payment option.");
         return false;
       }
       return true;
@@ -1176,31 +1248,57 @@ function Checkout() {
 
             {/* PAYMENT METHOD SELECTOR */}
             <fieldset className="space-y-4">
-              <legend className="text-sm font-semibold text-foreground">
-                Select payment method
-              </legend>
+              <div className="flex items-center justify-between">
+                <legend className="text-sm font-semibold text-foreground">
+                  Select payment method
+                </legend>
+                {paymentSettingsLoading && (
+                  <span className="text-xs text-muted-foreground animate-pulse">
+                    Loading live payment accounts...
+                  </span>
+                )}
+              </div>
+
+              {paymentSettingsError && (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive flex items-center justify-between">
+                  <span>Unable to verify latest payment accounts.</span>
+                  <button
+                    type="button"
+                    onClick={() => void loadPaymentSettings()}
+                    className="underline hover:no-underline font-medium ml-2 shrink-0"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
 
               {[
                 {
                   id: "telebirr" as const,
                   label: "Telebirr Mobile Payment",
                   desc: "Instant payment via Telebirr app or USSD *127#",
-                  detail: "0911 234 567",
-                  accountName: "Rekik Coffee Lounge",
+                  detail: paymentSettings.telebirr?.account_number || "Unavailable",
+                  accountName: paymentSettings.telebirr?.account_owner_name || "Rekik Coffee Lounge",
                   accountType: "Telebirr Merchant / Phone",
                   icon: Smartphone,
-                  tag: "Instant settlement",
+                  tag: paymentSettings.telebirr && !paymentSettings.telebirr.is_active
+                    ? "Temporarily unavailable"
+                    : "Instant settlement",
+                  isActive: paymentSettings.telebirr ? paymentSettings.telebirr.is_active : true,
                 },
                 {
                   id: "cbe" as const,
                   label: "CBE Birr / CBE Mobile Banking",
                   desc: "Transfer using CBE Birr mobile wallet or CBE Mobile Banking app",
-                  detail: "1000 2345 67890",
-                  shortCode: "123456",
-                  accountName: "Rekik Coffee & Roastery",
-                  accountType: "CBE Account / Shortcode",
+                  detail: paymentSettings.cbe?.account_number || "Unavailable",
+                  shortCode: undefined,
+                  accountName: paymentSettings.cbe?.account_owner_name || "Rekik Coffee & Roastery",
+                  accountType: "CBE Account",
                   icon: CreditCard,
-                  tag: "Fast & verified",
+                  tag: paymentSettings.cbe && !paymentSettings.cbe.is_active
+                    ? "Temporarily unavailable"
+                    : "Fast & verified",
+                  isActive: paymentSettings.cbe ? paymentSettings.cbe.is_active : true,
                 },
                 {
                   id: "cash" as const,
@@ -1221,18 +1319,29 @@ function Checkout() {
                   accountType: "In-person Settlement",
                   icon: Banknote,
                   tag: "In-person",
+                  isActive: true,
                 },
               ].map((option) => {
                 const isSelected = payment === option.id;
+                const isDisabled = !option.isActive;
                 return (
                   <div
                     key={option.id}
-                    onClick={() => setPayment(option.id)}
+                    onClick={() => {
+                      if (isDisabled) {
+                        toast.error(`${option.label} is currently unavailable.`);
+                        return;
+                      }
+                      setPayment(option.id);
+                    }}
                     className={cn(
-                      "cursor-pointer rounded-xl border p-4 transition-all",
-                      isSelected
+                      "rounded-xl border p-4 transition-all",
+                      isDisabled
+                        ? "opacity-60 bg-muted/40 cursor-not-allowed border-border/60"
+                        : "cursor-pointer hover:bg-secondary/40",
+                      isSelected && !isDisabled
                         ? "border-primary bg-accent/40 ring-1 ring-primary shadow-sm"
-                        : "border-border hover:bg-secondary/40",
+                        : "border-border",
                     )}
                   >
                     <div className="flex items-start gap-3">
@@ -1240,9 +1349,12 @@ function Checkout() {
                         type="radio"
                         name="payment"
                         value={option.id}
+                        disabled={isDisabled}
                         checked={isSelected}
-                        onChange={() => setPayment(option.id)}
-                        className="mt-1 size-4 accent-[var(--primary)]"
+                        onChange={() => {
+                          if (!isDisabled) setPayment(option.id);
+                        }}
+                        className="mt-1 size-4 accent-[var(--primary)] disabled:opacity-50"
                       />
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center justify-between gap-2">
@@ -1252,7 +1364,13 @@ function Checkout() {
                               {option.label}
                             </span>
                           </div>
-                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5">
+                          <Badge
+                            variant={isDisabled ? "outline" : "secondary"}
+                            className={cn(
+                              "text-[10px] px-1.5 py-0.5",
+                              isDisabled && "text-muted-foreground border-border",
+                            )}
+                          >
                             {option.tag}
                           </Badge>
                         </div>
@@ -1284,33 +1402,29 @@ function Checkout() {
                                 )}
                                 <div>
                                   <span className="block text-[11px] text-muted-foreground">
-                                    {option.id === "telebirr" ? "Merchant / Till Number:" : "Account Number:"}
+                                    {option.id === "telebirr" ? "Merchant / Till / Phone:" : "Account Number:"}
                                   </span>
                                   <span className="font-mono font-medium text-foreground text-xs flex items-center gap-1">
                                     {option.detail}
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void navigator.clipboard.writeText(option.detail.replace(/\s+/g, ""));
-                                        toast.success("Account details copied to clipboard!");
-                                      }}
-                                      className="text-muted-foreground hover:text-foreground inline-flex items-center"
-                                      title="Copy account number"
-                                    >
-                                      <Copy className="size-3 ml-1" />
-                                    </button>
+                                    {option.detail !== "Unavailable" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void navigator.clipboard.writeText(option.detail.replace(/\s+/g, ""));
+                                          toast.success("Account details copied to clipboard!");
+                                        }}
+                                        className="text-muted-foreground hover:text-foreground inline-flex items-center"
+                                        title="Copy account number"
+                                      >
+                                        <Copy className="size-3 ml-1" />
+                                      </button>
+                                    )}
                                   </span>
                                 </div>
                                 <div>
                                   <span className="block text-[11px] text-muted-foreground">Account Holder:</span>
                                   <span className="font-medium text-foreground text-xs">{option.accountName}</span>
                                 </div>
-                                {option.shortCode && (
-                                  <div>
-                                    <span className="block text-[11px] text-muted-foreground">Short Code:</span>
-                                    <span className="font-mono text-foreground text-xs">{option.shortCode}</span>
-                                  </div>
-                                )}
                               </div>
 
                               <div className="border-t border-border/40 pt-2 text-[11px] text-muted-foreground space-y-1">

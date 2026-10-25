@@ -1,4 +1,5 @@
 import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
+import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 import {
   AlertCircle,
   Boxes,
@@ -399,6 +400,13 @@ function AdminLayout() {
     return (
       <div className="admin-theme flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
         <div className="surface-card w-full max-w-sm p-8 shadow-sm">
+          <div className="mx-auto sm:mx-0 size-14 overflow-hidden rounded-full border-2 border-gold/70 shadow-sm bg-white mb-4">
+            <img
+              src={rekikLogo}
+              alt="Rekik Coffee logo"
+              className="size-full object-contain"
+            />
+          </div>
           <h1 className="font-display text-2xl font-semibold text-foreground">Admin sign in</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Enter your Rekik staff credentials to access café operations.
@@ -463,13 +471,18 @@ function AdminLayout() {
   return (
     <div className="admin-theme flex min-h-screen bg-background text-foreground">
       <aside className="hidden w-60 shrink-0 flex-col bg-sidebar p-4 text-sidebar-foreground md:flex border-r border-sidebar-border">
-        <Link to="/" className="px-2 py-3 flex items-center">
-          <span className="font-display text-lg font-semibold text-sidebar-foreground">
-            Rekik Café
-          </span>
-          <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/70">
-            Console
-          </span>
+        <Link to="/" className="flex items-center gap-2.5 px-2 py-3 group">
+          <div className="size-9 overflow-hidden rounded-full border border-gold/70 shrink-0 bg-white">
+            <img
+              src={rekikLogo}
+              alt="Rekik Coffee logo"
+              className="size-full object-contain"
+            />
+          </div>
+          <div>
+            <span className="font-display text-base font-bold text-sidebar-foreground">Rekik Coffee</span>
+            <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-medium">Console</span>
+          </div>
         </Link>
         <nav className="mt-4 flex-1 space-y-1" aria-label="Admin navigation">
           {nav.map((n) => (
@@ -563,11 +576,18 @@ function AdminLayout() {
             >
               <div>
                 <SheetHeader className="text-left pb-3 border-b border-sidebar-border pr-6">
-                  <SheetTitle className="font-display text-lg font-semibold text-sidebar-foreground flex items-center">
-                    <span>Rekik Café</span>
-                    <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/70">
-                      Console
-                    </span>
+                  <SheetTitle className="font-display text-lg font-semibold text-sidebar-foreground flex items-center gap-2.5">
+                    <div className="size-8 overflow-hidden rounded-full border border-gold/70 shrink-0 bg-white">
+                      <img
+                        src={rekikLogo}
+                        alt="Rekik Coffee logo"
+                        className="size-full object-contain"
+                      />
+                    </div>
+                    <div>
+                      <span className="font-display text-base font-bold">Rekik Coffee</span>
+                      <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-medium">Console</span>
+                    </div>
                   </SheetTitle>
                   <SheetDescription className="sr-only">Admin navigation menu</SheetDescription>
                 </SheetHeader>

@@ -2947,4 +2947,67 @@ export async function deleteContactMessage(id: string, client: any = supabase): 
   return true;
 }
 
+
+/* ==========================================================================
+   Payment Account Settings (Supabase public.payment_account_settings)
+   ========================================================================== */
+
+export interface DbPaymentAccountRow {
+  id: string;
+  payment_method: string;
+  account_number: string;
+  account_owner_name: string;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * Fetches all payment account settings rows from public.payment_account_settings
+ * using the server service-role client.
+ */
+export async function getPaymentAccountSettingsFromDb(): Promise<DbPaymentAccountRow[]> {
+  const { data, error } = await (supabase.from("payment_account_settings" as any) as any)
+    .select("id, payment_method, account_number, account_owner_name, is_active, created_at, updated_at")
+    .order("payment_method", { ascending: true });
+
+  if (error) {
+    console.error("[db] Failed to fetch payment account settings:", error.message);
+    throw new Error(`Failed to load payment account settings: ${error.message}`);
+  }
+
+  return (data || []) as DbPaymentAccountRow[];
+}
+
+/**
+ * Updates a payment account setting (e.g. CBE or Telebirr) in public.payment_account_settings.
+ */
+export async function updatePaymentAccountSettingsInDb(input: {
+  payment_method: string;
+  account_number: string;
+  account_owner_name: string;
+  is_active: boolean;
+}): Promise<DbPaymentAccountRow> {
+  const method = input.payment_method.toLowerCase().trim();
+  const nowIso = new Date().toISOString();
+
+  const { data, error } = await (supabase.from("payment_account_settings" as any) as any)
+    .update({
+      account_number: input.account_number.trim(),
+      account_owner_name: input.account_owner_name.trim(),
+      is_active: Boolean(input.is_active),
+      updated_at: nowIso,
+    })
+    .eq("payment_method", method)
+    .select("id, payment_method, account_number, account_owner_name, is_active, created_at, updated_at")
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error(`[db] Failed to update payment account settings for ${method}:`, error?.message);
+    throw new Error(error?.message || `Failed to update payment setting for ${method}`);
+  }
+
+  return data as DbPaymentAccountRow;
+}
+
 export { getAvailableWaiters, type AvailableWaiterDTO as AvailableWaiter } from "./waiter";

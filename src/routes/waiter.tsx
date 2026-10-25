@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
-import rekikLogo from "@/assets/rekik-coffee-logo.png";
+import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 import {
   AlertCircle,
   Bell,

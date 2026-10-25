@@ -1,4 +1,6 @@
 import {
+  getPaymentAccountSettingsFromDb,
+  updatePaymentAccountSettingsInDb,
   createOrder,
   createProduct,
   createPromotion,
@@ -1280,6 +1282,56 @@ export async function handleApiRequest(request: Request): Promise<Response> {
            POST /api/admin/payment-accounts (admin upsert)
            PATCH /api/admin/payment-accounts/:id (admin update)
        ---------------------------------------------------------------------- */
+    
+    /* ----------------------------------------------------------------------
+       Payment Account Settings:
+           GET /api/payment-settings (Public read of active payment accounts)
+           PUT /api/admin/payment-settings (Admin update of account details)
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/payment-settings") {
+      if (method === "GET") {
+        try {
+          const rows = await getPaymentAccountSettingsFromDb();
+          return json({ success: true, data: rows });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Failed to load payment settings";
+          return json({ success: false, error: "Payment Settings Unavailable", message }, 500);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/admin/payment-settings") {
+      if (method === "PUT" || method === "PATCH") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required to update payment accounts");
+        }
+        if (authUser.role !== "ADMIN" && authUser.role !== "STAFF") {
+          return forbidden("Only administrators can update payment accounts");
+        }
+
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object" || !body.payment_method || !body.account_number || !body.account_owner_name) {
+          return badRequest("Missing required fields: payment_method, account_number, account_owner_name");
+        }
+
+        try {
+          const updated = await updatePaymentAccountSettingsInDb({
+            payment_method: body.payment_method,
+            account_number: body.account_number,
+            account_owner_name: body.account_owner_name,
+            is_active: body.is_active !== undefined ? Boolean(body.is_active) : true,
+          });
+          return json({ success: true, data: updated });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Failed to update payment setting";
+          return json({ success: false, error: "Update Failed", message }, 500);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
     if (pathname === "/api/payment-accounts") {
       if (method === "GET") {
         try {
