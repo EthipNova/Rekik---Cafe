@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { cashierSupabase, supabase } from "@/lib/supabase";
 import type {
   CashierStaffProfile,
   PendingPaymentReviewItem,
@@ -10,7 +10,7 @@ import type {
 async function getAuthHeader(): Promise<Record<string, string>> {
   const {
     data: { session },
-  } = await supabase.auth.getSession();
+  } = await cashierSupabase.auth.getSession();
   if (!session?.access_token) {
     throw new Error("No active session. Please sign in.");
   }

@@ -2,17 +2,14 @@ import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 import {
   AlertCircle,
-  Bell,
   CheckCircle2,
   Clock,
-  CreditCard,
   History,
   LayoutDashboard,
   LogOut,
   Menu,
   ShieldAlert,
   ShoppingBag,
-  UserCheck,
   UtensilsCrossed,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -32,12 +29,14 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { applyTheme, readSettings } from "@/lib/settings";
-import { supabase } from "@/lib/supabase";
+import { waiterSupabase, supabase } from "@/lib/supabase";
 import {
   fetchWaiterProfile,
   updateWaiterAvailability,
   type WaiterProfile,
 } from "@/lib/waiter";
+import { LanguageSelector } from "@/components/site/LanguageSelector";
+import { useTranslation } from "@/lib/i18n";
 
 export const Route = createFileRoute("/waiter")({
   head: () => ({
@@ -54,20 +53,18 @@ export const Route = createFileRoute("/waiter")({
 });
 
 const waiterNav = [
-  { to: "/waiter", label: "Overview", icon: LayoutDashboard, exact: true },
-  { to: "/waiter/orders", label: "Assigned Orders", icon: ShoppingBag, exact: false },
-  { to: "/waiter/payments", label: "Payment Status", icon: CreditCard, exact: false },
+  { to: "/waiter", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { to: "/waiter/orders", label: "Current Orders", icon: ShoppingBag, exact: false },
   { to: "/waiter/history", label: "Order History", icon: History, exact: false },
-  { to: "/waiter/notifications", label: "Notifications", icon: Bell, exact: false },
-  { to: "/waiter/account", label: "Staff Account", icon: UserCheck, exact: false },
 ] as const;
 
 function WaiterLayout() {
+  const { t } = useTranslation();
   const [profile, setProfile] = useState<WaiterProfile | null>(null);
   const [ready, setReady] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isUnauthorized, setIsUnauthorized] = useState(false);
-  const [email, setEmail] = useState("");
+  const [staffId, setStaffId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [togglingAvailability, setTogglingAvailability] = useState(false);
@@ -83,7 +80,7 @@ function WaiterLayout() {
       } else {
         const {
           data: { session },
-        } = await supabase.auth.getSession();
+        } = await waiterSupabase.auth.getSession();
         if (session?.user) {
           setIsUnauthorized(true);
         } else {
@@ -105,7 +102,7 @@ function WaiterLayout() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    } = waiterSupabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
 
       if (event === "SIGNED_OUT" || !session?.user) {
@@ -120,7 +117,7 @@ function WaiterLayout() {
       }
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    waiterSupabase.auth.getSession().then(({ data: { session } }) => {
       if (!isMounted) return;
       if (!session?.user) {
         setReady(true);
@@ -130,28 +127,26 @@ function WaiterLayout() {
     });
 
     // Real-time listener for live order assignments and updates
-    const channel = supabase
+    const channel = waiterSupabase
       .channel("waiter-station-realtime")
       .on("postgres_changes" as any, { event: "*", schema: "public", table: "orders" }, () => {
         // Dispatches custom event for child views to re-fetch
         window.dispatchEvent(new CustomEvent("neba:waiter-order-update"));
-      })
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "notifications" }, () => {
-        window.dispatchEvent(new CustomEvent("neba:waiter-notif-update"));
       })
       .subscribe();
 
     return () => {
       isMounted = false;
       subscription.unsubscribe();
-      void supabase.removeChannel(channel);
+      void waiterSupabase.removeChannel(channel);
     };
   }, []);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password) {
-      setAuthError("Please enter both email and password.");
+    const idVal = staffId.trim();
+    if (!idVal || !password) {
+      setAuthError("Please enter both Staff ID and password.");
       return;
     }
 
@@ -159,31 +154,48 @@ function WaiterLayout() {
     setAuthError(null);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      // 1. Authenticate via Staff ID endpoint
+      const res = await fetch("/api/auth/staff-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          staffId: idVal,
+          password,
+          targetPortal: "waiter",
+        }),
       });
 
-      if (error) {
-        if (error.message.toLowerCase().includes("invalid login credentials")) {
-          setAuthError("Invalid email or password.");
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (json.status === "deactivated") {
+          setAuthError(t("error.deactivated", "Your account has been deactivated."));
+        } else if (json.status === "role_mismatch") {
+          setAuthError(t("error.roleMismatch", "You do not have permission to access this portal."));
+        } else if (json.status === "not_found") {
+          setAuthError(t("error.notFound", "Your Staff ID could not be found."));
         } else {
-          setAuthError(error.message || "Failed to sign in.");
+          setAuthError(json.message || json.error || t("error.invalidCredentials", "Invalid Staff ID or password."));
         }
         setLoading(false);
         return;
       }
 
-      if (data.user) {
-        const p = await fetchWaiterProfile();
-        if (p) {
-          setProfile(p);
-          setIsUnauthorized(false);
-          setAuthError(null);
-          toast.success(`Welcome back, ${p.fullName}!`);
-        } else {
-          setIsUnauthorized(true);
-        }
+      if (json.session) {
+        await waiterSupabase.auth.setSession({
+          access_token: json.session.access_token,
+          refresh_token: json.session.refresh_token,
+        });
+      }
+
+      const p = await fetchWaiterProfile();
+      if (p) {
+        setProfile(p);
+        setIsUnauthorized(false);
+        setAuthError(null);
+        toast.success(`Welcome back, ${p.fullName}!`);
+      } else {
+        setIsUnauthorized(true);
       }
     } catch {
       setAuthError("Network error occurred during authentication.");
@@ -195,7 +207,7 @@ function WaiterLayout() {
   const handleSignOut = async () => {
     setLoading(true);
     try {
-      await supabase.auth.signOut();
+      await waiterSupabase.auth.signOut();
       setProfile(null);
       setIsUnauthorized(false);
       setPassword("");
@@ -256,10 +268,10 @@ function WaiterLayout() {
           </div>
           <div className="flex flex-col gap-2 pt-2">
             <Button variant="outline" onClick={handleSignOut} disabled={loading}>
-              <LogOut className="size-4 mr-2" /> Sign Out
+              <LogOut className="size-4 mr-2" /> {t("nav.switchAccount", "Sign Out & Switch Account")}
             </Button>
             <Button asChild variant="ghost">
-              <Link to="/">Back to Café Menu</Link>
+              <Link to="/">{t("nav.backToMenu", "Back to Café Menu")}</Link>
             </Button>
           </div>
         </div>
@@ -272,20 +284,23 @@ function WaiterLayout() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-cream px-4">
         <div className="surface-card w-full max-w-sm p-8">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="size-11 overflow-hidden rounded-full border-2 border-gold/70 shrink-0 bg-white">
-              <img
-                src={rekikLogo}
-                alt="Rekik Coffee logo"
-                className="size-full object-contain"
-              />
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="size-10 overflow-hidden rounded-full border-2 border-gold/70 shrink-0 bg-white">
+                <img
+                  src={rekikLogo}
+                  alt="Rekik Coffee logo"
+                  className="size-full object-contain"
+                />
+              </div>
+              <div>
+                <span className="font-display text-base font-bold text-foreground">Rekik Coffee</span>
+                <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-semibold">
+                  {t("login.waiterStation", "Waiter Station")}
+                </span>
+              </div>
             </div>
-            <div>
-              <span className="font-display text-lg font-bold text-foreground">Rekik Coffee</span>
-              <span className="block text-[10px] uppercase tracking-[0.2em] text-gold font-semibold">
-                Waiter Station
-              </span>
-            </div>
+            <LanguageSelector variant="compact" />
           </div>
 
           <h1 className="font-display text-2xl font-semibold mt-4">Staff Sign In</h1>
@@ -305,15 +320,15 @@ function WaiterLayout() {
             )}
 
             <div className="space-y-1.5">
-              <Label htmlFor="waiter-email">Staff Email</Label>
+              <Label htmlFor="waiter-staff-id">Staff ID</Label>
               <Input
-                id="waiter-email"
-                type="email"
+                id="waiter-staff-id"
+                type="text"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="waiter@rekikcafe.com"
-                autoComplete="email"
+                value={staffId}
+                onChange={(e) => setStaffId(e.target.value)}
+                placeholder="e.g. RK-002"
+                autoComplete="username"
                 disabled={loading}
               />
             </div>
@@ -420,6 +435,12 @@ function WaiterLayout() {
 
         {/* Bottom Profile & Actions */}
         <div className="border-t border-sidebar-border pt-3 space-y-2">
+          <div className="flex items-center justify-between px-2 pb-1">
+            <span className="text-[10px] uppercase font-semibold text-sidebar-foreground/60 tracking-wider">
+              {t("nav.language", "Language")}
+            </span>
+            <LanguageSelector variant="compact" />
+          </div>
           {profile.role === "admin" && (
             <Link
               to="/admin"
@@ -430,9 +451,8 @@ function WaiterLayout() {
             </Link>
           )}
 
-          <Link
-            to="/waiter/account"
-            className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-sidebar-accent"
+          <div
+            className="flex items-center gap-3 rounded-lg p-2 bg-sidebar-accent/30"
           >
             <Avatar className="size-9 border border-sidebar-border shrink-0">
               <AvatarFallback className="bg-primary/20 text-primary text-xs font-semibold">
@@ -447,7 +467,7 @@ function WaiterLayout() {
                 {profile.role}
               </p>
             </div>
-          </Link>
+          </div>
 
           <Button
             variant="ghost"

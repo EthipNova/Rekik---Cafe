@@ -29,12 +29,24 @@ const COMMON_REASONS = [
   "Screenshot does not show successful transfer status",
 ];
 
+const CASH_REASONS = [
+  "Cash was not received at register",
+  "Insufficient cash amount tendered",
+  "Customer requested another payment method",
+  "Order cancelled by customer",
+];
+
 export function RejectDialog({ open, item, onConfirm, onClose }: RejectDialogProps) {
   const [reason, setReason] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!item) return null;
+
+  const isCash =
+    (item.payment_method || "").toLowerCase().includes("cash") ||
+    item.proof_screenshot_path === "cash-direct";
+  const availableReasons = isCash ? CASH_REASONS : COMMON_REASONS;
 
   const handleSelectPreset = (preset: string) => {
     setReason(preset);
@@ -55,7 +67,7 @@ export function RejectDialog({ open, item, onConfirm, onClose }: RejectDialogPro
       setReason("");
       onClose();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to reject payment proof.";
+      const msg = err instanceof Error ? err.message : (isCash ? "Failed to reject cash payment." : "Failed to reject payment proof.");
       setErrorMsg(msg);
     } finally {
       setIsSubmitting(false);
@@ -70,10 +82,12 @@ export function RejectDialog({ open, item, onConfirm, onClose }: RejectDialogPro
             <XCircle className="h-6 w-6" />
           </div>
           <DialogTitle className="text-xl font-bold font-display text-foreground">
-            Reject Payment Proof
+            {isCash ? "Reject Cash Payment" : "Reject Payment Proof"}
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            Specify why this payment proof cannot be approved. The customer and assigned waiter will receive this reason and can resubmit a corrected receipt.
+            {isCash
+              ? "Specify why this cash payment cannot be verified. The customer and assigned waiter will receive this notification."
+              : "Specify why this payment proof cannot be approved. The customer and assigned waiter will receive this reason and can resubmit a corrected receipt."}
           </DialogDescription>
         </DialogHeader>
 
@@ -82,6 +96,16 @@ export function RejectDialog({ open, item, onConfirm, onClose }: RejectDialogPro
             <div className="flex justify-between">
               <span className="text-muted-foreground">Order:</span>
               <span className="font-semibold text-foreground">{item.order_number} ({item.customer_name})</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Payment Method:</span>
+              {isCash ? (
+                <span className="font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded text-[11px]">
+                  💵 Cash
+                </span>
+              ) : (
+                <span className="font-medium text-foreground">{item.payment_method}</span>
+              )}
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Submitted Amount:</span>
@@ -94,7 +118,7 @@ export function RejectDialog({ open, item, onConfirm, onClose }: RejectDialogPro
               Quick Select Reason
             </Label>
             <div className="flex flex-wrap gap-1.5">
-              {COMMON_REASONS.map((preset) => (
+              {availableReasons.map((preset) => (
                 <button
                   key={preset}
                   type="button"
@@ -117,7 +141,7 @@ export function RejectDialog({ open, item, onConfirm, onClose }: RejectDialogPro
             </Label>
             <Textarea
               id="rejection-reason"
-              placeholder="Explain the issue clearly to the customer..."
+              placeholder={isCash ? "Explain why cash payment was not received or accepted..." : "Explain the issue clearly to the customer..."}
               value={reason}
               onChange={(e) => {
                 setReason(e.target.value);

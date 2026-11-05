@@ -71,11 +71,14 @@ function ProductPage() {
       <div className="grid gap-10 md:grid-cols-2">
         <div className="surface-card overflow-hidden">
           <img
-            src={product.image}
+            src={product.image || "/images/coffee-thumb.jpg"}
             alt={product.name}
             width={768}
             height={768}
             className="aspect-square w-full object-cover"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = "/images/coffee-thumb.jpg";
+            }}
           />
         </div>
 

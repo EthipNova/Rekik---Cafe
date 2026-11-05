@@ -1,85 +1,62 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
-  AlertCircle,
   ArrowRight,
   CheckCircle2,
   Clock,
   CreditCard,
-  History,
+  QrCode,
   RefreshCw,
   ShoppingBag,
   Sparkles,
   Utensils,
-  XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { formatETB } from "@/lib/menu-data";
 import { WaiterPaymentDialog } from "@/components/waiter/WaiterPaymentDialog";
 import {
-  approveWaiterOrder,
   fetchWaiterMetrics,
   fetchWaiterOrders,
   formatTimeAgo,
   getMethodLabel,
+  getOrderPaymentStatus,
   getOrderStatusBadge,
-  getWaiterDecisionBadge,
-  rejectWaiterOrder,
 } from "@/lib/waiter";
 import type { WaiterMetrics, WaiterOrder } from "@/types/waiter";
 
 export const Route = createFileRoute("/waiter/")({
   head: () => ({
     meta: [
-      { title: "Waiter Overview — NEBA Café" },
+      { title: "Waiter Dashboard — Rekik Café" },
       { name: "robots", content: "noindex" },
     ],
   }),
-  component: WaiterOverview,
+  component: WaiterDashboardOverview,
 });
 
-export function WaiterOverview() {
+export function WaiterDashboardOverview() {
   const [metrics, setMetrics] = useState<WaiterMetrics | null>(null);
-  const [pendingOrders, setPendingOrders] = useState<WaiterOrder[]>([]);
+  const [activeOrders, setActiveOrders] = useState<WaiterOrder[]>([]);
   const [recentOrders, setRecentOrders] = useState<WaiterOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Modal actions
-  const [activeOrder, setActiveOrder] = useState<WaiterOrder | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<WaiterOrder | null>(null);
-  const [actionType, setActionType] = useState<"approve" | "reject" | null>(null);
-  const [approvalNotes, setApprovalNotes] = useState("");
-  const [rejectionReason, setRejectionReason] = useState("");
-  const [processingAction, setProcessingAction] = useState(false);
 
   const loadData = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
-      const [m, pending, recent] = await Promise.all([
+      const [m, active, recent] = await Promise.all([
         fetchWaiterMetrics().catch(() => null),
-        fetchWaiterOrders({ status: "pending_review" }).catch(() => []),
+        fetchWaiterOrders({ status: "active" }).catch(() => []),
         fetchWaiterOrders().catch(() => []),
       ]);
 
       if (m) setMetrics(m);
-      setPendingOrders(pending || []);
+      setActiveOrders(active || []);
       setRecentOrders(recent || []);
     } catch (err) {
-      console.warn("Failed to load waiter overview:", err);
+      console.warn("Failed to load waiter dashboard overview:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -92,83 +69,48 @@ export function WaiterOverview() {
     // Listen for realtime events dispatched by WaiterLayout
     const handleUpdate = () => void loadData();
     window.addEventListener("neba:waiter-order-update", handleUpdate);
-    window.addEventListener("neba:waiter-notif-update", handleUpdate);
 
-    // 12s polling fallback
-    const interval = setInterval(() => void loadData(), 12000);
+    // 15s polling fallback
+    const interval = setInterval(() => void loadData(), 15000);
 
     return () => {
       window.removeEventListener("neba:waiter-order-update", handleUpdate);
-      window.removeEventListener("neba:waiter-notif-update", handleUpdate);
       clearInterval(interval);
     };
   }, []);
 
-  const handleConfirmAction = async () => {
-    if (!activeOrder || !actionType) return;
-    setProcessingAction(true);
-
-    try {
-      if (actionType === "approve") {
-        const approved = await approveWaiterOrder(activeOrder.id, approvalNotes.trim() || undefined);
-        toast.success(`Order #${activeOrder.orderNumber} approved!`);
-        // Immediately reveal the Payment Evidence upload step for the approved order
-        setPaymentOrder(approved);
-      } else {
-        if (!rejectionReason.trim()) {
-          toast.error("Please provide a rejection reason.");
-          setProcessingAction(false);
-          return;
-        }
-        await rejectWaiterOrder(activeOrder.id, rejectionReason.trim());
-        toast.success(`Order #${activeOrder.orderNumber} rejected.`);
-      }
-
-      setActiveOrder(null);
-      setActionType(null);
-      setApprovalNotes("");
-      setRejectionReason("");
-      void loadData(true);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to process order";
-      toast.error(msg);
-    } finally {
-      setProcessingAction(false);
-    }
-  };
-
   const metricCards = [
     {
-      label: "Awaiting My Review",
-      value: metrics ? String(metrics.pendingReview) : "0",
-      highlight: (metrics?.pendingReview ?? 0) > 0,
-      icon: Clock,
+      label: "Active Orders",
+      value: String(activeOrders.length),
+      highlight: activeOrders.length > 0,
+      icon: ShoppingBag,
       color: "text-amber-600 bg-amber-500/10",
-      link: "/waiter/orders?status=pending_review",
+      link: "/waiter/orders",
     },
     {
-      label: "Approved Today",
-      value: metrics ? String(metrics.approvedToday) : "0",
+      label: "In Preparation",
+      value: String(activeOrders.filter((o) => o.status === "preparing").length),
       highlight: false,
+      icon: Clock,
+      color: "text-purple-600 bg-purple-500/10",
+      link: "/waiter/orders?status=preparing",
+    },
+    {
+      label: "Ready for Service",
+      value: String(activeOrders.filter((o) => o.status === "ready").length),
+      highlight: activeOrders.some((o) => o.status === "ready"),
       icon: CheckCircle2,
       color: "text-emerald-600 bg-emerald-500/10",
-      link: "/waiter/orders?status=approved",
-    },
-    {
-      label: "Awaiting Payment",
-      value: metrics ? String(metrics.awaitingPayment) : "0",
-      highlight: false,
-      icon: CreditCard,
-      color: "text-blue-600 bg-blue-500/10",
-      link: "/waiter/payments",
+      link: "/waiter/orders?status=ready",
     },
     {
       label: "Cashier Review",
       value: metrics ? String(metrics.underCashierReview) : "0",
       highlight: false,
       icon: Sparkles,
-      color: "text-purple-600 bg-purple-500/10",
-      link: "/waiter/payments",
+      color: "text-blue-600 bg-blue-500/10",
+      link: "/waiter/history",
     },
     {
       label: "Completed Today",
@@ -179,10 +121,10 @@ export function WaiterOverview() {
       link: "/waiter/history",
     },
     {
-      label: "Today's Total Value",
+      label: "Today's Revenue",
       value: formatETB(metrics?.todayTotalRevenue ?? 0),
       highlight: false,
-      icon: ShoppingBag,
+      icon: CreditCard,
       color: "text-primary bg-primary/10",
       link: "/waiter/history",
     },
@@ -194,10 +136,10 @@ export function WaiterOverview() {
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight">
-            Waiter Overview
+            Waiter Dashboard
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            Real-time table and order review station.
+            Real-time table orders, service status, and settlement station.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -212,7 +154,7 @@ export function WaiterOverview() {
             Refresh
           </Button>
           <Button asChild size="sm" className="h-9 gap-2 text-xs">
-            <Link to="/waiter/orders">View All Orders</Link>
+            <Link to="/waiter/orders">View All Current Orders</Link>
           </Button>
         </div>
       </header>
@@ -224,7 +166,7 @@ export function WaiterOverview() {
             key={card.label}
             to={card.link}
             className={`surface-card p-4 transition-all hover:shadow-md hover:border-primary/40 block ${
-              card.highlight ? "ring-2 ring-amber-500/30 bg-amber-500/5" : ""
+              card.highlight ? "ring-2 ring-primary/30 bg-primary/5" : ""
             }`}
           >
             <div className="flex items-center justify-between">
@@ -232,8 +174,8 @@ export function WaiterOverview() {
                 <card.icon className="size-4" />
               </span>
               {card.highlight && (
-                <Badge variant="outline" className="border-amber-500 text-amber-600 text-[10px] px-1.5 py-0 animate-pulse">
-                  Action
+                <Badge variant="outline" className="border-primary text-primary text-[10px] px-1.5 py-0">
+                  Active
                 </Badge>
               )}
             </div>
@@ -245,49 +187,53 @@ export function WaiterOverview() {
         ))}
       </div>
 
-      {/* Immediate Attention Queue */}
+      {/* Current Active Orders */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h2 className="font-display text-lg sm:text-xl font-semibold">
-              Action Queue: Pending Review
+              Current Active Orders
             </h2>
             <Badge variant="secondary" className="text-xs font-semibold">
-              {pendingOrders.length}
+              {activeOrders.length}
             </Badge>
           </div>
-          {pendingOrders.length > 0 && (
+          {activeOrders.length > 0 && (
             <Link
               to="/waiter/orders"
               className="text-xs font-medium text-primary hover:underline flex items-center gap-1"
             >
-              Open Orders Tab <ArrowRight className="size-3" />
+              Open Full Orders Tab <ArrowRight className="size-3" />
             </Link>
           )}
         </div>
 
         {loading ? (
           <div className="surface-card p-10 text-center text-sm text-muted-foreground animate-pulse">
-            Loading pending orders…
+            Loading active orders…
           </div>
-        ) : pendingOrders.length === 0 ? (
+        ) : activeOrders.length === 0 ? (
           <div className="surface-card p-8 text-center space-y-2 border-dashed">
             <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600">
               <CheckCircle2 className="size-5" />
             </div>
-            <p className="font-medium text-sm">All caught up!</p>
+            <p className="font-medium text-sm">No active orders right now</p>
             <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-              No orders are currently waiting for review. New orders assigned to you will appear here instantly.
+              Newly submitted orders assigned to you will automatically appear here instantly.
             </p>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {pendingOrders.map((order) => {
+            {activeOrders.map((order) => {
               const method = getMethodLabel(order.method);
+              const statusBadge = getOrderStatusBadge(order.status);
+              const paymentStatus = getOrderPaymentStatus(order);
+              const isPaid = paymentStatus.status === "Paid";
+
               return (
                 <div
                   key={order.id}
-                  className="surface-card p-4 flex flex-col justify-between border-amber-500/30 hover:border-amber-500/60 transition-colors shadow-sm space-y-3"
+                  className="surface-card p-4 flex flex-col justify-between border-border hover:border-primary/50 transition-colors shadow-sm space-y-3"
                 >
                   <div className="space-y-2">
                     <div className="flex items-start justify-between gap-2">
@@ -303,14 +249,25 @@ export function WaiterOverview() {
                         <p className="text-xs font-medium text-foreground mt-0.5">
                           {order.customerName}
                           {order.tableNumber && (
-                            <span className="ml-2 font-semibold text-primary">
-                              Table {order.tableNumber}
+                            <span className="ml-2 inline-flex items-center gap-1 font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded text-[11px]">
+                              <QrCode className="size-3" />
+                              Table #{order.tableNumber}
                             </span>
                           )}
                         </p>
                       </div>
                       <Badge variant="outline" className={`text-[10px] ${method.color}`}>
                         {method.label}
+                      </Badge>
+                    </div>
+
+                    {/* Status & Payment Badges */}
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      <Badge variant="outline" className={`text-[10px] ${statusBadge.className}`}>
+                        {statusBadge.label}
+                      </Badge>
+                      <Badge variant="outline" className={`text-[10px] ${paymentStatus.className}`}>
+                        {paymentStatus.label}
                       </Badge>
                     </div>
 
@@ -350,28 +307,24 @@ export function WaiterOverview() {
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="flex gap-2">
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-8 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
-                        onClick={() => {
-                          setActiveOrder(order);
-                          setActionType("reject");
-                        }}
+                        asChild
+                        className="h-8 flex-1 text-xs"
                       >
-                        Reject
+                        <Link to="/waiter/orders">View Details</Link>
                       </Button>
-                      <Button
-                        size="sm"
-                        className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                        onClick={() => {
-                          setActiveOrder(order);
-                          setActionType("approve");
-                        }}
-                      >
-                        Approve
-                      </Button>
+                      {!isPaid && (
+                        <Button
+                          size="sm"
+                          className="h-8 flex-1 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
+                          onClick={() => setPaymentOrder(order)}
+                        >
+                          Record Payment
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -381,17 +334,17 @@ export function WaiterOverview() {
         )}
       </section>
 
-      {/* Recent Activity */}
+      {/* Recent Activity Table */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg sm:text-xl font-semibold">
-            Recent Assigned Activity
+            Recent Assigned Orders
           </h2>
           <Link
             to="/waiter/history"
             className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1"
           >
-            History <ArrowRight className="size-3" />
+            Order History <ArrowRight className="size-3" />
           </Link>
         </div>
 
@@ -403,8 +356,8 @@ export function WaiterOverview() {
                   <th className="p-3">Order</th>
                   <th className="p-3">Customer / Table</th>
                   <th className="p-3">Method</th>
-                  <th className="p-3">Review Decision</th>
-                  <th className="p-3">State</th>
+                  <th className="p-3">Order State</th>
+                  <th className="p-3">Payment Status</th>
                   <th className="p-3 text-right">Total</th>
                   <th className="p-3 text-right">Time</th>
                 </tr>
@@ -419,7 +372,7 @@ export function WaiterOverview() {
                 ) : (
                   recentOrders.slice(0, 8).map((o) => {
                     const statusBadge = getOrderStatusBadge(o.status);
-                    const decisionBadge = getWaiterDecisionBadge(o.waiterDecision);
+                    const paymentStatus = getOrderPaymentStatus(o);
                     const method = getMethodLabel(o.method);
 
                     return (
@@ -443,13 +396,13 @@ export function WaiterOverview() {
                           </span>
                         </td>
                         <td className="p-3">
-                          <Badge variant="outline" className={`text-[10px] ${decisionBadge.className}`}>
-                            {decisionBadge.label}
+                          <Badge variant="outline" className={`text-[10px] ${statusBadge.className}`}>
+                            {statusBadge.label}
                           </Badge>
                         </td>
                         <td className="p-3">
-                          <Badge variant="outline" className={`text-[10px] ${statusBadge.className}`}>
-                            {statusBadge.label}
+                          <Badge variant="outline" className={`text-[10px] ${paymentStatus.className}`}>
+                            {paymentStatus.label}
                           </Badge>
                         </td>
                         <td className="p-3 text-right font-semibold text-foreground">
@@ -468,120 +421,18 @@ export function WaiterOverview() {
         </div>
       </section>
 
-      {/* Confirmation Dialogs for Approve / Reject */}
-      <Dialog
-        open={Boolean(activeOrder && actionType)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setActiveOrder(null);
-            setActionType(null);
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {actionType === "approve"
-                ? `Approve Order #${activeOrder?.orderNumber}`
-                : `Reject Order #${activeOrder?.orderNumber}`}
-            </DialogTitle>
-            <DialogDescription>
-              {actionType === "approve"
-                ? "Confirming this order notifies the customer and kitchen to proceed with meal preparation."
-                : "A rejection reason is strictly required so the customer can be notified accurately."}
-            </DialogDescription>
-          </DialogHeader>
-
-          {activeOrder && (
-            <div className="space-y-3 py-2 text-xs">
-              <div className="rounded-lg bg-muted/50 p-3 space-y-1.5">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Customer:</span>
-                  <span className="font-medium">{activeOrder.customerName}</span>
-                </div>
-                {activeOrder.tableNumber && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Table:</span>
-                    <span className="font-semibold text-primary">{activeOrder.tableNumber}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Order Total:</span>
-                  <span className="font-bold text-foreground">{formatETB(activeOrder.totalAmount)}</span>
-                </div>
-              </div>
-
-              {actionType === "approve" ? (
-                <div className="space-y-1.5">
-                  <Label htmlFor="approval-notes" className="text-xs">
-                    Optional Waiter Notes (e.g. Special requests confirmed)
-                  </Label>
-                  <Input
-                    id="approval-notes"
-                    placeholder="e.g. Verified table 4, kitchen expedited"
-                    value={approvalNotes}
-                    onChange={(e) => setApprovalNotes(e.target.value)}
-                    disabled={processingAction}
-                  />
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <Label htmlFor="rejection-reason" className="text-xs text-destructive font-medium">
-                    Reason for Rejection (Required) *
-                  </Label>
-                  <Textarea
-                    id="rejection-reason"
-                    required
-                    placeholder="e.g. Selected item is out of stock / Invalid table number / Café closing"
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    rows={3}
-                    disabled={processingAction}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={processingAction}
-              onClick={() => {
-                setActiveOrder(null);
-                setActionType(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={processingAction || (actionType === "reject" && !rejectionReason.trim())}
-              className={
-                actionType === "approve"
-                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                  : "bg-destructive hover:bg-destructive/90 text-white"
-              }
-              onClick={handleConfirmAction}
-            >
-              {processingAction
-                ? "Processing…"
-                : actionType === "approve"
-                  ? "Confirm Approval"
-                  : "Confirm Rejection"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Waiter Payment Evidence Dialog */}
-      <WaiterPaymentDialog
-        order={paymentOrder}
-        open={Boolean(paymentOrder)}
-        onOpenChange={(open) => !open && setPaymentOrder(null)}
-        onSuccess={() => void loadData()}
-      />
+      {/* Waiter Payment Dialog for fast recording */}
+      {paymentOrder && (
+        <WaiterPaymentDialog
+          order={paymentOrder}
+          open={Boolean(paymentOrder)}
+          onOpenChange={(open) => !open && setPaymentOrder(null)}
+          onSuccess={() => {
+            setPaymentOrder(null);
+            void loadData(true);
+          }}
+        />
+      )}
     </div>
   );
 }

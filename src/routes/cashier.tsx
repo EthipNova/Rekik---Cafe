@@ -1,8 +1,9 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Coffee, ShieldAlert, Menu } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { Coffee, ShieldAlert, Menu, LogOut, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cashierSupabase, supabase } from "@/lib/supabase";
 import { applyTheme, readSettings } from "@/lib/settings";
 import type {
   CashierStaffProfile,
@@ -61,6 +62,7 @@ export function CashierRoutePage() {
   const [authChecking, setAuthChecking] = useState(true);
   const [profile, setProfile] = useState<CashierStaffProfile | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [unauthorizedStaff, setUnauthorizedStaff] = useState<{ fullName: string; role: string } | null>(null);
 
   // Dashboard Data State
   const [activeTab, setActiveTab] = useState<string>("pending");
@@ -83,10 +85,11 @@ export function CashierRoutePage() {
     try {
       const {
         data: { session },
-      } = await supabase.auth.getSession();
+      } = await cashierSupabase.auth.getSession();
 
       if (!session?.user) {
         setProfile(null);
+        setUnauthorizedStaff(null);
         setAuthChecking(false);
         return;
       }
@@ -94,9 +97,24 @@ export function CashierRoutePage() {
       const meResult = await fetchCashierMe();
       if (meResult.success) {
         setProfile(meResult.profile);
+        setUnauthorizedStaff(null);
         setAuthError(null);
       } else {
         setProfile(null);
+        try {
+          const { data: sp } = await (cashierSupabase.from("staff_profiles" as any) as any)
+            .select("role, full_name")
+            .eq("user_id", session.user.id)
+            .maybeSingle();
+          if (sp && sp.role && sp.role !== "cashier") {
+            setUnauthorizedStaff({
+              fullName: sp.full_name || "Staff Member",
+              role: sp.role,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
         setAuthError(meResult.message);
       }
     } catch (err: unknown) {
@@ -115,10 +133,11 @@ export function CashierRoutePage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    } = cashierSupabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
       if (event === "SIGNED_OUT" || !session) {
         setProfile(null);
+        setUnauthorizedStaff(null);
         setAuthChecking(false);
       } else if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
         verifySession();
@@ -222,7 +241,7 @@ export function CashierRoutePage() {
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      await cashierSupabase.auth.signOut();
       setProfile(null);
       setAuthError(null);
       toast.success("Signed out of Cashier shift.");
@@ -244,6 +263,57 @@ export function CashierRoutePage() {
           <span className="text-sm font-semibold text-[#2A1810]">
             Verifying Cashier Authorization...
           </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Authenticated but non-cashier role (e.g. Waiter or Admin)
+  if (unauthorizedStaff) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FAF7F2] px-4">
+        <div className="w-full max-w-md p-8 text-center space-y-5 bg-white border border-[#EAE3D9] rounded-3xl shadow-xl">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-destructive/10 text-destructive border border-destructive/20 shadow-xs">
+            <ShieldAlert className="size-7" />
+          </div>
+          <div>
+            <h1 className="font-display text-2xl font-bold text-[#1A110D]">Access Restricted</h1>
+            <p className="mt-2 text-sm text-[#70645C] leading-relaxed">
+              You are currently signed in as{" "}
+              <span className="font-semibold text-[#1A110D]">{unauthorizedStaff.fullName}</span> with role{" "}
+              <span className="font-semibold capitalize text-[#1A110D]">{unauthorizedStaff.role}</span>.
+              The Cashier Dashboard is restricted to Cashier staff.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2.5 pt-2">
+            {unauthorizedStaff.role === "waiter" && (
+              <Button asChild className="w-full bg-[#1B110B] hover:bg-[#2A1810] text-white">
+                <Link to="/waiter">Go to Waiter Station</Link>
+              </Button>
+            )}
+            {unauthorizedStaff.role === "admin" && (
+              <Button asChild className="w-full bg-[#1B110B] hover:bg-[#2A1810] text-white">
+                <Link to="/admin">Go to Admin Console</Link>
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={async () => {
+                await cashierSupabase.auth.signOut();
+                setProfile(null);
+                setUnauthorizedStaff(null);
+                setAuthError(null);
+                toast.success("Signed out successfully");
+              }}
+              className="w-full border-[#DFD6C8] hover:bg-[#FAF7F2]"
+            >
+              <LogOut className="size-4 mr-2" /> Sign Out & Switch Account
+            </Button>
+            <Button asChild variant="ghost" className="w-full text-xs text-[#70645C]">
+              <Link to="/">Back to Café Menu</Link>
+            </Button>
+          </div>
         </div>
       </div>
     );

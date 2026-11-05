@@ -1,37 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  AlertCircle,
-  Calendar,
   Camera,
   CheckCircle2,
   Clock,
   Eye,
-  FileImage,
-  Filter,
   Phone,
+  QrCode,
   Receipt,
   RefreshCw,
+  Banknote,
   Search,
   ShoppingBag,
+  Upload,
   User,
   UtensilsCrossed,
-  Upload,
-  XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -40,24 +28,21 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { formatETB } from "@/lib/menu-data";
 import { WaiterPaymentDialog } from "@/components/waiter/WaiterPaymentDialog";
 import {
-  approveWaiterOrder,
   fetchWaiterOrders,
   formatTimeAgo,
   getMethodLabel,
+  getOrderPaymentStatus,
   getOrderStatusBadge,
-  getWaiterDecisionBadge,
-  rejectWaiterOrder,
 } from "@/lib/waiter";
 import type { WaiterOrder } from "@/types/waiter";
 
 export const Route = createFileRoute("/waiter/orders")({
   head: () => ({
     meta: [
-      { title: "Assigned Orders — Waiter Station" },
+      { title: "Current Orders — Waiter Station" },
       { name: "robots", content: "noindex" },
     ],
   }),
@@ -68,7 +53,7 @@ export function WaiterOrdersPage() {
   const [orders, setOrders] = useState<WaiterOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [statusTab, setStatusTab] = useState<string>("pending_review");
+  const [statusTab, setStatusTab] = useState<string>("active");
   const [searchTerm, setSearchTerm] = useState("");
   const [dateFilter, setDateFilter] = useState<string>("all");
 
@@ -77,13 +62,6 @@ export function WaiterOrdersPage() {
 
   // Payment Submission Dialog
   const [paymentOrder, setPaymentOrder] = useState<WaiterOrder | null>(null);
-
-  // Approval / Rejection dialogs
-  const [actionOrder, setActionOrder] = useState<WaiterOrder | null>(null);
-  const [actionType, setActionType] = useState<"approve" | "reject" | null>(null);
-  const [approvalNotes, setApprovalNotes] = useState("");
-  const [rejectionReason, setRejectionReason] = useState("");
-  const [submittingAction, setSubmittingAction] = useState(false);
 
   const loadOrders = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -126,54 +104,16 @@ export function WaiterOrdersPage() {
     void loadOrders(true);
   };
 
-  const handleConfirmDecision = async () => {
-    if (!actionOrder || !actionType) return;
-    setSubmittingAction(true);
-
-    try {
-      if (actionType === "approve") {
-        const approved = await approveWaiterOrder(
-          actionOrder.id,
-          approvalNotes.trim() || undefined,
-        );
-        toast.success(`Order #${actionOrder.orderNumber} approved successfully`);
-        if (selectedOrder?.id === actionOrder.id) setSelectedOrder(approved);
-        // Step 5: Immediately reveal the Payment Evidence upload step for the approved order
-        setPaymentOrder(approved);
-      } else {
-        if (!rejectionReason.trim()) {
-          toast.error("Rejection reason is mandatory.");
-          setSubmittingAction(false);
-          return;
-        }
-        const rejected = await rejectWaiterOrder(actionOrder.id, rejectionReason.trim());
-        toast.success(`Order #${actionOrder.orderNumber} marked as rejected`);
-        if (selectedOrder?.id === actionOrder.id) setSelectedOrder(rejected);
-      }
-
-      setActionOrder(null);
-      setActionType(null);
-      setApprovalNotes("");
-      setRejectionReason("");
-      void loadOrders(true);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to process decision";
-      toast.error(msg);
-    } finally {
-      setSubmittingAction(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight">
-            Order Station
+            Current Orders
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            Review, verify table service, and confirm orders in real time.
+            Monitor active meal preparation, table service, and customer payments in real time.
           </p>
         </div>
         <Button
@@ -193,17 +133,17 @@ export function WaiterOrdersPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Tabs value={statusTab} onValueChange={setStatusTab} className="w-full sm:w-auto">
             <TabsList className="bg-muted/70">
-              <TabsTrigger value="pending_review" className="text-xs font-medium">
-                Awaiting Review
-              </TabsTrigger>
               <TabsTrigger value="active" className="text-xs font-medium">
-                In Progress
+                All Active
               </TabsTrigger>
-              <TabsTrigger value="approved" className="text-xs font-medium">
-                Approved
+              <TabsTrigger value="confirmed" className="text-xs font-medium">
+                Confirmed
               </TabsTrigger>
-              <TabsTrigger value="rejected" className="text-xs font-medium">
-                Rejected
+              <TabsTrigger value="preparing" className="text-xs font-medium">
+                Preparing
+              </TabsTrigger>
+              <TabsTrigger value="ready" className="text-xs font-medium">
+                Ready for Service
               </TabsTrigger>
               <TabsTrigger value="all" className="text-xs font-medium">
                 All Orders
@@ -211,7 +151,7 @@ export function WaiterOrdersPage() {
             </TabsList>
           </Tabs>
 
-          {/* Date Selector */}
+          {/* Quick Date Selector */}
           <div className="flex items-center gap-1.5 bg-muted/60 rounded-lg p-1 text-xs">
             <button
               type="button"
@@ -296,15 +236,13 @@ export function WaiterOrdersPage() {
           {orders.map((order) => {
             const method = getMethodLabel(order.method);
             const statusBadge = getOrderStatusBadge(order.status);
-            const decisionBadge = getWaiterDecisionBadge(order.waiterDecision);
-            const isPendingDecision = order.waiterDecision === "pending";
+            const paymentStatus = getOrderPaymentStatus(order);
+            const isPaid = paymentStatus.status === "Paid";
 
             return (
               <div
                 key={order.id}
-                className={`surface-card p-4 flex flex-col justify-between transition-all hover:shadow-md ${
-                  isPendingDecision ? "border-amber-500/40 bg-amber-500/[0.02]" : ""
-                }`}
+                className="surface-card p-4 flex flex-col justify-between transition-all hover:shadow-md border-border hover:border-primary/40"
               >
                 <div className="space-y-3">
                   {/* Top Bar */}
@@ -322,8 +260,9 @@ export function WaiterOrdersPage() {
                         <User className="size-3 text-muted-foreground" />
                         {order.customerName}
                         {order.tableNumber && (
-                          <span className="ml-1.5 font-bold text-primary bg-primary/10 px-1.5 py-0.2 rounded text-[11px]">
-                            Table {order.tableNumber}
+                          <span className="ml-1.5 inline-flex items-center gap-1 font-bold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded text-[11px]">
+                            <QrCode className="size-3" />
+                            Table #{order.tableNumber}
                           </span>
                         )}
                       </p>
@@ -334,13 +273,13 @@ export function WaiterOrdersPage() {
                     </Badge>
                   </div>
 
-                  {/* Badges */}
+                  {/* Badges: Order Status & Payment Status */}
                   <div className="flex flex-wrap gap-1.5">
-                    <Badge variant="outline" className={`text-[10px] ${decisionBadge.className}`}>
-                      {decisionBadge.label}
-                    </Badge>
                     <Badge variant="outline" className={`text-[10px] ${statusBadge.className}`}>
                       {statusBadge.label}
+                    </Badge>
+                    <Badge variant="outline" className={`text-[10px] ${paymentStatus.className}`}>
+                      {paymentStatus.label}
                     </Badge>
                   </div>
 
@@ -368,12 +307,6 @@ export function WaiterOrdersPage() {
                       <span className="font-semibold">Note:</span> {order.customerNotes}
                     </p>
                   )}
-
-                  {order.waiterRejectionReason && (
-                    <div className="rounded bg-destructive/10 border border-destructive/20 p-2 text-[11px] text-destructive">
-                      <span className="font-semibold">Rejection reason:</span> {order.waiterRejectionReason}
-                    </div>
-                  )}
                 </div>
 
                 {/* Footer and Actions */}
@@ -397,44 +330,16 @@ export function WaiterOrdersPage() {
                       <Eye className="size-3.5" /> Details
                     </Button>
 
-                    {isPendingDecision && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 px-2.5 text-xs text-destructive hover:bg-destructive/10 border-destructive/30"
-                          onClick={() => {
-                            setActionOrder(order);
-                            setActionType("reject");
-                          }}
-                        >
-                          Reject
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                          onClick={() => {
-                            setActionOrder(order);
-                            setActionType("approve");
-                          }}
-                        >
-                          Approve
-                        </Button>
-                      </>
+                    {!isPaid && (
+                      <Button
+                        size="sm"
+                        className="h-8 flex-1 text-xs bg-primary text-primary-foreground hover:bg-primary/90 font-medium gap-1"
+                        onClick={() => setPaymentOrder(order)}
+                      >
+                        <Camera className="size-3" />
+                        <span>Record Payment</span>
+                      </Button>
                     )}
-                    {!isPendingDecision &&
-                      order.waiterDecision === "approved" &&
-                      order.payments?.[0]?.status !== "paid" &&
-                      (!order.payments?.[0]?.proof || order.payments?.[0]?.proof.status === "rejected") && (
-                        <Button
-                          size="sm"
-                          className="h-8 px-2.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90 font-medium gap-1"
-                          onClick={() => setPaymentOrder(order)}
-                        >
-                          <Camera className="size-3" />
-                          <span>{order.payments?.[0]?.proof?.status === "rejected" ? "Re-upload Proof" : "Evidence"}</span>
-                        </Button>
-                      )}
                   </div>
                 </div>
               </div>
@@ -462,116 +367,86 @@ export function WaiterOrdersPage() {
                 </SheetDescription>
               </SheetHeader>
 
-              {/* Status and Actions */}
+              {/* Status Badges */}
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline" className={`text-xs ${getWaiterDecisionBadge(selectedOrder.waiterDecision).className}`}>
-                    {getWaiterDecisionBadge(selectedOrder.waiterDecision).label}
-                  </Badge>
                   <Badge variant="outline" className={`text-xs ${getOrderStatusBadge(selectedOrder.status).className}`}>
-                    {getOrderStatusBadge(selectedOrder.status).label}
+                    Status: {getOrderStatusBadge(selectedOrder.status).label}
+                  </Badge>
+                  <Badge variant="outline" className={`text-xs ${getOrderPaymentStatus(selectedOrder).className}`}>
+                    Payment: {getOrderPaymentStatus(selectedOrder).label}
                   </Badge>
                 </div>
 
-                {selectedOrder.waiterDecision === "pending" && (
-                  <div className="flex gap-2 pt-1">
-                    <Button
-                      size="sm"
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8"
-                      onClick={() => {
-                        setActionOrder(selectedOrder);
-                        setActionType("approve");
-                      }}
-                    >
-                      <CheckCircle2 className="size-3.5 mr-1.5" /> Approve Order
-                    </Button>
-                    <Button
+                {/* Clearly Identifiable Payment Evidence / Settlement Section */}
+                <div className="rounded-lg border border-border/80 bg-muted/20 p-3.5 space-y-2 mt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-foreground flex items-center gap-1.5">
+                      <Receipt className="size-3.5 text-primary" /> Payment Settlement
+                    </span>
+                    <Badge
                       variant="outline"
-                      size="sm"
-                      className="flex-1 text-destructive hover:bg-destructive/10 border-destructive/30 text-xs h-8"
-                      onClick={() => {
-                        setActionOrder(selectedOrder);
-                        setActionType("reject");
-                      }}
+                      className={`text-[10px] ${getOrderPaymentStatus(selectedOrder).className}`}
                     >
-                      <XCircle className="size-3.5 mr-1.5" /> Reject Order
-                    </Button>
+                      {getOrderPaymentStatus(selectedOrder).label}
+                    </Badge>
                   </div>
-                )}
 
-                {/* Clearly Identifiable Payment Evidence Section */}
-                {selectedOrder.waiterDecision === "approved" && (
-                  <div className="rounded-lg border border-border/80 bg-muted/20 p-3 space-y-2 mt-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs text-foreground flex items-center gap-1.5">
-                        <Receipt className="size-3.5 text-primary" /> Payment Evidence
+                  {getOrderPaymentStatus(selectedOrder).status === "Paid" ? (
+                    <div className="rounded-md bg-emerald-500/10 border border-emerald-500/30 p-2.5 text-xs text-emerald-600 dark:text-emerald-400 flex items-center justify-between">
+                      <span className="font-semibold flex items-center gap-1.5">
+                        <CheckCircle2 className="size-3.5" /> Payment Settled & Verified
                       </span>
-                      <Badge
-                        variant="outline"
-                        className={
-                          selectedOrder.payments?.[0]?.status === "paid"
-                            ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]"
-                            : selectedOrder.payments?.[0]?.proof?.status === "pending"
-                              ? "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30 text-[10px]"
-                              : selectedOrder.payments?.[0]?.proof?.status === "rejected"
-                                ? "bg-destructive/10 text-destructive border-destructive/30 text-[10px]"
-                                : "bg-amber-500/10 text-amber-600 border-amber-500/30 text-[10px]"
-                        }
-                      >
-                        {selectedOrder.payments?.[0]?.status === "paid"
-                          ? "Cashier Verified"
-                          : selectedOrder.payments?.[0]?.proof?.status === "pending"
-                            ? "Pending Cashier Review"
-                            : selectedOrder.payments?.[0]?.proof?.status === "rejected"
-                              ? "Cashier Rejected"
-                              : "Awaiting Evidence"}
-                      </Badge>
+                      <span className="font-bold">{formatETB(selectedOrder.totalAmount)}</span>
                     </div>
-
-                    {selectedOrder.payments?.[0]?.status === "paid" ? (
-                      <div className="rounded-md bg-emerald-500/10 border border-emerald-500/30 p-2 text-xs text-emerald-600 dark:text-emerald-400 flex items-center justify-between">
-                        <span className="font-semibold flex items-center gap-1.5">
-                          <CheckCircle2 className="size-3.5" /> Payment Settled & Verified
+                  ) : getOrderPaymentStatus(selectedOrder).status === "Pending" &&
+                    selectedOrder.payments?.[0]?.proof?.status === "pending" ? (
+                    (selectedOrder.payments?.[0]?.method || "").toLowerCase().includes("cash") ? (
+                      <div className="rounded-md bg-emerald-500/10 border border-emerald-500/30 p-2.5 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                        <span className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
+                          <Banknote className="size-4" /> 💵 Cash Payment Recorded — Sent to Cashier
                         </span>
-                        <span className="font-bold">{formatETB(selectedOrder.totalAmount)}</span>
+                        <p className="text-[11px] text-muted-foreground">
+                          Awaiting cashier verification. No receipt photo or proof required.
+                        </p>
                       </div>
-                    ) : selectedOrder.payments?.[0]?.proof?.status === "pending" ? (
-                      <div className="rounded-md bg-purple-500/10 border border-purple-500/30 p-2 text-xs text-purple-700 dark:text-purple-300 space-y-1">
+                    ) : (
+                      <div className="rounded-md bg-purple-500/10 border border-purple-500/30 p-2.5 text-xs text-purple-700 dark:text-purple-300 space-y-1">
                         <span className="flex items-center gap-1.5 font-medium">
                           <Clock className="size-3.5 animate-spin" /> Payment Evidence Sent to Cashier
                         </span>
                         <p className="text-[11px] text-muted-foreground">
-                          Awaiting cashier verification. Status will update automatically.
+                          Awaiting cashier verification. Status will update automatically upon review.
                         </p>
                       </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {selectedOrder.payments?.[0]?.proof?.status === "rejected" &&
-                          selectedOrder.payments[0].proof.rejectionReason && (
-                            <div className="rounded bg-destructive/10 border border-destructive/20 p-2 text-[11px] text-destructive">
-                              <span className="font-semibold">Rejection reason:</span>{" "}
-                              {selectedOrder.payments[0].proof.rejectionReason}
-                            </div>
-                          )}
-                        <Button
-                          size="sm"
-                          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground text-xs h-8.5 font-semibold gap-1.5"
-                          onClick={() => {
-                            setPaymentOrder(selectedOrder);
-                          }}
-                        >
-                          <Camera className="size-3.5" />
-                          <Upload className="size-3.5" />
-                          <span>
-                            {selectedOrder.payments?.[0]?.proof?.status === "rejected"
-                              ? "Re-upload Payment Evidence"
-                              : "Upload Payment Evidence (Take Photo / Gallery)"}
-                          </span>
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                )}
+                    )
+                  ) : (
+                    <div className="space-y-2">
+                      {selectedOrder.payments?.[0]?.proof?.status === "rejected" &&
+                        selectedOrder.payments[0].proof.rejectionReason && (
+                          <div className="rounded bg-destructive/10 border border-destructive/20 p-2 text-[11px] text-destructive">
+                            <span className="font-semibold">Rejection reason:</span>{" "}
+                            {selectedOrder.payments[0].proof.rejectionReason}
+                          </div>
+                        )}
+                      <Button
+                        size="sm"
+                        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground text-xs h-9 font-semibold gap-1.5"
+                        onClick={() => {
+                          setPaymentOrder(selectedOrder);
+                        }}
+                      >
+                        <Camera className="size-3.5" />
+                        <Upload className="size-3.5" />
+                        <span>
+                          {selectedOrder.payments?.[0]?.proof?.status === "rejected"
+                            ? "Re-upload Payment Evidence"
+                            : "Record Payment (Cash / Digital Screenshot)"}
+                        </span>
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Customer & Location */}
@@ -587,9 +462,11 @@ export function WaiterOrdersPage() {
                   {selectedOrder.tableNumber && (
                     <div>
                       <span className="block text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                        Table
+                        Table (QR Code)
                       </span>
-                      <span className="font-bold text-primary">{selectedOrder.tableNumber}</span>
+                      <span className="font-bold text-primary text-sm flex items-center gap-1">
+                        <QrCode className="size-3.5" /> Table #{selectedOrder.tableNumber}
+                      </span>
                     </div>
                   )}
                   {selectedOrder.customerPhone && (
@@ -597,7 +474,10 @@ export function WaiterOrdersPage() {
                       <span className="block text-[10px] uppercase tracking-wider text-muted-foreground/70">
                         Phone
                       </span>
-                      <span className="font-medium text-foreground">{selectedOrder.customerPhone}</span>
+                      <span className="font-medium text-foreground flex items-center gap-1">
+                        <Phone className="size-3 text-muted-foreground" />
+                        {selectedOrder.customerPhone}
+                      </span>
                     </div>
                   )}
                   {selectedOrder.deliveryAddress && (
@@ -650,158 +530,31 @@ export function WaiterOrdersPage() {
                 {selectedOrder.deliveryFee > 0 && (
                   <div className="flex justify-between text-muted-foreground">
                     <span>Delivery Fee</span>
-                    <span>+{formatETB(selectedOrder.deliveryFee)}</span>
+                    <span>{formatETB(selectedOrder.deliveryFee)}</span>
                   </div>
                 )}
-                <div className="flex justify-between font-bold text-sm text-foreground pt-1.5 border-t border-border">
+                <div className="flex justify-between pt-1.5 border-t border-border/60 font-bold text-sm text-foreground">
                   <span>Total Amount</span>
                   <span className="text-primary">{formatETB(selectedOrder.totalAmount)}</span>
                 </div>
-              </div>
-
-              {/* History & Timeline */}
-              <div className="space-y-2">
-                <p className="font-semibold text-xs text-foreground">Status & Decision Logs</p>
-                {selectedOrder.statusLogs && selectedOrder.statusLogs.length > 0 ? (
-                  <div className="space-y-2 text-xs">
-                    {selectedOrder.statusLogs.map((log, idx) => (
-                      <div key={idx} className="flex items-start gap-2.5 p-2 rounded bg-secondary/30">
-                        <Clock className="size-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                        <div className="flex-1">
-                          <p className="font-medium">
-                            Status changed to <span className="font-semibold text-primary">{log.toStatus}</span>
-                          </p>
-                          {log.notes && <p className="text-[11px] text-muted-foreground">{log.notes}</p>}
-                          <p className="text-[10px] text-muted-foreground/80 mt-0.5">
-                            {new Date(log.createdAt).toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground italic">No historical status logs recorded.</p>
-                )}
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
 
-      {/* Confirmation Dialogs for Approve / Reject */}
-      <Dialog
-        open={Boolean(actionOrder && actionType)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setActionOrder(null);
-            setActionType(null);
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {actionType === "approve"
-                ? `Approve Order #${actionOrder?.orderNumber}`
-                : `Reject Order #${actionOrder?.orderNumber}`}
-            </DialogTitle>
-            <DialogDescription>
-              {actionType === "approve"
-                ? "Confirming this order notifies the kitchen and customer to proceed."
-                : "A rejection reason is strictly required so the customer understands the decision."}
-            </DialogDescription>
-          </DialogHeader>
-
-          {actionOrder && (
-            <div className="space-y-3 py-2 text-xs">
-              <div className="rounded bg-muted/60 p-2.5 space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Customer:</span>
-                  <span className="font-medium">{actionOrder.customerName}</span>
-                </div>
-                {actionOrder.tableNumber && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Table:</span>
-                    <span className="font-bold text-primary">{actionOrder.tableNumber}</span>
-                  </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total:</span>
-                  <span className="font-bold">{formatETB(actionOrder.totalAmount)}</span>
-                </div>
-              </div>
-
-              {actionType === "approve" ? (
-                <div className="space-y-1.5">
-                  <Label htmlFor="order-approval-notes" className="text-xs">
-                    Optional Waiter Comments
-                  </Label>
-                  <Input
-                    id="order-approval-notes"
-                    placeholder="e.g. Table 3 verified, guest seated"
-                    value={approvalNotes}
-                    onChange={(e) => setApprovalNotes(e.target.value)}
-                    disabled={submittingAction}
-                  />
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <Label htmlFor="order-rejection-reason" className="text-xs text-destructive font-medium">
-                    Reason for Rejection *
-                  </Label>
-                  <Textarea
-                    id="order-rejection-reason"
-                    required
-                    placeholder="e.g. Item unavailable / Incorrect table number / Kitchen closed"
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    rows={3}
-                    disabled={submittingAction}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={submittingAction}
-              onClick={() => {
-                setActionOrder(null);
-                setActionType(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={submittingAction || (actionType === "reject" && !rejectionReason.trim())}
-              className={
-                actionType === "approve"
-                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                  : "bg-destructive hover:bg-destructive/90 text-white"
-              }
-              onClick={handleConfirmDecision}
-            >
-              {submittingAction
-                ? "Processing…"
-                : actionType === "approve"
-                  ? "Confirm Approval"
-                  : "Confirm Rejection"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Waiter Payment Evidence Dialog */}
-      <WaiterPaymentDialog
-        order={paymentOrder}
-        open={Boolean(paymentOrder)}
-        onOpenChange={(open) => !open && setPaymentOrder(null)}
-        onSuccess={() => void loadOrders()}
-      />
+      {/* Payment Dialog */}
+      {paymentOrder && (
+        <WaiterPaymentDialog
+          order={paymentOrder}
+          open={Boolean(paymentOrder)}
+          onOpenChange={(open) => !open && setPaymentOrder(null)}
+          onSuccess={() => {
+            setPaymentOrder(null);
+            void loadOrders(true);
+          }}
+        />
+      )}
     </div>
   );
 }

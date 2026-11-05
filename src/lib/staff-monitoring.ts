@@ -24,8 +24,20 @@ import type { OrderStatus, OrderMethod } from "@/lib/orders";
 
 export type StaffRole = "admin" | "waiter" | "cashier" | "kitchen" | string;
 
+export const BASELINE_STAFF_IDS: Record<string, string> = {
+  "5d2b434b-0b18-461b-a12d-9a93ac8fc92a": "RK-001",
+  "e9504215-7be6-489d-8471-83a86eb9ef4e": "RK-002",
+  "e145d152-0ecb-43d6-863c-06fa40c12db4": "RK-003",
+  "9ce996c4-d645-4480-be49-629f85343ae0": "RK-004",
+  "a5c18c86-c102-4355-b713-e93975e0a689": "RK-005",
+  "593c8d07-904a-4f10-9571-dbf4c6af7250": "RK-006",
+  "61bee678-4df9-4061-9843-c35ca3f0cb48": "RK-007",
+  "5bca6d75-ca78-44ec-8410-5a770ee56bde": "RK-008",
+};
+
 export interface StaffProfileRecord {
   userId: string;
+  staffId?: string;
   fullName: string;
   email: string;
   role: StaffRole;
@@ -622,6 +634,7 @@ export async function loadStaffMonitoringData(
 
   const staffProfiles: StaffProfileRecord[] = rawStaff.map((s) => ({
     userId: s.user_id,
+    staffId: s.staff_id || BASELINE_STAFF_IDS[s.user_id] || "RK-???",
     fullName: s.full_name || "Unnamed Staff",
     email: s.email || userEmailMap.get(s.user_id) || "—",
     role: s.role || "staff",

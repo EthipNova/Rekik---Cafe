@@ -179,6 +179,10 @@ export function PendingReviewsList({
           ))
         ) : filteredItems.length > 0 ? (
           filteredItems.map((item) => {
+            const rawMethod = (item.payment_method || "").toLowerCase();
+            const rawProofPath = (item.proof_screenshot_path || "").toLowerCase();
+            const isCash =
+              rawMethod === "cash" || rawMethod.includes("cash") || rawProofPath === "cash-direct";
             const orderNum = item.order_number.startsWith("#")
               ? item.order_number
               : `#${item.order_number}`;
@@ -190,25 +194,42 @@ export function PendingReviewsList({
                 onClick={() => onViewProof(item)}
                 className="group cursor-pointer bg-[#EDE7DD] hover:bg-[#E6DFD4] border border-[#DFD6C8] rounded-2xl p-3.5 sm:p-4 transition-all shadow-xs flex items-center justify-between gap-4"
               >
-                {/* Left side: Thumbnail + Order Info */}
+                {/* Left side: Thumbnail or Cash Badge + Order Info */}
                 <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 border border-[#D5C9B8] bg-[#D8CFC2]">
-                    <img
-                      src="/images/coffee-thumb.jpg"
-                      alt={item.order_number}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      onError={(e) => {
-                        // Fallback to about.jpg if coffee-thumb fails
-                        (e.target as HTMLImageElement).src = "/images/about.jpg";
-                      }}
-                    />
-                  </div>
+                  {isCash ? (
+                    <div className="w-14 h-14 rounded-xl shrink-0 border border-emerald-300 bg-emerald-50 flex flex-col items-center justify-center text-emerald-800 shadow-2xs">
+                      <span className="text-xl">💵</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Cash</span>
+                    </div>
+                  ) : (
+                    <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 border border-[#D5C9B8] bg-[#D8CFC2]">
+                      <img
+                        src="/images/coffee-thumb.jpg"
+                        alt={item.order_number}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = "/images/about.jpg";
+                        }}
+                      />
+                    </div>
+                  )}
 
                   <div className="space-y-1 min-w-0">
-                    <div className="font-bold text-sm text-[#2A1810] truncate">{orderNum}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-bold text-sm text-[#2A1810] truncate">{orderNum}</div>
+                      {isCash && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          💵 Cash
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1.5 text-xs text-[#5C4538] truncate">
                       <User className="h-3 w-3 shrink-0 text-[#8C7A6E]" />
                       <span className="truncate">{item.customer_name}</span>
+                      <span className="text-[#8A7B70]">•</span>
+                      <span className="font-semibold text-[#2A1810]">
+                        Payment Method: {isCash ? "💵 Cash" : item.payment_method}
+                      </span>
                     </div>
                     <div className="text-[11px] text-[#8A7B70]">{dateDisplay}</div>
                   </div>
@@ -220,9 +241,15 @@ export function PendingReviewsList({
                     <div className="font-bold text-sm sm:text-base text-[#2A1810]">
                       {formatCurrency(item.payment_amount || item.order_total)}
                     </div>
-                    <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]">
-                      Under Review
-                    </span>
+                    {isCash ? (
+                      <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
+                        Cash Payment
+                      </span>
+                    ) : (
+                      <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]">
+                        Under Review
+                      </span>
+                    )}
                   </div>
 
                   <ChevronRight className="h-5 w-5 text-[#8C7A6E] group-hover:text-[#2A1810] transition-colors" />

@@ -7,6 +7,7 @@ export const ALLOWED_AVATAR_MIME_TYPES = ["image/jpeg", "image/png", "image/webp
 
 export type AdminAccountProfile = {
   id: string;
+  staffId?: string;
   email: string;
   role: UserRole;
   fullName: string;
@@ -559,6 +560,78 @@ export async function changeAdminPassword(
     return { success: true, error: null };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Password update failed.";
+    return { success: false, error: msg };
+  }
+}
+
+
+/**
+ * Changes administrator account email securely with password verification.
+ */
+export async function changeAdminEmail(
+  newEmail: string,
+  currentPassword: string,
+): Promise<{ success: boolean; email?: string; error: string | null }> {
+  try {
+    const token = await getValidAccessToken();
+    if (!token) {
+      return { success: false, error: "Authentication required. Please sign in." };
+    }
+
+    const res = await fetch("/api/admin/change-email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        newEmail: newEmail.trim().toLowerCase(),
+        currentPassword,
+      }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      return {
+        success: false,
+        error: json.message || json.error || `Failed to update email (HTTP ${res.status})`,
+      };
+    }
+
+    return { success: true, email: json.email || newEmail, error: null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to change email.";
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Requests password recovery instructions to be sent to administrator email.
+ */
+export async function requestAdminPasswordRecovery(
+  email: string,
+): Promise<{ success: boolean; error: string | null }> {
+  try {
+    const res = await fetch("/api/admin/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+      }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        error: json.message || json.error || "Failed to send password recovery instructions.",
+      };
+    }
+
+    return { success: true, error: null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to send recovery email.";
     return { success: false, error: msg };
   }
 }

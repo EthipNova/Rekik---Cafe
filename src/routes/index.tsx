@@ -27,6 +27,7 @@ import securePaymentsImage from "@/assets/secure-payments.png";
 import shiroImage from "@/assets/shiro.png";
 import simpleCheckoutImage from "@/assets/simple-checkout.png";
 import softDrinkImage from "@/assets/soft-drink.png";
+import drinkImage from "@/assets/drink.png";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Section, SectionHeading } from "@/components/site/Section";
@@ -117,11 +118,22 @@ const benefits = [
 ];
 
 const categoryImages: Record<string, { src: string; alt: string }> = {
-  burgers: { src: burgersImage, alt: "Burger" },
-  "club-sandwich": { src: clubSandwichImage, alt: "Club sandwich" },
-  pizza: { src: pizzaImage, alt: "Pizza" },
-  shiro: { src: shiroImage, alt: "Shiro" },
-  "soft-drink": { src: softDrinkImage, alt: "Soft drink" },
+  coffee: { src: "/images/coffee-thumb.jpg", alt: "Ethiopian Specialty Coffee" },
+  espresso: { src: "/images/coffee-thumb.jpg", alt: "Espresso & Handcrafted Coffee" },
+  tea: { src: "/images/coffee-thumb.jpg", alt: "Traditional Ethiopian & Herbal Tea" },
+  juice: { src: drinkImage, alt: "Fresh Fruit Juice" },
+  "soft-drinks": { src: softDrinkImage, alt: "Soft Drinks & Refreshments" },
+  "soft-drink": { src: softDrinkImage, alt: "Soft Drinks & Refreshments" },
+  drinks: { src: softDrinkImage, alt: "Cold Beverages & Refreshments" },
+  burgers: { src: burgersImage, alt: "Burgers" },
+  pizza: { src: pizzaImage, alt: "Stone-Baked Pizza" },
+  pasta: { src: "/images/chicken-pizza.jpg", alt: "Pasta & Kitchen Dishes" },
+  breakfast: { src: clubSandwichImage, alt: "Breakfast & Morning Specials" },
+  desserts: { src: "/images/coffee-thumb.jpg", alt: "Pastries & Sweet Treats" },
+  "club-sandwich": { src: clubSandwichImage, alt: "Club Sandwich" },
+  shiro: { src: shiroImage, alt: "Shiro & Traditional Dishes" },
+  sides: { src: "/images/fries.jpg", alt: "Chips & Crispy Sides" },
+  combos: { src: burgersImage, alt: "Meal Combos & Specials" },
 };
 
 const journey = [
@@ -492,7 +504,7 @@ function Home() {
                           loading="lazy"
                           className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
                           onError={(e) => {
-                            (e.currentTarget as HTMLElement).style.display = "none";
+                            (e.currentTarget as HTMLImageElement).src = heroFallback;
                           }}
                         />
                         <div className="absolute top-2.5 left-2.5">

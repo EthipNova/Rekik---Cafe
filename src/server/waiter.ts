@@ -377,9 +377,9 @@ export async function getWaiterMetrics(staff: AuthenticatedStaff): Promise<Waite
   let query = (supabase.from("orders" as any) as any)
     .select("id, status, waiter_decision, total_amount, created_at, waiter_id");
 
-  // If waiter (not super admin), filter exclusively by orders assigned to them or unassigned pending
+  // If waiter (not super admin), filter exclusively by orders assigned to them or unassigned
   if (!isSuperAdmin) {
-    query = query.or(`waiter_id.eq.${staff.userId},and(waiter_id.is.null,waiter_decision.eq.pending)`);
+    query = query.or(`waiter_id.eq.${staff.userId},waiter_id.is.null`);
   }
 
   const { data: orders, error } = await query;
@@ -551,9 +551,9 @@ export async function getWaiterOrders(
     )
     .order("created_at", { ascending: false });
 
-  // Role isolation: Only view orders assigned to this waiter, or unassigned pending orders
+  // Role isolation: Only view orders assigned to this waiter, or unassigned orders
   if (!isSuperAdmin) {
-    query = query.or(`waiter_id.eq.${staff.userId},and(waiter_id.is.null,waiter_decision.eq.pending)`);
+    query = query.or(`waiter_id.eq.${staff.userId},waiter_id.is.null`);
   }
 
   // Status Filter
@@ -574,16 +574,27 @@ export async function getWaiterOrders(
     }
   }
 
-  // Date Filter
-  if (filters?.date) {
+  // Date Filter (Timezone-safe calendar boundaries)
+  if (filters?.date && filters.date !== "all") {
     const now = new Date();
     if (filters.date === "today") {
-      now.setHours(0, 0, 0, 0);
-      query = query.gte("created_at", now.toISOString());
-    } else if (filters.date === "week") {
-      now.setDate(now.getDate() - 7);
-      now.setHours(0, 0, 0, 0);
-      query = query.gte("created_at", now.toISOString());
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      query = query.gte("created_at", startOfToday.toISOString());
+    } else if (filters.date === "yesterday") {
+      const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
+      const endOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+      query = query.gte("created_at", startOfYesterday.toISOString()).lte("created_at", endOfYesterday.toISOString());
+    } else if (filters.date === "week" || filters.date === "7days") {
+      const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0);
+      query = query.gte("created_at", startOfWeek.toISOString());
+    } else if (filters.date === "month" || filters.date === "30days") {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0, 0);
+      query = query.gte("created_at", startOfMonth.toISOString());
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(filters.date)) {
+      const [year, month, day] = filters.date.split("-").map(Number);
+      const startDate = new Date(year!, month! - 1, day!, 0, 0, 0, 0);
+      const endDate = new Date(year!, month! - 1, day!, 23, 59, 59, 999);
+      query = query.gte("created_at", startDate.toISOString()).lte("created_at", endDate.toISOString());
     }
   }
 
@@ -1022,10 +1033,14 @@ export async function submitWaiterPaymentProof(
     throw new Error("You are not authorized to submit payment for an order assigned to another waiter.");
   }
 
-  // 3. Status check: Waiter must have accepted/approved the order first
-  if (order.waiter_decision !== "approved") {
+  // 3. Status check: Waiter must have accepted/approved the order, or auto-accept if pending
+  if (order.waiter_decision === "pending") {
+    await (supabase.from("orders" as any) as any)
+      .update({ waiter_decision: "approved", waiter_decided_at: new Date().toISOString() })
+      .eq("id", order.id);
+  } else if (order.waiter_decision !== "approved") {
     throw new Error(
-      `Order #${order.order_number} must be accepted/approved by the waiter before submitting payment.`,
+      `Cannot submit payment for an order with decision "${order.waiter_decision}".`,
     );
   }
 
@@ -1064,6 +1079,10 @@ export async function submitWaiterPaymentProof(
       ? input.transactionReference.trim()
       : null;
 
+  const isCash =
+    typeof input.paymentMethod === "string" &&
+    input.paymentMethod.toLowerCase().includes("cash");
+
   // Handle proof screenshot upload if base64 was provided
   let resolvedScreenshotPath = input.screenshotPath || "";
   if (!resolvedScreenshotPath && input.imageBase64) {
@@ -1101,7 +1120,7 @@ export async function submitWaiterPaymentProof(
   }
 
   if (!resolvedScreenshotPath) {
-    resolvedScreenshotPath = `proofs/waiter-receipt-${order.id}.png`;
+    resolvedScreenshotPath = isCash ? "cash-direct" : `proofs/waiter-receipt-${order.id}.png`;
   }
 
   // 6. Find or create payment row
@@ -1115,10 +1134,12 @@ export async function submitWaiterPaymentProof(
   if (paymentId) {
     await (supabase.from("payments" as any) as any)
       .update({
-        method: input.paymentMethod || "Mobile Payment",
+        method: input.paymentMethod || (isCash ? "Cash at Table" : "Mobile Payment"),
         transaction_reference: cleanTxRef,
         status: "pending",
         amount: submittedAmount,
+        collected_by: staff.userId,
+        collected_at: nowIso,
         updated_at: nowIso,
       })
       .eq("id", paymentId);
@@ -1127,10 +1148,12 @@ export async function submitWaiterPaymentProof(
     const { error: insPayErr } = await (supabase.from("payments" as any) as any).insert({
       id: newPayId,
       order_id: order.id,
-      method: input.paymentMethod || "Mobile Payment",
+      method: input.paymentMethod || (isCash ? "Cash at Table" : "Mobile Payment"),
       status: "pending",
       amount: submittedAmount,
       transaction_reference: cleanTxRef,
+      collected_by: staff.userId,
+      collected_at: nowIso,
       created_at: nowIso,
       updated_at: nowIso,
     });
@@ -1139,6 +1162,15 @@ export async function submitWaiterPaymentProof(
     }
     paymentId = newPayId;
   }
+
+  // Update order record with payment method and reference
+  await (supabase.from("orders" as any) as any)
+    .update({
+      payment_method: input.paymentMethod,
+      transaction_reference: cleanTxRef,
+      updated_at: nowIso,
+    })
+    .eq("id", order.id);
 
   // 7. Insert payment proof record
   const proofId = crypto.randomUUID();
@@ -1158,7 +1190,10 @@ export async function submitWaiterPaymentProof(
   }
 
   // 8. Log audit trail in order_status_logs
-  const auditNotes = `Payment evidence submitted by server ${staff.fullName} (Method: ${input.paymentMethod}, Amount: ${submittedAmount} ETB, Ref: ${cleanTxRef || "Not provided"}). Awaiting cashier review.`;
+  const auditNotes = isCash
+    ? `Cash payment of ${submittedAmount} ETB recorded directly at table by waiter ${staff.fullName}${cleanTxRef ? ` (Ref: ${cleanTxRef})` : ""}.`
+    : `Payment evidence submitted by server ${staff.fullName} (Method: ${input.paymentMethod}, Amount: ${submittedAmount} ETB, Ref: ${cleanTxRef || "Not provided"}). Awaiting cashier review.`;
+
   await (supabase.from("order_status_logs" as any) as any).insert({
     id: crypto.randomUUID(),
     order_id: order.id,
@@ -1177,8 +1212,10 @@ export async function submitWaiterPaymentProof(
         recipient_user_id: order.customer_id,
         order_id: order.id,
         payment_proof_id: proofId,
-        title: "Payment Submitted for Verification",
-        message: `Your server ${staff.fullName} has submitted payment evidence (${input.paymentMethod}). Pending cashier review.`,
+        title: isCash ? "Cash Payment Recorded" : "Payment Submitted for Verification",
+        message: isCash
+          ? `Your server ${staff.fullName} has recorded your cash payment of ${submittedAmount} ETB.`
+          : `Your server ${staff.fullName} has submitted payment evidence (${input.paymentMethod}). Pending cashier review.`,
         notification_type: "payment_submitted",
         is_read: false,
         created_at: nowIso,

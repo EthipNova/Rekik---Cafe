@@ -250,7 +250,9 @@ export function ReviewHistoryView({
                     <td className="py-3.5 px-4 font-bold font-mono text-[#2A1810] whitespace-nowrap">
                       {item.payment_amount.toLocaleString()} ETB
                       <span className="block text-[11px] text-[#8C7A6E] font-sans font-normal">
-                        {item.payment_method}
+                        {(item.payment_method || "").toLowerCase().includes("cash") || item.screenshot_path === "cash-direct"
+                          ? "💵 Cash"
+                          : item.payment_method}
                       </span>
                     </td>
 

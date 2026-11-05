@@ -21,6 +21,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import type { CashierStaffProfile, CashierNotification } from "@/lib/cashier";
 import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
+import { LanguageSelector } from "@/components/site/LanguageSelector";
 
 interface CashierHeaderProps {
   profile: CashierStaffProfile;
@@ -94,6 +95,7 @@ export function CashierHeader({
 
       {/* Right Controls: Refresh, Notifications, Profile Dropdown, Logout */}
       <div className="flex items-center gap-2">
+        <LanguageSelector className="hidden sm:inline-flex" />
         <Button
           type="button"
           variant="outline"

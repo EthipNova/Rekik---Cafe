@@ -38,10 +38,9 @@ interface WaiterPaymentDialogProps {
 }
 
 const PAYMENT_METHODS = [
+  { id: "Cash", label: "💵 Cash", icon: Banknote },
   { id: "Telebirr Mobile", label: "Telebirr Mobile", icon: CreditCard },
   { id: "CBE Birr", label: "CBE Birr", icon: Building },
-  { id: "Cash at Table", label: "Cash at Table", icon: Banknote },
-  { id: "Bank Transfer", label: "Bank Transfer", icon: Receipt },
 ];
 
 export function WaiterPaymentDialog({
@@ -51,7 +50,7 @@ export function WaiterPaymentDialog({
   onSuccess,
 }: WaiterPaymentDialogProps) {
   const [amount, setAmount] = useState<string>("");
-  const [paymentMethod, setPaymentMethod] = useState<string>("Telebirr Mobile");
+  const [paymentMethod, setPaymentMethod] = useState<string>("Cash");
   const [transactionRef, setTransactionRef] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
@@ -68,10 +67,12 @@ export function WaiterPaymentDialog({
     if (order) {
       setAmount(String(order.totalAmount || ""));
       const existingPayment = order.payments?.[0];
-      if (existingPayment?.method) {
+      if (existingPayment?.method?.toLowerCase().includes("cash")) {
+        setPaymentMethod("Cash");
+      } else if (existingPayment?.method && PAYMENT_METHODS.some((m) => m.id === existingPayment.method)) {
         setPaymentMethod(existingPayment.method);
       } else {
-        setPaymentMethod("Telebirr Mobile");
+        setPaymentMethod("Cash");
       }
       setTransactionRef(existingPayment?.transactionReference || "");
       setNotes("");
@@ -90,6 +91,8 @@ export function WaiterPaymentDialog({
   }, [previewUrl]);
 
   if (!order) return null;
+
+  const isCash = paymentMethod.toLowerCase().includes("cash");
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -140,21 +143,25 @@ export function WaiterPaymentDialog({
       return;
     }
 
-    if (!selectedFile) {
-      toast.error("Payment evidence photo/screenshot is strictly required.");
+    // Evidence photo strictly required for non-cash electronic payments
+    if (!isCash && !selectedFile) {
+      toast.error("Payment evidence photo/screenshot is required for electronic payments.");
       return;
     }
 
     setSubmitting(true);
 
     try {
-      // Convert File to Base64 data URL
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = (err) => reject(err);
-        reader.readAsDataURL(selectedFile);
-      });
+      let base64Data: string | undefined = undefined;
+      if (!isCash && selectedFile) {
+        // Convert File to Base64 data URL
+        base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(selectedFile);
+        });
+      }
 
       const updatedOrder = await submitWaiterPaymentProof(order.id, {
         submittedAmount: numAmount,
@@ -162,10 +169,14 @@ export function WaiterPaymentDialog({
         transactionReference: transactionRef.trim() || undefined,
         notes: notes.trim() || undefined,
         imageBase64: base64Data,
-        mimeType: selectedFile.type,
+        mimeType: selectedFile?.type,
       });
 
-      toast.success("Payment evidence sent to the cashier. Awaiting verification.");
+      if (isCash) {
+        toast.success(`Cash payment of ${formatETB(numAmount)} recorded successfully.`);
+      } else {
+        toast.success("Payment evidence sent to the cashier. Awaiting verification.");
+      }
 
       // Notify window listeners
       window.dispatchEvent(
@@ -176,18 +187,19 @@ export function WaiterPaymentDialog({
       onSuccess?.(updatedOrder);
     } catch (err: unknown) {
       console.error("[WaiterPaymentDialog] submission error:", err);
-      const msg = err instanceof Error ? err.message : "Failed to submit payment evidence.";
+      const msg = err instanceof Error ? err.message : "Failed to record payment.";
       toast.error(msg);
     } finally {
       setSubmitting(false);
     }
   };
 
+  const numAmount = parseFloat(amount);
   const isFormValid =
-    Boolean(selectedFile) &&
-    !isNaN(parseFloat(amount)) &&
-    parseFloat(amount) > 0 &&
-    !submitting;
+    !isNaN(numAmount) &&
+    numAmount > 0 &&
+    !submitting &&
+    (isCash || Boolean(selectedFile));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -212,14 +224,16 @@ export function WaiterPaymentDialog({
         <DialogHeader className="text-left pb-3 border-b border-border">
           <div className="flex items-center justify-between">
             <DialogTitle className="font-display text-lg font-bold">
-              Payment Evidence — #{order.orderNumber}
+              {isCash ? "Record Cash Payment — #" : "Payment Evidence — #"}{order.orderNumber}
             </DialogTitle>
             <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-xs font-semibold">
               Table {order.tableNumber || "N/A"}
             </Badge>
           </div>
           <DialogDescription className="text-xs text-muted-foreground">
-            Collect payment from customer, capture receipt evidence, and route to cashier for verification.
+            {isCash
+              ? "Record cash payment collected directly at table. No evidence photo is required."
+              : "Collect payment from customer, capture receipt evidence, and route to cashier for verification."}
           </DialogDescription>
         </DialogHeader>
 
@@ -266,7 +280,7 @@ export function WaiterPaymentDialog({
             <Label className="text-xs font-semibold">
               Payment Method <span className="text-destructive">*</span>
             </Label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {PAYMENT_METHODS.map((m) => {
                 const Icon = m.icon;
                 const isSelected = paymentMethod === m.id;
@@ -289,6 +303,21 @@ export function WaiterPaymentDialog({
             </div>
           </div>
 
+          {/* Cash Payment Direct Info Banner */}
+          {isCash && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 flex items-start gap-2.5 text-xs text-emerald-800 dark:text-emerald-300">
+              <Banknote className="size-5 shrink-0 text-emerald-600 mt-0.5" />
+              <div>
+                <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+                  Cash Payment at Table
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  No receipt photo or evidence upload is required. The payment timestamp and your server attribution will be saved directly in Supabase.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Transaction Reference */}
           <div className="space-y-1.5">
             <Label htmlFor="transaction-ref" className="text-xs font-semibold">
@@ -301,108 +330,112 @@ export function WaiterPaymentDialog({
               value={transactionRef}
               onChange={(e) => setTransactionRef(e.target.value)}
               placeholder={
-                paymentMethod.includes("Telebirr")
-                  ? "e.g. TBL9384729103 (optional)"
-                  : paymentMethod.includes("CBE")
-                    ? "e.g. FT260819ABCD (optional)"
-                    : "e.g. Receipt voucher # (optional)"
+                isCash
+                  ? "e.g. Receipt voucher # (optional)"
+                  : paymentMethod.includes("Telebirr")
+                    ? "e.g. TBL9384729103 (optional)"
+                    : "e.g. FT260819ABCD (optional)"
               }
               className="text-xs h-9 font-mono"
             />
             <p className="text-[11px] text-muted-foreground">
-              Optional reference code from customer SMS or bank notification if available.
+              {isCash
+                ? "Optional cash register voucher or receipt slip reference number if issued."
+                : "Optional reference code from customer SMS or bank notification if available."}
             </p>
           </div>
 
-          {/* Evidence Photo Upload Section */}
-          <div className="space-y-2 rounded-lg border border-border/80 bg-muted/20 p-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-bold text-foreground">
-                Payment Evidence Photo <span className="text-destructive">*</span>
-              </Label>
-              <span className="text-[10px] text-muted-foreground">JPG, PNG, or WEBP (Max 5MB)</span>
-            </div>
+          {/* Evidence Photo Upload Section — strictly for electronic payments */}
+          {!isCash && (
+            <div className="space-y-2 rounded-lg border border-border/80 bg-muted/20 p-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-bold text-foreground">
+                  Payment Evidence Photo <span className="text-destructive">*</span>
+                </Label>
+                <span className="text-[10px] text-muted-foreground">JPG, PNG, or WEBP (Max 5MB)</span>
+              </div>
 
-            {previewUrl ? (
-              <div className="space-y-2.5">
-                <div className="relative rounded-lg border border-border bg-background p-2.5 flex items-center gap-3">
-                  <img
-                    src={previewUrl}
-                    alt="Payment preview"
-                    className="size-16 object-cover rounded-md border border-border/80 shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-foreground truncate">{selectedFile?.name}</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {selectedFile ? (selectedFile.size / 1024).toFixed(1) + " KB" : ""}
-                    </p>
-                    <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30 mt-1">
-                      Ready to send
-                    </Badge>
+              {previewUrl ? (
+                <div className="space-y-2.5">
+                  <div className="relative rounded-lg border border-border bg-background p-2.5 flex items-center gap-3">
+                    <img
+                      src={previewUrl}
+                      alt="Payment preview"
+                      className="size-16 object-cover rounded-md border border-border/80 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-foreground truncate">{selectedFile?.name}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {selectedFile ? (selectedFile.size / 1024).toFixed(1) + " KB" : ""}
+                      </p>
+                      <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/30 mt-1">
+                        Ready to send
+                      </Badge>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={removeSelectedFile}
+                      className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                      title="Remove image"
+                    >
+                      <X className="size-4" />
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={removeSelectedFile}
-                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive shrink-0"
-                    title="Remove image"
-                  >
-                    <X className="size-4" />
-                  </Button>
-                </div>
 
-                {/* Replace image buttons */}
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="flex-1 h-8 text-[11px] gap-1.5"
-                  >
-                    <RotateCcw className="size-3" /> Retake Photo
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => galleryInputRef.current?.click()}
-                    className="flex-1 h-8 text-[11px] gap-1.5"
-                  >
-                    <FileImage className="size-3" /> Choose Different
-                  </Button>
+                  {/* Replace image buttons */}
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="flex-1 h-8 text-[11px] gap-1.5"
+                    >
+                      <RotateCcw className="size-3" /> Retake Photo
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => galleryInputRef.current?.click()}
+                      className="flex-1 h-8 text-[11px] gap-1.5"
+                    >
+                      <FileImage className="size-3" /> Choose Different
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                <p className="text-[11px] text-muted-foreground">
-                  Take a clear photo of the customer's transfer confirmation screen/voucher with permission, or pick from gallery:
-                </p>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => cameraInputRef.current?.click()}
-                    className="h-14 flex flex-col items-center justify-center gap-1 border-primary/30 hover:border-primary hover:bg-primary/5 transition-all"
-                  >
-                    <Camera className="size-5 text-primary" />
-                    <span className="text-xs font-semibold text-foreground">Take Photo</span>
-                  </Button>
+              ) : (
+                <div className="space-y-2.5">
+                  <p className="text-[11px] text-muted-foreground">
+                    Take a clear photo of the customer's transfer confirmation screen/voucher with permission, or pick from gallery:
+                  </p>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="h-14 flex flex-col items-center justify-center gap-1 border-primary/30 hover:border-primary hover:bg-primary/5 transition-all"
+                    >
+                      <Camera className="size-5 text-primary" />
+                      <span className="text-xs font-semibold text-foreground">Take Photo</span>
+                    </Button>
 
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => galleryInputRef.current?.click()}
-                    className="h-14 flex flex-col items-center justify-center gap-1 border-primary/30 hover:border-primary hover:bg-primary/5 transition-all"
-                  >
-                    <FileImage className="size-5 text-primary" />
-                    <span className="text-xs font-semibold text-foreground">Choose from Gallery</span>
-                  </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => galleryInputRef.current?.click()}
+                      className="h-14 flex flex-col items-center justify-center gap-1 border-primary/30 hover:border-primary hover:bg-primary/5 transition-all"
+                    >
+                      <FileImage className="size-5 text-primary" />
+                      <span className="text-xs font-semibold text-foreground">Choose from Gallery</span>
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* Optional Notes */}
           <div className="space-y-1.5">
@@ -413,7 +446,7 @@ export function WaiterPaymentDialog({
               id="waiter-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Verified customer SMS, cash change provided."
+              placeholder={isCash ? "e.g. Exact cash collected at table, change returned." : "e.g. Verified customer SMS, cash change provided."}
               className="text-xs min-h-[55px]"
             />
           </div>
@@ -422,8 +455,17 @@ export function WaiterPaymentDialog({
           <div className="rounded-lg border border-border bg-muted/40 p-3 flex items-start gap-2.5 text-[11px] text-muted-foreground">
             <ShieldCheck className="size-4 shrink-0 text-primary mt-0.5" />
             <div>
-              <span className="font-semibold text-foreground">Cashier Verification Required: </span>
-              Clicking Send to Cashier submits this evidence to the Cashier Queue. Final payment approval is authorized exclusively by the Cashier.
+              {isCash ? (
+                <>
+                  <span className="font-semibold text-foreground">Cash Settlement Recorded: </span>
+                  Recording this cash payment saves the transaction directly in Supabase with your waiter attribution and timestamp.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-foreground">Cashier Verification Required: </span>
+                  Clicking Send to Cashier submits this evidence to the Cashier Queue. Final payment approval is authorized exclusively by the Cashier.
+                </>
+              )}
             </div>
           </div>
 
@@ -447,12 +489,12 @@ export function WaiterPaymentDialog({
               {submitting ? (
                 <>
                   <Clock className="size-3.5 animate-spin" />
-                  Sending to Cashier…
+                  {isCash ? "Recording Cash Payment…" : "Sending to Cashier…"}
                 </>
               ) : (
                 <>
-                  <Upload className="size-3.5" />
-                  Send to Cashier
+                  {isCash ? <Banknote className="size-3.5" /> : <Upload className="size-3.5" />}
+                  {isCash ? "Record Cash Payment" : "Send to Cashier"}
                 </>
               )}
             </Button>

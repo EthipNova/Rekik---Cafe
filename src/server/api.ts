@@ -41,6 +41,12 @@ import type { Promotion } from "@/lib/promotions";
 import { createScopedClient, supabase, type UserRole } from "@/lib/supabase";
 import { serverSupabase } from "./supabase";
 import {
+  findStaffByStaffId,
+  getStaffIdForUserId,
+  isValidStaffIdFormat,
+} from "./staff-id";
+import {
+  deleteStaffMember,
   getRegisteredStaffList,
   registerStaffMember,
   updateStaffActiveStatus,
@@ -76,12 +82,22 @@ import {
   markWaiterNotificationRead,
   getAvailableWaiters,
 } from "./waiter";
+import {
+  getExpenses,
+  getExpenseById,
+  createExpense,
+  updateExpense,
+  deleteExpense,
+  getExpenseSummary,
+} from "./expenses";
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -205,6 +221,12 @@ export async function resolveAuthUser(request: Request): Promise<AuthenticatedUs
     let fullName: string | null = null;
     let phone: string | null = null;
 
+    // Authoritative Single Administrator Invariant:
+    // Only this exact designated account is permitted to hold the administrator role.
+    const isDesignatedAdminAccount =
+      user.id === DESIGNATED_ADMIN_ID ||
+      (Boolean(user.email) && user.email?.toLowerCase() === DESIGNATED_ADMIN_EMAIL.toLowerCase());
+
     // 1. Primary check: public.staff_profiles for active operational roles (admin, manager, owner, cashier, waiter, staff)
     try {
       const { data: staffProfile } = await (serverSupabase.from("staff_profiles" as any) as any)
@@ -215,7 +237,15 @@ export async function resolveAuthUser(request: Request): Promise<AuthenticatedUs
       if (staffProfile && staffProfile.is_active) {
         const staffRole = (staffProfile.role || "").toLowerCase().trim();
         if (["admin", "manager", "owner"].includes(staffRole)) {
-          role = "ADMIN";
+          // Strictly enforce single-admin architecture: only the designated account receives ADMIN
+          if (isDesignatedAdminAccount) {
+            role = "ADMIN";
+          } else {
+            console.warn(
+              `[api:security] Non-designated user ${user.id} (${user.email}) has role '${staffRole}' in staff_profiles. Enforcing single-admin rule: access to ADMIN denied.`,
+            );
+            role = "STAFF";
+          }
         } else if (["cashier", "waiter", "kitchen", "staff"].includes(staffRole)) {
           role = "STAFF";
         }
@@ -236,8 +266,18 @@ export async function resolveAuthUser(request: Request): Promise<AuthenticatedUs
 
         if (profile) {
           const userRole = (profile.role || "").toUpperCase().trim();
-          if (userRole === "ADMIN") role = "ADMIN";
-          else if (userRole === "STAFF") role = "STAFF";
+          if (userRole === "ADMIN") {
+            if (isDesignatedAdminAccount) {
+              role = "ADMIN";
+            } else {
+              console.warn(
+                `[api:security] Non-designated user ${user.id} (${user.email}) has role 'ADMIN' in users. Enforcing single-admin rule: access to ADMIN denied.`,
+              );
+              role = "STAFF";
+            }
+          } else if (userRole === "STAFF") {
+            role = "STAFF";
+          }
           if (profile.full_name) fullName = fullName || profile.full_name;
           if (profile.phone) phone = phone || profile.phone;
         }
@@ -284,14 +324,24 @@ export async function resolveAuthUser(request: Request): Promise<AuthenticatedUs
 }
 
 /**
- * Validates the request bearer token against Supabase Auth and checks for ADMIN role in public.users
- * using a token-scoped client to satisfy PostgREST Row-Level Security.
+ * Designated Rekik Café Administrator Account
+ * Exactly ONE administrator account is permitted in the system.
+ */
+export const DESIGNATED_ADMIN_ID = "e145d152-0ecb-43d6-863c-06fa40c12db4";
+export const DESIGNATED_ADMIN_EMAIL = "kbstar77sisay@gmail.com";
+
+/**
+ * Validates the request bearer token against Supabase Auth and checks for ADMIN role
+ * held strictly by the designated administrator account.
  * Returns the verified token if authorized, or null if unauthorized.
  */
 async function verifyAdminUser(request: Request): Promise<string | null> {
   const authUser = await resolveAuthUser(request);
   if (!authUser) return null;
-  return authUser.role === "ADMIN" ? authUser.token : null;
+  const isDesignated =
+    authUser.id === DESIGNATED_ADMIN_ID ||
+    (Boolean(authUser.email) && authUser.email.toLowerCase() === DESIGNATED_ADMIN_EMAIL.toLowerCase());
+  return authUser.role === "ADMIN" && isDesignated ? authUser.token : null;
 }
 
 /**
@@ -309,6 +359,289 @@ export async function handleApiRequest(request: Request): Promise<Response> {
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
 
   try {
+    /* ----------------------------------------------------------------------
+       0. Staff ID Login: POST /api/auth/staff-login
+       Authenticates staff members via unique Staff ID (RK-001, RK-002, ...)
+       and Password without requiring staff to remember or enter their email.
+       Enforces active status, role-based portal access, and security invariants.
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/auth/staff-login") {
+      if (method !== "POST") {
+        return json({ error: "Method Not Allowed" }, 405);
+      }
+
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== "object") {
+        return badRequest("Invalid login request payload");
+      }
+
+      const rawStaffId = typeof body.staffId === "string" ? body.staffId.trim() : "";
+      const password = typeof body.password === "string" ? body.password : "";
+      const targetPortal = typeof body.targetPortal === "string" ? body.targetPortal.trim().toLowerCase() : undefined;
+
+      if (!rawStaffId || !password) {
+        return badRequest("Please enter both Staff ID and password.");
+      }
+
+      // Step 1: Find staff member using entered Staff ID
+      const staff = await findStaffByStaffId(rawStaffId);
+      if (!staff) {
+        return json(
+          {
+            error: "Invalid Staff ID or password.",
+            message: "Invalid Staff ID or password.",
+            status: "not_found",
+          },
+          401,
+        );
+      }
+
+      // Step 2: Check account status
+      if (staff.isActive === false) {
+        return json(
+          {
+            error: "Your account has been deactivated.",
+            message: "Your account has been deactivated.",
+            status: "deactivated",
+          },
+          403,
+        );
+      }
+
+      // Step 3: Authenticate securely using Supabase Auth with the staff member's internal email
+      const { data: authData, error: authError } = await serverSupabase.auth.signInWithPassword({
+        email: staff.email,
+        password,
+      });
+
+      if (authError || !authData.user) {
+        const errorMsg = authError?.message || "";
+        if (errorMsg.toLowerCase().includes("banned") || errorMsg.toLowerCase().includes("deactivated")) {
+          return json(
+            {
+              error: "Your account has been deactivated.",
+              message: "Your account has been deactivated.",
+              status: "deactivated",
+            },
+            403,
+          );
+        }
+        return json({ error: "Invalid Staff ID or password.", message: "Invalid Staff ID or password." }, 401);
+      }
+
+      // Step 4: Check staff member's role and portal authorization
+      const userRole = (staff.role || "staff").toLowerCase();
+      const isDesignatedAdmin = staff.userId === DESIGNATED_ADMIN_ID;
+
+      if (targetPortal === "cashier") {
+        // Cashier portal allows cashiers and administrators
+        if (userRole !== "cashier" && !isDesignatedAdmin) {
+          return json(
+            {
+              error: "You do not have permission to access this portal.",
+              message: "You do not have permission to access this portal.",
+              status: "role_mismatch",
+              role: staff.role,
+            },
+            403,
+          );
+        }
+      } else if (targetPortal === "waiter") {
+        // Waiter portal allows waiters and administrators
+        if (userRole !== "waiter" && !isDesignatedAdmin) {
+          return json(
+            {
+              error: "You do not have permission to access this portal.",
+              message: "You do not have permission to access this portal.",
+              status: "role_mismatch",
+              role: staff.role,
+            },
+            403,
+          );
+        }
+      } else if (targetPortal === "admin") {
+        // Admin portal allows strictly the designated administrator
+        if (!isDesignatedAdmin) {
+          return json(
+            {
+              error: "You do not have permission to access this portal.",
+              message: "You do not have permission to access this portal.",
+              status: "role_mismatch",
+              role: staff.role,
+            },
+            403,
+          );
+        }
+      }
+
+      return json({
+        success: true,
+        session: authData.session,
+        user: authData.user,
+        profile: {
+          userId: staff.userId,
+          staffId: staff.staffId,
+          fullName: staff.fullName,
+          role: staff.role,
+          phone: staff.phone,
+          isActive: staff.isActive,
+        },
+      });
+    }
+
+    /* ----------------------------------------------------------------------
+       0b. Admin Forgot Password Recovery: POST /api/admin/forgot-password
+       Sends secure password reset link via Supabase Auth without plaintext exposure.
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/admin/forgot-password") {
+      if (method !== "POST") {
+        return json({ error: "Method Not Allowed" }, 405);
+      }
+
+      const body = await request.json().catch(() => null);
+      const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+
+      if (!email || !EMAIL_REGEX.test(email)) {
+        return badRequest("A valid email address is required.");
+      }
+
+      try {
+        const { error: resetErr } = await serverSupabase.auth.resetPasswordForEmail(email, {
+          redirectTo: typeof body?.redirectTo === "string" ? body.redirectTo : undefined,
+        });
+
+        if (resetErr) {
+          console.warn("[api] Password reset request notice:", resetErr.message);
+        }
+
+        return json({
+          success: true,
+          message: "Password recovery instructions have been sent to your email address.",
+        });
+      } catch (err: unknown) {
+        return serverError(err);
+      }
+    }
+
+    /* ----------------------------------------------------------------------
+       0c. Admin Email Change: POST /api/admin/change-email
+       Allows administrator to update their authentication email securely:
+       - Requires authentication & verification of current password
+       - Validates new email & checks for duplicate accounts
+       - Keeps Admin profile, permissions, role, and Staff ID unchanged
+       - Preserves the single-admin invariant
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/admin/change-email") {
+      if (method !== "POST" && method !== "PATCH") {
+        return json({ error: "Method Not Allowed" }, 405);
+      }
+
+      const authUser = await resolveAuthUser(request);
+      if (!authUser) {
+        return unauthorized("Authentication required to change administrator email");
+      }
+      if (authUser.role !== "ADMIN" || authUser.id !== DESIGNATED_ADMIN_ID) {
+        return forbidden("Only the designated Rekik Café administrator can perform this action");
+      }
+
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body !== "object") {
+        return badRequest("Invalid email change payload");
+      }
+
+      const newEmail = typeof body.newEmail === "string" ? body.newEmail.trim().toLowerCase() : "";
+      const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
+
+      if (!newEmail || !EMAIL_REGEX.test(newEmail)) {
+        return badRequest("Please enter a valid new email address.");
+      }
+
+      if (!currentPassword) {
+        return badRequest("Current password verification is required.");
+      }
+
+      if (authUser.email && newEmail === authUser.email.toLowerCase()) {
+        return badRequest("New email must be different from current email.");
+      }
+
+      // Step 1: Re-authenticate with current password to verify identity
+      const { error: verifyErr } = await serverSupabase.auth.signInWithPassword({
+        email: authUser.email,
+        password: currentPassword,
+      });
+
+      if (verifyErr) {
+        return json(
+          {
+            error: "Current password verification failed. Please enter your correct password.",
+            message: "Current password verification failed. Please enter your correct password.",
+          },
+          401,
+        );
+      }
+
+      // Step 2: Check for duplicate email in public.users
+      const { data: existingUser } = await (serverSupabase.from("users" as any) as any)
+        .select("id, email")
+        .eq("email", newEmail)
+        .maybeSingle();
+
+      if (existingUser && existingUser.id !== authUser.id) {
+        return json(
+          {
+            error: "An account with this email address already exists.",
+            message: "An account with this email address already exists.",
+          },
+          409,
+        );
+      }
+
+      // Step 3: Update Supabase Auth user email securely
+      const { error: authUpdateErr } = await serverSupabase.auth.admin.updateUserById(authUser.id, {
+        email: newEmail,
+        email_confirm: true,
+      });
+
+      if (authUpdateErr) {
+        return badRequest(`Failed to update email in authentication service: ${authUpdateErr.message}`);
+      }
+
+      const nowIso = new Date().toISOString();
+
+      // Step 4: Update public.users
+      await (serverSupabase.from("users" as any) as any)
+        .update({ email: newEmail, updated_at: nowIso })
+        .eq("id", authUser.id);
+
+      // Step 5: Update public.staff_profiles
+      await (serverSupabase.from("staff_profiles" as any) as any)
+        .update({ email: newEmail, updated_at: nowIso })
+        .eq("user_id", authUser.id);
+
+      // Step 6: Record security audit log
+      try {
+        await (serverSupabase.from("audit_logs" as any) as any).insert({
+          action: "admin_email_changed",
+          entity_type: "auth.users",
+          entity_id: authUser.id,
+          details: {
+            old_email: authUser.email,
+            new_email: newEmail,
+            changed_by: authUser.id,
+          },
+          created_at: nowIso,
+        });
+      } catch {
+        /* ignore */
+      }
+
+      return json({
+        success: true,
+        email: newEmail,
+        message: "Administrator email updated successfully.",
+      });
+    }
+
     /* ----------------------------------------------------------------------
        1. Categories: GET /api/categories
        ---------------------------------------------------------------------- */
@@ -738,6 +1071,105 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     }
 
     /* ----------------------------------------------------------------------
+       3e-1. Admin Expense Management:
+             GET    /api/admin/expenses
+             POST   /api/admin/expenses
+             GET    /api/admin/expenses/:id
+             PUT    /api/admin/expenses/:id
+             PATCH  /api/admin/expenses/:id
+             DELETE /api/admin/expenses/:id
+       ---------------------------------------------------------------------- */
+    if (pathname === "/api/admin/expenses") {
+      const authUser = await resolveAuthUser(request);
+      if (!authUser) {
+        return unauthorized("Authentication required to manage expenses");
+      }
+      if (authUser.role !== "ADMIN") {
+        return forbidden("Only the designated administrator can access financial expenses");
+      }
+
+      if (method === "GET") {
+        try {
+          const startDate = url.searchParams.get("startDate") || undefined;
+          const endDate = url.searchParams.get("endDate") || undefined;
+          const category = url.searchParams.get("category") || undefined;
+          const search = url.searchParams.get("search") || undefined;
+
+          const expenses = await getExpenses({ startDate, endDate, category, search });
+          const summary = await getExpenseSummary(startDate, endDate);
+          return json({ success: true, expenses, summary });
+        } catch (err: unknown) {
+          return serverError(err);
+        }
+      }
+
+      if (method === "POST") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid expense request payload");
+        }
+
+        try {
+          const created = await createExpense(body, authUser.id);
+          return json({ success: true, expense: created }, 201);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          return serverError(err);
+        }
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const expenseMatch = pathname.match(/^\/api\/admin\/expenses\/([^/]+)$/);
+    if (expenseMatch) {
+      const authUser = await resolveAuthUser(request);
+      if (!authUser) {
+        return unauthorized("Authentication required to manage expenses");
+      }
+      if (authUser.role !== "ADMIN") {
+        return forbidden("Only the designated administrator can access financial expenses");
+      }
+
+      const expenseId = decodeURIComponent(expenseMatch[1]!);
+
+      if (method === "GET") {
+        const exp = await getExpenseById(expenseId);
+        if (!exp) return notFound(`Expense '${expenseId}' not found`);
+        return json({ success: true, expense: exp });
+      }
+
+      if (method === "PUT" || method === "PATCH") {
+        const body = await request.json().catch(() => null);
+        if (!body || typeof body !== "object") {
+          return badRequest("Invalid expense update payload");
+        }
+
+        try {
+          const updated = await updateExpense(expenseId, body, authUser.id);
+          return json({ success: true, expense: updated });
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 404) return notFound(err.message);
+          return serverError(err);
+        }
+      }
+
+      if (method === "DELETE") {
+        try {
+          await deleteExpense(expenseId, authUser.id);
+          return json({ success: true, deletedId: expenseId });
+        } catch (err: unknown) {
+          return serverError(err);
+        }
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    /* ----------------------------------------------------------------------
        3e. Admin Staff Management & Registration:
            GET   /api/admin/staff
            POST  /api/admin/staff (or /api/admin/staff/register)
@@ -787,6 +1219,26 @@ export async function handleApiRequest(request: Request): Promise<Response> {
           if (status === 400) return badRequest(err.message);
           if (status === 409) return json({ error: err.message, message: err.message }, 409);
           if (status === 403) return forbidden(err.message);
+          return serverError(err);
+        }
+      }
+
+      // DELETE /api/admin/staff
+      if (method === "DELETE") {
+        const body = await request.json().catch(() => null);
+        const targetUserId = body?.userId ? String(body.userId).trim() : null;
+        if (!targetUserId) {
+          return badRequest("Field 'userId' is required to delete a staff account");
+        }
+
+        try {
+          const result = await deleteStaffMember(targetUserId, authUser.id);
+          return json(result);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 403) return forbidden(err.message);
+          if (status === 404) return notFound(err.message);
           return serverError(err);
         }
       }
@@ -853,6 +1305,32 @@ export async function handleApiRequest(request: Request): Promise<Response> {
 
         try {
           const result = await updateStaffActiveStatus(targetUserId, isActive, authUser.id);
+          return json(result);
+        } catch (err: any) {
+          const status = err.statusCode || 500;
+          if (status === 400) return badRequest(err.message);
+          if (status === 403) return forbidden(err.message);
+          if (status === 404) return notFound(err.message);
+          return serverError(err);
+        }
+      }
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    const staffIdMatch = pathname.match(/^\/api\/admin\/staff\/([^/]+)$/);
+    if (staffIdMatch && !["status", "password", "register"].includes(staffIdMatch[1]!)) {
+      const targetUserId = decodeURIComponent(staffIdMatch[1]!);
+      if (method === "DELETE") {
+        const authUser = await resolveAuthUser(request);
+        if (!authUser) {
+          return unauthorized("Authentication required");
+        }
+        if (authUser.role !== "ADMIN") {
+          return forbidden("Only administrators can delete staff accounts");
+        }
+
+        try {
+          const result = await deleteStaffMember(targetUserId, authUser.id);
           return json(result);
         } catch (err: any) {
           const status = err.statusCode || 500;

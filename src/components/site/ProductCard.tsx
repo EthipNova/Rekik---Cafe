@@ -7,6 +7,37 @@ import { useCart } from "@/lib/cart";
 import { formatETB, type Product } from "@/lib/menu-data";
 import { calculateDiscountedPrice, formatDiscount, type Promotion } from "@/lib/promotions";
 
+function getFallbackProductImage(name: string, categorySlug?: string): string {
+  const n = (name || "").toLowerCase();
+  const c = (categorySlug || "").toLowerCase();
+  if (
+    n.includes("coffee") ||
+    c.includes("coffee") ||
+    n.includes("espresso") ||
+    c.includes("espresso") ||
+    n.includes("tea") ||
+    c.includes("tea")
+  ) {
+    return "/images/coffee-thumb.jpg";
+  }
+  if (n.includes("pizza") || c.includes("pizza")) {
+    return "/images/margherita.jpg";
+  }
+  if (n.includes("chicken") && n.includes("burger")) {
+    return "/images/chicken-burger.jpg";
+  }
+  if (n.includes("burger") || c.includes("burger")) {
+    return "/images/classic-burger.jpg";
+  }
+  if (n.includes("fries") || n.includes("chip") || c.includes("side")) {
+    return "/images/fries.jpg";
+  }
+  if (n.includes("juice") || c.includes("juice") || n.includes("drink") || c.includes("drink")) {
+    return "/images/cola.jpg";
+  }
+  return "/images/coffee-thumb.jpg";
+}
+
 export function ProductCard({
   product,
   promotion,
@@ -30,12 +61,18 @@ export function ProductCard({
         className="relative block aspect-4/3 overflow-hidden bg-cream/40"
       >
         <img
-          src={product.image}
+          src={product.image || getFallbackProductImage(product.name, product.categorySlug)}
           alt={product.name}
           loading="lazy"
           width={768}
           height={768}
           className="size-full object-cover transition-transform duration-500 group-hover:scale-105"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = getFallbackProductImage(
+              product.name,
+              product.categorySlug,
+            );
+          }}
         />
         {product.featured && (
           <span className="absolute top-2.5 left-2.5 rounded-full bg-gold/95 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-espresso shadow-xs">

@@ -9,10 +9,19 @@
  */
 
 import { serverSupabase } from "./supabase";
+import {
+  allocateStaffId,
+  getStaffIdForUserId,
+  markStaffIdDeleted,
+  getNextStaffId,
+  BASELINE_STAFF_MAPPING,
+} from "./staff-id";
+
+export const DESIGNATED_ADMIN_ID = "e145d152-0ecb-43d6-863c-06fa40c12db4";
 
 export interface RegisterStaffInput {
   name: string;
-  email: string;
+  email?: string;
   password: string;
   role: "waiter" | "cashier";
   phone?: string | null | undefined;
@@ -21,6 +30,7 @@ export interface RegisterStaffInput {
 export interface StaffSummary {
   id: string;
   userId?: string;
+  staffId: string;
   name: string;
   email: string;
   role: string;
@@ -53,7 +63,7 @@ export function validateStaffRegistrationInput(input: RegisterStaffInput): {
   }
 
   const email = (input.email || "").trim().toLowerCase();
-  if (!email || !EMAIL_REGEX.test(email)) {
+  if (email && !EMAIL_REGEX.test(email)) {
     return { valid: false, error: "A valid email address is required.", field: "email" };
   }
 
@@ -96,15 +106,26 @@ export function validateStaffRegistrationInput(input: RegisterStaffInput): {
  */
 export async function getRegisteredStaffList(): Promise<StaffSummary[]> {
   // 1. Fetch all staff profiles
-  const { data: profiles, error: profErr } = await (
+  let profiles: any[] | null = null;
+  const { data: pData, error: profErr } = await (
     serverSupabase.from("staff_profiles" as any) as any
   )
-    .select("user_id, full_name, role, is_active, phone, created_at, updated_at")
+    .select("user_id, full_name, role, is_active, phone, created_at, updated_at, staff_id")
     .order("created_at", { ascending: false });
 
   if (profErr) {
-    console.error("[staff] Failed to load staff_profiles:", profErr.message);
-    throw new Error(`Failed to load staff list: ${profErr.message}`);
+    const { data: fallbackProfiles, error: fallbackErr } = await (
+      serverSupabase.from("staff_profiles" as any) as any
+    )
+      .select("user_id, full_name, role, is_active, phone, created_at, updated_at")
+      .order("created_at", { ascending: false });
+    if (fallbackErr) {
+      console.error("[staff] Failed to load staff_profiles:", fallbackErr.message);
+      throw new Error(`Failed to load staff list: ${fallbackErr.message}`);
+    }
+    profiles = fallbackProfiles;
+  } else {
+    profiles = pData;
   }
 
   // 2. Fetch all users to resolve emails in case staff_profiles.email is not yet populated
@@ -119,16 +140,34 @@ export async function getRegisteredStaffList(): Promise<StaffSummary[]> {
     });
   }
 
-  return (profiles || []).map((p: any) => ({
-    id: p.user_id,
-    name: p.full_name || "Staff Member",
-    email: p.email || emailMap.get(p.user_id) || "—",
-    role: (p.role || "staff").toLowerCase(),
-    isActive: p.is_active !== false,
-    phone: p.phone || null,
-    createdAt: p.created_at || new Date().toISOString(),
-    updatedAt: p.updated_at || null,
-  }));
+  // 3. Resolve staffId for every profile (guaranteeing everyone has a readable Staff ID)
+  const summaries: StaffSummary[] = [];
+  for (const p of profiles || []) {
+    let staffId = p.staff_id || getStaffIdForUserId(p.user_id);
+    if (!staffId) {
+      staffId = await allocateStaffId({
+        userId: p.user_id,
+        name: p.full_name || "Staff Member",
+        role: p.role || "staff",
+        email: p.email || emailMap.get(p.user_id),
+      });
+    }
+
+    summaries.push({
+      id: p.user_id,
+      userId: p.user_id,
+      staffId,
+      name: p.full_name || "Staff Member",
+      email: p.email || emailMap.get(p.user_id) || "—",
+      role: (p.role || "staff").toLowerCase(),
+      isActive: p.is_active !== false,
+      phone: p.phone || null,
+      createdAt: p.created_at || new Date().toISOString(),
+      updatedAt: p.updated_at || null,
+    });
+  }
+
+  return summaries;
 }
 
 /**
@@ -148,10 +187,18 @@ export async function registerStaffMember(
   }
 
   const name = input.name.trim();
-  const email = input.email.trim().toLowerCase();
-  const password = input.password;
   const role = input.role.toLowerCase() as "waiter" | "cashier";
   const phone = input.phone?.trim() || null;
+
+  // 0. Auto-generate next permanent Staff ID
+  const { staffId } = await getNextStaffId();
+
+  // If email was not provided or blank, generate an internal email mapped to staffId
+  const email = (input.email && input.email.trim())
+    ? input.email.trim().toLowerCase()
+    : `staff.${staffId.toLowerCase().replace(/[^a-z0-9]/g, "")}@rekikcafe.local`;
+
+  const password = input.password;
 
   // 1. Check for duplicate email in public.users
   const { data: existingUser } = await (serverSupabase.from("users" as any) as any)
@@ -173,6 +220,7 @@ export async function registerStaffMember(
     user_metadata: {
       full_name: name,
       role,
+      staff_id: staffId,
       ...(phone ? { phone } : {}),
     },
   });
@@ -227,6 +275,7 @@ export async function registerStaffMember(
         email,
         phone,
         role,
+        staff_id: staffId,
         is_active: true,
         is_available: true,
         created_at: new Date().toISOString(),
@@ -290,9 +339,18 @@ export async function registerStaffMember(
       // Non-critical audit logging failure
     }
 
+    await allocateStaffId({
+      userId: newUserId,
+      name,
+      role,
+      email,
+      customStaffId: staffId,
+    });
+
     return {
       id: newUserId,
       userId: newUserId,
+      staffId,
       name,
       email,
       role,
@@ -334,6 +392,13 @@ export async function updateStaffActiveStatus(
     throw err;
   }
 
+  // Guard 0: Authoritative single admin protection - designated administrator cannot be deactivated
+  if (targetUserId === DESIGNATED_ADMIN_ID) {
+    const err = new Error("Administrator and Owner accounts cannot be deactivated via staff management.");
+    (err as any).statusCode = 403;
+    throw err;
+  }
+
   // Guard 1: Cannot modify own status
   if (targetUserId === adminUserId) {
     const err = new Error("You cannot change the active status of your own administrator account.");
@@ -342,17 +407,24 @@ export async function updateStaffActiveStatus(
   }
 
   // Guard 2: Inspect target profile - ensure not modifying administrator/owner
-  const { data: targetProfile, error: fetchErr } = await (
-    serverSupabase.from("staff_profiles" as any) as any
-  )
-    .select("role, full_name, is_active")
-    .eq("user_id", targetUserId)
-    .maybeSingle();
+  let targetProfile: { role?: string; full_name?: string; is_active?: boolean } | null = null;
+  try {
+    const { data } = await (serverSupabase.from("staff_profiles" as any) as any)
+      .select("role, full_name, is_active")
+      .eq("user_id", targetUserId)
+      .maybeSingle();
+    if (data) {
+      targetProfile = data;
+    }
+  } catch {
+    /* fallback to local baseline */
+  }
 
-  if (fetchErr) {
-    const err = new Error(`Failed to inspect target staff profile: ${fetchErr.message}`);
-    (err as any).statusCode = 500;
-    throw err;
+  if (!targetProfile) {
+    const baseline = BASELINE_STAFF_MAPPING.find((b) => b.userId === targetUserId);
+    if (baseline) {
+      targetProfile = { role: baseline.role, full_name: baseline.name, is_active: baseline.isActive ?? true };
+    }
   }
 
   if (!targetProfile) {
@@ -415,6 +487,214 @@ export async function updateStaffActiveStatus(
     isActive,
     staff: { userId: targetUserId, isActive },
   };
+}
+
+export interface DeleteStaffResult {
+  success: boolean;
+  userId: string;
+  isDeleted: boolean;
+  isArchived: boolean;
+  message: string;
+}
+
+/**
+ * Safely removes or archives a staff account.
+ * If the staff member has historical records (orders, payments, approvals),
+ * prevents deleting business records by revoking credentials and deactivating the account.
+ * If the staff member has no business records, permanently deletes the account from auth and database.
+ */
+export async function deleteStaffMember(
+  targetUserId: string,
+  adminUserId: string,
+): Promise<DeleteStaffResult> {
+  if (!targetUserId) {
+    const err = new Error("Target user ID is required.");
+    (err as any).statusCode = 400;
+    throw err;
+  }
+
+  // Guard 0: Authoritative single admin protection - designated administrator cannot be deleted
+  if (targetUserId === DESIGNATED_ADMIN_ID) {
+    const err = new Error("Administrator and Owner accounts cannot be deleted via staff management.");
+    (err as any).statusCode = 403;
+    throw err;
+  }
+
+  // Guard 1: Cannot delete self
+  if (targetUserId === adminUserId) {
+    const err = new Error("You cannot delete your own administrator account.");
+    (err as any).statusCode = 400;
+    throw err;
+  }
+
+  // Guard 2: Inspect target profile - ensure not deleting administrator/owner
+  let targetProfile: { role?: string; full_name?: string; is_active?: boolean; phone?: string | null } | null = null;
+  try {
+    const { data } = await (serverSupabase.from("staff_profiles" as any) as any)
+      .select("role, full_name, is_active, phone")
+      .eq("user_id", targetUserId)
+      .maybeSingle();
+    if (data) {
+      targetProfile = data;
+    }
+  } catch {
+    /* fallback to local baseline */
+  }
+
+  if (!targetProfile) {
+    const baseline = BASELINE_STAFF_MAPPING.find((b) => b.userId === targetUserId);
+    if (baseline) {
+      targetProfile = { role: baseline.role, full_name: baseline.name, is_active: baseline.isActive ?? true };
+    }
+  }
+
+  if (!targetProfile) {
+    const err = new Error("Staff profile not found.");
+    (err as any).statusCode = 404;
+    throw err;
+  }
+
+  const roleLower = (targetProfile.role || "").toLowerCase().trim();
+  if (["admin", "owner", "manager"].includes(roleLower)) {
+    const err = new Error(
+      "Administrator and Owner accounts cannot be deleted via staff management.",
+    );
+    (err as any).statusCode = 403;
+    throw err;
+  }
+
+  // Check for historical business records (orders, payment reviews, approvals)
+  let hasHistoricalOrders = false;
+  let hasPaymentReviews = false;
+  let hasApprovals = false;
+
+  try {
+    const { count: orderCount } = await (serverSupabase.from("orders" as any) as any)
+      .select("id", { count: "exact", head: true })
+      .eq("waiter_id", targetUserId);
+    hasHistoricalOrders = Boolean(orderCount && orderCount > 0);
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const { count: reviewCount } = await (serverSupabase.from("payment_reviews" as any) as any)
+      .select("id", { count: "exact", head: true })
+      .eq("cashier_id", targetUserId);
+    hasPaymentReviews = Boolean(reviewCount && reviewCount > 0);
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const { count: approvalCount } = await (serverSupabase.from("order_approvals" as any) as any)
+      .select("id", { count: "exact", head: true })
+      .eq("waiter_id", targetUserId);
+    hasApprovals = Boolean(approvalCount && approvalCount > 0);
+  } catch {
+    /* ignore */
+  }
+
+  const hasBusinessRecords = hasHistoricalOrders || hasPaymentReviews || hasApprovals;
+
+  if (hasBusinessRecords) {
+    // PRESERVE HISTORICAL RECORDS STRATEGY:
+    // Mark staff ID as deleted so it is never reused
+    markStaffIdDeleted(targetUserId);
+
+    // Deactivate account and revoke login credentials to preserve business and payment history.
+    const nowIso = new Date().toISOString();
+    await (serverSupabase.from("staff_profiles" as any) as any)
+      .update({
+        is_active: false,
+        is_available: false,
+        updated_at: nowIso,
+      })
+      .eq("user_id", targetUserId);
+
+    try {
+      await serverSupabase.auth.admin.updateUserById(targetUserId, {
+        ban_duration: "876000h",
+      });
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      await (serverSupabase.from("audit_logs" as any) as any).insert({
+        action: "archive_staff_account",
+        entity_type: "staff_profiles",
+        entity_id: targetUserId,
+        details: {
+          target_name: targetProfile.full_name,
+          target_role: targetProfile.role,
+          deleted_by: adminUserId,
+          reason: "Account archived to preserve historical business orders and payment records",
+        },
+        created_at: nowIso,
+      });
+    } catch {
+      /* ignore */
+    }
+
+    return {
+      success: true,
+      userId: targetUserId,
+      isDeleted: false,
+      isArchived: true,
+      message: `Staff member "${targetProfile.full_name}" has associated historical orders or payments. Their login credentials were permanently revoked and account deactivated to preserve business history.`,
+    };
+  }
+
+  // NO HISTORICAL BUSINESS RECORDS: Perform safe permanent deletion
+  markStaffIdDeleted(targetUserId);
+  const nowIso = new Date().toISOString();
+  try {
+    // 1. Remove from staff_profiles
+    await (serverSupabase.from("staff_profiles" as any) as any)
+      .delete()
+      .eq("user_id", targetUserId);
+
+    // 2. Remove from public.users
+    await (serverSupabase.from("users" as any) as any)
+      .delete()
+      .eq("id", targetUserId);
+
+    // 3. Remove from Supabase Auth
+    try {
+      await serverSupabase.auth.admin.deleteUser(targetUserId);
+    } catch (authDelErr: any) {
+      console.warn("[staff] Auth user deletion warning:", authDelErr?.message);
+    }
+
+    try {
+      await (serverSupabase.from("audit_logs" as any) as any).insert({
+        action: "delete_staff_account",
+        entity_type: "staff_profiles",
+        entity_id: targetUserId,
+        details: {
+          target_name: targetProfile.full_name,
+          target_role: targetProfile.role,
+          deleted_by: adminUserId,
+        },
+        created_at: nowIso,
+      });
+    } catch {
+      /* ignore */
+    }
+
+    return {
+      success: true,
+      userId: targetUserId,
+      isDeleted: true,
+      isArchived: false,
+      message: `Staff account for "${targetProfile.full_name}" was permanently removed.`,
+    };
+  } catch (delErr: any) {
+    const err = new Error(`Failed to delete staff account: ${delErr.message}`);
+    (err as any).statusCode = 500;
+    throw err;
+  }
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   XCircle,
   Receipt,
   RotateCcw,
+  Banknote,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { fetchProofSignedUrl } from "@/services/cashier";
@@ -76,8 +77,14 @@ export function PaymentProofModal({
   const [urlError, setUrlError] = useState<string | null>(null);
 
   const isHistorical = Boolean(item && "decision" in item);
-  const pendingItem = !isHistorical ? (item as PendingPaymentReviewItem) : null;
-  const historyItem = isHistorical ? (item as PaymentReviewHistoryItem) : null;
+  const pendingItem = !isHistorical && item ? (item as PendingPaymentReviewItem) : null;
+  const historyItem = isHistorical && item ? (item as PaymentReviewHistoryItem) : null;
+  const rawMethod = (item?.payment_method || "").toLowerCase();
+  const rawProofPath =
+    (item && "proof_screenshot_path" in item ? (item as any).proof_screenshot_path : "") ||
+    (item && "screenshot_path" in item ? (item as any).screenshot_path : "");
+  const isCash =
+    rawMethod === "cash" || rawMethod.includes("cash") || rawProofPath === "cash-direct";
 
   useEffect(() => {
     if (!open || !item) {
@@ -89,6 +96,15 @@ export function PaymentProofModal({
     let active = true;
     setLoadingUrl(true);
     setUrlError(null);
+
+    const rawM = (item?.payment_method || "").toLowerCase();
+    const proofPath =
+      ("proof_screenshot_path" in item ? (item as any).proof_screenshot_path : "") ||
+      ("screenshot_path" in item ? (item as any).screenshot_path : "");
+    if (rawM === "cash" || rawM.includes("cash") || proofPath === "cash-direct") {
+      setLoadingUrl(false);
+      return;
+    }
 
     const target = item.proof_id || ("screenshot_path" in item ? item.screenshot_path : "");
 
@@ -123,7 +139,17 @@ export function PaymentProofModal({
   const customerEmail =
     pendingItem?.customer_email || `${customerName.toLowerCase().replace(/\s+/g, "")}@example.com`;
   const paymentAmount = item.payment_amount || 850;
-  const paymentMethod = item.payment_method || "CBE Birr (Mobile Banking)";
+  const isCBE = rawMethod.includes("cbe");
+  const isTelebirr = rawMethod.includes("telebirr");
+  const defaultMethod = isCash
+    ? "💵 Cash"
+    : isCBE
+      ? "CBE Birr"
+      : isTelebirr
+        ? "Telebirr"
+        : "Electronic Transfer";
+  const paymentMethod = isCash ? "💵 Cash" : (item.payment_method || defaultMethod);
+  const methodLabel = isCash ? "Cash" : isCBE ? "CBE" : isTelebirr ? "Telebirr" : (item.payment_method || "Electronic Transfer");
   const formattedDate = formatReviewDate(
     pendingItem?.proof_submitted_at || pendingItem?.order_created_at || historyItem?.reviewed_at,
   );
@@ -150,21 +176,24 @@ export function PaymentProofModal({
         ];
 
   const orderTotal = pendingItem?.order_total || paymentAmount;
-  const customerNotes =
-    pendingItem?.customer_notes || "Payment made from CBE. Please check the screenshot.";
+  const customerNotes = pendingItem?.customer_notes?.trim() || "";
 
-  const effectiveImageUrl = signedUrl || "/images/cbe-receipt-mockup.png";
+  const effectiveImageUrl = signedUrl || "";
 
   const handleOpenInNewTab = () => {
-    window.open(effectiveImageUrl, "_blank", "noopener,noreferrer");
+    if (signedUrl) {
+      window.open(signedUrl, "_blank", "noopener,noreferrer");
+    }
   };
 
   const handleDownload = () => {
-    const a = document.createElement("a");
-    a.href = effectiveImageUrl;
-    a.download = `payment-proof-${orderNumber.replace(/[^a-zA-Z0-9_-]/g, "")}.png`;
-    a.target = "_blank";
-    a.click();
+    if (signedUrl) {
+      const a = document.createElement("a");
+      a.href = signedUrl;
+      a.download = `payment-proof-${orderNumber.replace(/[^a-zA-Z0-9_-]/g, "")}.png`;
+      a.target = "_blank";
+      a.click();
+    }
   };
 
   return (
@@ -178,10 +207,12 @@ export function PaymentProofModal({
             </div>
             <div>
               <DialogTitle className="text-xl font-bold text-[#1A110D] tracking-tight">
-                Payment Verification
+                {isCash ? "Order & Cash Verification" : "Payment Verification"}
               </DialogTitle>
               <p className="text-xs text-[#8A7B70] mt-0.5">
-                Review the payment proof and verify the payment details.
+                {isCash
+                  ? "Verify customer order details and confirm in-person cash payment."
+                  : `Review the payment proof for ${methodLabel} and verify the payment details.`}
               </p>
             </div>
           </div>
@@ -295,7 +326,13 @@ export function PaymentProofModal({
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[#70645C]">Payment Method</span>
-                  <span className="font-medium text-[#2A1810]">{paymentMethod}</span>
+                  {isCash ? (
+                    <span className="font-bold text-emerald-800 inline-flex items-center gap-1 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full text-[11px]">
+                      💵 Cash
+                    </span>
+                  ) : (
+                    <span className="font-medium text-[#2A1810]">{paymentMethod}</span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[#70645C]">Payment Submitted</span>
@@ -310,20 +347,19 @@ export function PaymentProofModal({
               </div>
             </div>
 
-            {/* 4. Additional Information */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm font-bold text-[#1A110D]">
-                <FileText className="h-4 w-4 text-[#8C7A6E]" />
-                <span>Additional Information</span>
-              </div>
+            {/* 4. Customer Notes (Only rendered if notes were provided) */}
+            {customerNotes && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-bold text-[#1A110D]">
+                  <FileText className="h-4 w-4 text-[#8C7A6E]" />
+                  <span>Customer Notes</span>
+                </div>
 
-              <div className="space-y-1.5">
-                <div className="text-xs text-[#8A7B70]">Notes from customer</div>
                 <div className="bg-[#F4EFEB] rounded-xl p-3 text-xs text-[#2A1810] leading-relaxed">
                   {customerNotes}
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* ─────────────────────────────────────────────────────────── */}
@@ -332,61 +368,113 @@ export function PaymentProofModal({
           <div className="lg:col-span-5 space-y-4">
             {/* Payment Proof Header */}
             <div className="flex items-center gap-2 text-sm font-bold text-[#1A110D]">
-              <ImageIcon className="h-4 w-4 text-[#8C7A6E]" />
-              <span>Payment Proof</span>
-            </div>
-
-            {/* Phone Screen Mockup / Large Proof Image Viewport */}
-            <div className="relative bg-[#E5E0D8] rounded-2xl p-4 flex items-center justify-center overflow-hidden min-h-[360px] border border-[#D8D0C5]">
-              {loadingUrl ? (
-                <div className="flex flex-col items-center gap-2 text-[#70645C]">
-                  <RotateCcw className="h-6 w-6 animate-spin text-[#C8102E]" />
-                  <span className="text-xs font-medium">Loading proof preview...</span>
-                </div>
+              {isCash ? (
+                <>
+                  <Banknote className="h-4 w-4 text-emerald-600" />
+                  <span>Payment Proof</span>
+                </>
               ) : (
-                <div className="relative max-w-[280px] w-full flex items-center justify-center">
-                  <img
-                    src={effectiveImageUrl}
-                    alt={`Payment proof for ${orderNumber}`}
-                    className="max-h-[380px] w-auto max-w-full object-contain rounded-2xl shadow-xl border border-black/10"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/images/cbe-receipt-mockup.png";
-                    }}
-                  />
-                </div>
+                <>
+                  <ImageIcon className="h-4 w-4 text-[#8C7A6E]" />
+                  <span>Payment Proof</span>
+                </>
               )}
             </div>
 
-            {/* Open in new tab & Download Controls */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleOpenInNewTab}
-                className="flex-1 h-10 px-4 rounded-xl border border-[#DFD6C8] bg-white hover:bg-[#FAF8F5] text-xs font-medium text-[#2A1810] flex items-center justify-center gap-2 transition-colors shadow-xs"
-              >
-                <ExternalLink className="h-4 w-4 text-[#8C7A6E]" />
-                <span>Open in new tab</span>
-              </button>
+            {isCash ? (
+              <div className="bg-[#FAF8F5] rounded-2xl p-6 border border-[#EFECE6] text-center space-y-4">
+                <div className="mx-auto size-16 rounded-2xl bg-emerald-500/10 text-emerald-700 border border-emerald-200/80 flex items-center justify-center text-3xl shadow-2xs">
+                  💵
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="font-bold text-base text-[#1A110D]">
+                    💵 Payment collected in cash. No payment proof is required.
+                  </h3>
+                  <p className="text-xs text-[#70645C] max-w-xs mx-auto font-medium">
+                    Payment collected in cash by the waiter. In-Person Cash Payment.
+                  </p>
+                  <p className="text-[11px] text-[#8C7A6E]">
+                    No receipt screenshot or payment proof required.
+                  </p>
+                </div>
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200/60 rounded-xl text-xs text-emerald-800 text-left space-y-1.5">
+                  <p className="font-semibold flex items-center gap-1.5">
+                    <CheckCircle2 className="size-4 text-emerald-600" />
+                    Payment Method: 💵 Cash
+                  </p>
+                  <p className="text-[11px] text-emerald-700 leading-relaxed">
+                    Physical cash payment verified in person. Click &quot;Approve Payment&quot; below to confirm and authorize kitchen preparation.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="p-3.5 bg-blue-50 border border-blue-200/80 rounded-xl text-xs text-blue-900 flex items-center gap-2.5">
+                  <ImageIcon className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span className="font-medium">
+                    Payment made through {methodLabel}. Please check the payment proof.
+                  </span>
+                </div>
 
-              <button
-                type="button"
-                onClick={handleDownload}
-                className="h-10 w-10 rounded-xl border border-[#DFD6C8] bg-white hover:bg-[#FAF8F5] text-[#2A1810] flex items-center justify-center transition-colors shadow-xs"
-                title="Download Payment Proof"
-                aria-label="Download Payment Proof"
-              >
-                <Download className="h-4 w-4 text-[#8C7A6E]" />
-              </button>
-            </div>
+                {/* Phone Screen Mockup / Large Proof Image Viewport */}
+                <div className="relative bg-[#E5E0D8] rounded-2xl p-4 flex items-center justify-center overflow-hidden min-h-[360px] border border-[#D8D0C5]">
+                  {loadingUrl ? (
+                    <div className="flex flex-col items-center gap-2 text-[#70645C]">
+                      <RotateCcw className="h-6 w-6 animate-spin text-[#C8102E]" />
+                      <span className="text-xs font-medium">Loading proof preview...</span>
+                    </div>
+                  ) : signedUrl ? (
+                    <div className="relative max-w-[280px] w-full flex items-center justify-center">
+                      <img
+                        src={signedUrl}
+                        alt={`Payment proof for ${orderNumber}`}
+                        className="max-h-[380px] w-auto max-w-full object-contain rounded-2xl shadow-xl border border-black/10"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 text-[#70645C] text-center p-6">
+                      <Receipt className="h-8 w-8 text-[#8C7A6E]" />
+                      <span className="text-xs font-medium">No payment proof image available.</span>
+                    </div>
+                  )}
+                </div>
 
-            {/* Private Storage Access Notice */}
-            <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl p-3 flex items-start gap-2.5">
-              <Lock className="h-4 w-4 text-[#2563EB] shrink-0 mt-0.5" />
-              <p className="text-xs text-[#1D4ED8] leading-relaxed">
-                This payment proof is stored securely in a private Supabase Storage bucket and can
-                only be accessed by authorized staff.
-              </p>
-            </div>
+                {/* Open in new tab & Download Controls — only shown when proof image exists */}
+                {signedUrl && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenInNewTab}
+                      className="flex-1 h-10 px-4 rounded-xl border border-[#DFD6C8] bg-white hover:bg-[#FAF8F5] text-xs font-medium text-[#2A1810] flex items-center justify-center gap-2 transition-colors shadow-xs"
+                    >
+                      <ExternalLink className="h-4 w-4 text-[#8C7A6E]" />
+                      <span>Open in new tab</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDownload}
+                      className="h-10 w-10 rounded-xl border border-[#DFD6C8] bg-white hover:bg-[#FAF8F5] text-[#2A1810] flex items-center justify-center transition-colors shadow-xs"
+                      title="Download Payment Proof"
+                      aria-label="Download Payment Proof"
+                    >
+                      <Download className="h-4 w-4 text-[#8C7A6E]" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Private Storage Access Notice */}
+                {signedUrl && (
+                  <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl p-3 flex items-start gap-2.5">
+                    <Lock className="h-4 w-4 text-[#2563EB] shrink-0 mt-0.5" />
+                    <p className="text-xs text-[#1D4ED8] leading-relaxed">
+                      This payment proof is stored securely in a private Supabase Storage bucket and can
+                      only be accessed by authorized staff.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
 
             {/* Verification Actions */}
             <div className="space-y-2.5 pt-1">

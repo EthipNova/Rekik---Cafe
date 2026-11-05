@@ -24,6 +24,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   changeAdminPassword,
+  changeAdminEmail,
+  requestAdminPasswordRecovery,
   deleteAdminAvatar,
   fetchCurrentAdminAccount,
   updateAdminProfile,
@@ -89,6 +91,16 @@ function AdminAccountPage() {
 
   // Copy ID feedback
   const [copiedId, setCopiedId] = useState(false);
+  const [copiedStaffId, setCopiedStaffId] = useState(false);
+
+  // Change Email state
+  const [isChangeEmailOpen, setIsChangeEmailOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [emailVerifyPassword, setEmailVerifyPassword] = useState("");
+  const [changingEmail, setChangingEmail] = useState(false);
+
+  // Recovery email trigger state
+  const [sendingRecovery, setSendingRecovery] = useState(false);
 
   const loadAccount = async () => {
     setLoading(true);
@@ -211,6 +223,56 @@ function AdminAccountPage() {
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
+  };
+
+  const handleChangeEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanNewEmail = newEmail.trim().toLowerCase();
+    if (!cleanNewEmail) {
+      toast.error("Please enter a valid new email address.");
+      return;
+    }
+    if (!emailVerifyPassword) {
+      toast.error("Please enter your current password to verify your identity.");
+      return;
+    }
+
+    setChangingEmail(true);
+    const res = await changeAdminEmail(cleanNewEmail, emailVerifyPassword);
+    setChangingEmail(false);
+
+    if (!res.success) {
+      toast.error(res.error || "Failed to change administrator email.");
+      return;
+    }
+
+    toast.success("Administrator email updated successfully!");
+    setProfile((prev) => (prev ? { ...prev, email: cleanNewEmail } : prev));
+    setIsChangeEmailOpen(false);
+    setNewEmail("");
+    setEmailVerifyPassword("");
+    void loadAccount();
+  };
+
+  const handleSendRecoveryEmail = async () => {
+    if (!profile?.email) return;
+    setSendingRecovery(true);
+    const res = await requestAdminPasswordRecovery(profile.email);
+    setSendingRecovery(false);
+
+    if (res.success) {
+      toast.success(`Password recovery instructions sent to ${profile.email}`);
+    } else {
+      toast.error(res.error || "Failed to send recovery email");
+    }
+  };
+
+  const handleCopyStaffId = () => {
+    const sId = profile?.staffId || "RK-003";
+    navigator.clipboard.writeText(sId);
+    setCopiedStaffId(true);
+    toast.success(`Staff ID ${sId} copied to clipboard`);
+    setTimeout(() => setCopiedStaffId(false), 2000);
   };
 
   const handleCopyId = () => {
@@ -366,13 +428,19 @@ function AdminAccountPage() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            {/* Email (Read-Only) */}
+            {/* Current Email & Change Email Action */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="prof-email">Email address</Label>
-                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <Lock className="size-3" /> Read-only
-                </span>
+                <Label htmlFor="prof-email">Current Email</Label>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => setIsChangeEmailOpen((prev) => !prev)}
+                  className="h-auto p-0 text-xs text-primary font-medium hover:underline"
+                >
+                  Change email
+                </Button>
               </div>
               <Input
                 id="prof-email"
@@ -382,36 +450,124 @@ function AdminAccountPage() {
                 className="bg-muted/50 cursor-not-allowed opacity-80"
               />
               <p className="text-[11px] text-muted-foreground">
-                Authentication email is managed securely by Supabase Auth.
+                Primary authentication email address for administrative console access.
               </p>
             </div>
 
-            {/* Role (Read-Only) */}
+            {/* Staff ID (Read-only) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="prof-role">Café access role</Label>
+                <Label htmlFor="prof-staff-id">Staff ID (Read-Only)</Label>
                 <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                  <Lock className="size-3" /> Read-only
+                  <Lock className="size-3" /> Permanent Identifier
                 </span>
               </div>
-              <div className="flex items-center h-10 px-3 rounded-md border border-input bg-muted/50 text-sm font-medium">
-                <Badge
-                  variant={profile.role === "ADMIN" ? "default" : "secondary"}
-                  className="mr-2"
+              <div className="relative flex items-center">
+                <Input
+                  id="prof-staff-id"
+                  value={profile.staffId || "RK-003"}
+                  disabled
+                  className="bg-muted/50 cursor-not-allowed font-mono font-semibold text-primary opacity-90 pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-1 size-8 text-muted-foreground hover:text-foreground"
+                  onClick={handleCopyStaffId}
+                  title="Copy Staff ID"
                 >
-                  {profile.role}
-                </Badge>
-                <span className="text-xs text-muted-foreground">
-                  {profile.role === "ADMIN"
-                    ? "Full administrative access to all operations"
-                    : "Standard café operations access"}
-                </span>
+                  {copiedStaffId ? (
+                    <Check className="size-3.5 text-primary" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Role modifications require database administrator authorization.
+                Permanent Staff ID remains unchanged even when changing email.
               </p>
             </div>
           </div>
+
+          {/* Change Email Form Card */}
+          {isChangeEmailOpen && (
+            <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 sm:p-5 space-y-4 animate-in fade-in duration-200">
+              <div className="border-b border-border/40 pb-2 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Change Account Email</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Requires your current password to verify your administrative identity.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsChangeEmailOpen(false)}
+                  className="h-7 text-xs"
+                >
+                  Cancel
+                </Button>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="change-new-email" className="text-xs font-semibold">
+                    New Email Address
+                  </Label>
+                  <Input
+                    id="change-new-email"
+                    type="email"
+                    placeholder="new.admin@rekikcafe.com"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    required
+                    disabled={changingEmail}
+                    className="text-xs bg-background"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="change-verify-password" className="text-xs font-semibold">
+                    Current Password (Verification)
+                  </Label>
+                  <Input
+                    id="change-verify-password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={emailVerifyPassword}
+                    onChange={(e) => setEmailVerifyPassword(e.target.value)}
+                    required
+                    disabled={changingEmail}
+                    className="text-xs bg-background"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsChangeEmailOpen(false)}
+                  disabled={changingEmail}
+                  className="text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleChangeEmailSubmit}
+                  disabled={changingEmail}
+                  className="text-xs bg-primary text-primary-foreground"
+                >
+                  {changingEmail ? "Updating Email…" : "Confirm Email Change"}
+                </Button>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end pt-2">
             <Button type="submit" disabled={savingProfile}>
@@ -533,6 +689,26 @@ function AdminAccountPage() {
             {updatingPassword ? "Updating password…" : "Change password"}
           </Button>
         </form>
+
+        {/* Forgot / Reset Password Recovery Option */}
+        <div className="pt-4 border-t border-border/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Password Recovery & Reset</h3>
+            <p className="text-xs text-muted-foreground">
+              Send password reset instructions to your current administrator email address ({profile.email}).
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleSendRecoveryEmail}
+            disabled={sendingRecovery}
+            className="text-xs whitespace-nowrap"
+          >
+            {sendingRecovery ? "Sending Recovery Link…" : "Send Recovery Email"}
+          </Button>
+        </div>
       </section>
 
       {/* SECTION C: ACCOUNT INFORMATION */}
@@ -571,9 +747,9 @@ function AdminAccountPage() {
           </div>
 
           <div className="p-4 rounded-lg bg-background/50 border border-border/60 space-y-1.5">
-            <p className="text-xs text-muted-foreground font-medium">Authentication Email</p>
-            <p className="font-mono text-xs truncate" title={profile.email}>
-              {profile.email}
+            <p className="text-xs text-muted-foreground font-medium">Staff ID</p>
+            <p className="font-mono text-xs font-bold text-primary truncate">
+              {profile.staffId || "RK-003"}
             </p>
           </div>
 

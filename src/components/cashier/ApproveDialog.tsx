@@ -39,6 +39,9 @@ export function ApproveDialog({ open, item, onConfirm, onClose }: ApproveDialogP
   };
 
   const amountMatches = Math.abs(item.order_total - item.proof_submitted_amount) < 0.01;
+  const isCash =
+    (item.payment_method || "").toLowerCase().includes("cash") ||
+    item.proof_screenshot_path === "cash-direct";
 
   return (
     <AlertDialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -48,10 +51,12 @@ export function ApproveDialog({ open, item, onConfirm, onClose }: ApproveDialogP
             <CheckCircle2 className="h-6 w-6" />
           </div>
           <AlertDialogTitle className="text-xl font-bold font-display text-foreground">
-            Approve Payment Verification
+            {isCash ? "Confirm Cash Payment" : "Approve Payment Verification"}
           </AlertDialogTitle>
           <AlertDialogDescription className="text-sm text-muted-foreground">
-            Confirm that the submitted proof of payment matches the customer order. This will mark the payment as verified and confirm the order for preparation.
+            {isCash
+              ? "Confirm that physical cash has been collected for this order. This will mark the payment as verified and authorize kitchen preparation."
+              : "Confirm that the submitted proof of payment matches the customer order. This will mark the payment as verified and confirm the order for preparation."}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -68,7 +73,13 @@ export function ApproveDialog({ open, item, onConfirm, onClose }: ApproveDialogP
 
           <div className="flex justify-between items-center text-sm">
             <span className="text-muted-foreground">Payment Method:</span>
-            <span className="font-medium text-foreground">{item.payment_method}</span>
+            {isCash ? (
+              <span className="font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded text-xs">
+                💵 Cash
+              </span>
+            ) : (
+              <span className="font-medium text-foreground">{item.payment_method}</span>
+            )}
           </div>
 
           {item.transaction_reference && (
@@ -103,7 +114,7 @@ export function ApproveDialog({ open, item, onConfirm, onClose }: ApproveDialogP
           </Label>
           <Input
             id="verification-notes"
-            placeholder="e.g. Verified via Telebirr SMS notification"
+            placeholder={isCash ? "e.g. Received ETB cash at register" : "e.g. Verified via Telebirr SMS notification"}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             disabled={isSubmitting}
@@ -131,7 +142,7 @@ export function ApproveDialog({ open, item, onConfirm, onClose }: ApproveDialogP
             ) : (
               <span className="flex items-center gap-1.5">
                 <ShieldCheck className="h-4 w-4" />
-                Confirm & Verify Payment
+                {isCash ? "Confirm Cash Payment" : "Confirm & Verify Payment"}
               </span>
             )}
           </AlertDialogAction>

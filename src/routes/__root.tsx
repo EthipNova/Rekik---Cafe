@@ -12,6 +12,7 @@ import { type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { CartProvider } from "@/lib/cart";
+import { LanguageProvider } from "@/lib/i18n";
 import { Navbar } from "@/components/site/Navbar";
 import { Footer } from "@/components/site/Footer";
 import { Toaster } from "@/components/ui/sonner";
@@ -131,7 +132,8 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <CartProvider>
+      <LanguageProvider>
+        <CartProvider>
         <div className="flex min-h-screen flex-col">
           {!isPortal && <Navbar />}
           <main className="flex-1">
@@ -141,7 +143,8 @@ function RootComponent() {
           {!isPortal && <Footer />}
         </div>
         <Toaster position="top-center" />
-      </CartProvider>
+        </CartProvider>
+      </LanguageProvider>
     </QueryClientProvider>
   );
 }

@@ -218,6 +218,7 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
         table_number,
         delivery_address,
         customer_notes,
+        payment_method,
         subtotal,
         discount_amount,
         delivery_fee,
@@ -287,7 +288,11 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
       discount_amount: Number(order?.discount_amount) || 0,
       delivery_fee: Number(order?.delivery_fee) || 0,
       payment_amount: Number(payment?.amount) || Number(raw.submitted_amount) || 0,
-      payment_method: payment?.method || "Mobile Payment",
+      payment_method: (() => {
+        const rawMethod = payment?.method || order?.payment_method || (raw.screenshot_path === "cash-direct" ? "Cash" : "");
+        const m = rawMethod || "Mobile Payment";
+        return m.toLowerCase().includes("cash") ? "💵 Cash" : m;
+      })(),
       payment_status: payment?.status || "pending",
       transaction_reference: raw.transaction_reference || payment?.transaction_reference || null,
       proof_screenshot_path: raw.screenshot_path,
@@ -336,6 +341,7 @@ export async function getPaymentReviewHistory(): Promise<PaymentReviewHistoryIte
           order_number,
           customer_name,
           customer_phone,
+          payment_method,
           total_amount,
           created_at,
           order_items (
@@ -389,7 +395,11 @@ export async function getPaymentReviewHistory(): Promise<PaymentReviewHistoryIte
       customer_name: order?.customer_name || "Guest",
       customer_phone: order?.customer_phone || null,
       payment_amount: Number(payment?.amount) || Number(proof?.submitted_amount) || 0,
-      payment_method: payment?.method || "Mobile Payment",
+      payment_method: (() => {
+        const rawMethod = payment?.method || order?.payment_method || (proof?.screenshot_path === "cash-direct" ? "Cash" : "");
+        const m = rawMethod || "Mobile Payment";
+        return m.toLowerCase().includes("cash") ? "💵 Cash" : m;
+      })(),
       decision: rev.decision as "approved" | "rejected",
       reason: rev.reason || null,
       cashier_id: rev.cashier_id,

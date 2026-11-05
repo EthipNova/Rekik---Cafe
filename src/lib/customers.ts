@@ -200,8 +200,13 @@ export function derivePreferredMethod(orders: Order[]): OrderMethod {
  */
 function normalizeCustomerOrder(rawCustomer: any, rawOrder: any): Order {
   const rawPayments = Array.isArray(rawOrder.payments) ? rawOrder.payments : [];
-  let paymentStatus: "paid" | "pending" | "failed" = "pending";
-  let paymentMethod = "Mobile Payment";
+  let paymentStatus: "paid" | "pending" | "failed" =
+    rawOrder.paymentStatus === "paid" || rawOrder.payment_status === "paid"
+      ? "paid"
+      : rawOrder.paymentStatus === "failed" || rawOrder.payment_status === "failed"
+        ? "failed"
+        : "pending";
+  let paymentMethod = rawOrder.paymentMethod || rawOrder.payment_method || "Mobile Payment";
 
   if (rawPayments.length > 0) {
     // Sort descending by created_at to select latest payment attempt
@@ -235,7 +240,7 @@ function normalizeCustomerOrder(rawCustomer: any, rawOrder: any): Order {
     price: Number(item.unit_price) || 0,
   }));
 
-  const total = Number(rawOrder.total_amount) || 0;
+  const total = Number(rawOrder.total_amount) || Number(rawOrder.total) || 0;
   const subtotal = Number(rawOrder.subtotal) || total;
   const discount = Number(rawOrder.discount_amount) || 0;
   const delivery = Number(rawOrder.delivery_fee) || 0;
@@ -265,7 +270,7 @@ function normalizeCustomerOrder(rawCustomer: any, rawOrder: any): Order {
 /**
  * Normalizes a raw customer record and its related orders and addresses from Supabase.
  */
-function normalizeCustomerRecord(rawCustomer: any): DerivedCustomer {
+export function normalizeCustomerRecord(rawCustomer: any): DerivedCustomer {
   const rawOrders = Array.isArray(rawCustomer.orders) ? rawCustomer.orders : [];
   const seenOrderIds = new Set<string>();
   const deduplicatedRawOrders = rawOrders.filter((o: any) => {
@@ -285,7 +290,10 @@ function normalizeCustomerRecord(rawCustomer: any): DerivedCustomer {
     });
 
   const orderCount = normalizedOrders.length;
-  const totalSpent = normalizedOrders.reduce((sum, o) => sum + o.total, 0);
+  // Total verified/completed customer spending based strictly on paid orders (excluding pending/failed/rejected)
+  const totalSpent = normalizedOrders
+    .filter((o) => o.paymentStatus === "paid")
+    .reduce((sum, o) => sum + o.total, 0);
 
   const fallbackDate = rawCustomer.created_at || new Date().toISOString();
   const lastOrderDate = normalizedOrders[0]?.createdAt || fallbackDate;
@@ -421,11 +429,13 @@ export function aggregateCustomers(orders: Order[]): DerivedCustomer[] {
       }
     }
 
-    // Total spending
-    const totalSpent = sortedOrders.reduce((sum, o) => {
-      const val = typeof o.total === "number" && !isNaN(o.total) ? o.total : 0;
-      return sum + val;
-    }, 0);
+    // Total spending (verified paid orders only)
+    const totalSpent = sortedOrders
+      .filter((o) => o.paymentStatus === "paid")
+      .reduce((sum, o) => {
+        const val = typeof o.total === "number" && !isNaN(o.total) ? o.total : 0;
+        return sum + val;
+      }, 0);
 
     // Dates
     const lastOrder = sortedOrders[0];

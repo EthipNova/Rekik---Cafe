@@ -14,7 +14,7 @@
  * - Multi-criteria server-side filtering by date, status, method, and fulfillment
  */
 
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AlertCircle,
   AlertTriangle,
@@ -22,6 +22,7 @@ import {
   ArrowUpDown,
   ArrowUpRight,
   Calendar,
+  Banknote,
   CheckCircle2,
   Clock,
   CreditCard,
@@ -534,6 +535,20 @@ function RekikSalesMonitoringPage() {
 
   return (
     <div className="space-y-6 sm:space-y-8">
+      {/* ── UNIFIED SECTION NOTICE ────────────────────────────────────────── */}
+      <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <ShoppingBag className="size-5 text-primary shrink-0" />
+          <div>
+            <p className="text-xs font-semibold text-foreground">Orders & Payments are now unified</p>
+            <p className="text-[11px] text-muted-foreground">Access complete order tracking, table numbers, and payment details together in the Order & Payment section.</p>
+          </div>
+        </div>
+        <Button asChild size="sm" className="h-8 text-xs font-medium shrink-0">
+          <Link to="/admin/orders">Go to Order & Payment</Link>
+        </Button>
+      </div>
+
       {/* ── 1. HEADER & PERIOD CONTROLS ────────────────────────────────────── */}
       <header className="flex flex-col gap-4 border-b border-border/40 pb-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">
@@ -1376,113 +1391,137 @@ function RekikSalesMonitoringPage() {
               </section>
 
               {/* 4. Payment Receipt Image (Secure Preview matching Cashier PaymentProofModal) */}
-              <section aria-labelledby="drawer-receipt" className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3
-                    id="drawer-receipt"
-                    className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
-                  >
-                    <Receipt className="size-3.5 text-primary" />
-                    <span>Payment Receipt Screenshot</span>
-                  </h3>
-                  {selectedOrderProof && (
-                    <Badge variant="outline" className="text-[10px] capitalize font-mono">
-                      {selectedOrderProof.status}
-                    </Badge>
-                  )}
-                </div>
-
-                {selectedOrderProof ? (
-                  <div className="space-y-3">
-                    {/* Phone Screen Mockup / Receipt Viewport */}
-                    <div className="relative bg-muted/40 dark:bg-muted/20 rounded-2xl p-4 flex items-center justify-center overflow-hidden min-h-[280px] border border-border/80">
-                      {loadingProofUrl ? (
-                        <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                          <RefreshCw className="h-6 w-6 animate-spin text-primary" />
-                          <span className="text-xs font-medium">Loading receipt preview…</span>
-                        </div>
-                      ) : proofUrlError ? (
-                        <div className="flex flex-col items-center gap-2 text-destructive text-center p-4">
-                          <AlertCircle className="h-6 w-6" />
-                          <span className="text-xs font-medium">{proofUrlError}</span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => void loadProofUrl(selectedOrderProof)}
-                            className="h-7 text-xs gap-1 mt-1"
-                          >
-                            <RotateCcw className="size-3" /> Retry
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="relative max-w-[280px] w-full flex items-center justify-center">
-                          <img
-                            src={proofSignedUrl || "/images/cbe-receipt-mockup.png"}
-                            alt={`Payment proof for ${selectedOrder.orderNumber}`}
-                            className="max-h-[340px] w-auto max-w-full object-contain rounded-xl shadow-lg border border-border/60"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = "/images/cbe-receipt-mockup.png";
-                            }}
-                          />
-                        </div>
+              {(() => {
+                const isCash = (selectedOrder.paymentMethod || "").toLowerCase().includes("cash");
+                return (
+                  <section aria-labelledby="drawer-receipt" className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3
+                        id="drawer-receipt"
+                        className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+                      >
+                        {isCash ? (
+                          <>
+                            <Banknote className="size-3.5 text-emerald-600" />
+                            <span>Cash Payment Verification</span>
+                          </>
+                        ) : (
+                          <>
+                            <Receipt className="size-3.5 text-primary" />
+                            <span>Payment Receipt Screenshot</span>
+                          </>
+                        )}
+                      </h3>
+                      {selectedOrderProof && (
+                        <Badge variant="outline" className="text-[10px] capitalize font-mono">
+                          {selectedOrderProof.status}
+                        </Badge>
                       )}
                     </div>
 
-                    {/* Action buttons (Open in new tab & Download) */}
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const url = proofSignedUrl || "/images/cbe-receipt-mockup.png";
-                          window.open(url, "_blank", "noopener,noreferrer");
-                        }}
-                        className="flex-1 h-8 text-xs gap-1.5"
-                        disabled={loadingProofUrl}
-                      >
-                        <ExternalLink className="size-3.5 text-muted-foreground" />
-                        <span>Open Receipt in New Tab</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const url = proofSignedUrl || "/images/cbe-receipt-mockup.png";
-                          const a = document.createElement("a");
-                          a.href = url;
-                          a.download = `payment-proof-${selectedOrder.orderNumber.replace(/[^a-zA-Z0-9_-]/g, "")}.png`;
-                          a.target = "_blank";
-                          a.click();
-                        }}
-                        className="h-8 w-8 p-0"
-                        title="Download Receipt"
-                        aria-label="Download Receipt"
-                        disabled={loadingProofUrl}
-                      >
-                        <Download className="size-3.5 text-muted-foreground" />
-                      </Button>
-                    </div>
+                    {isCash ? (
+                      <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5 text-center space-y-2">
+                        <div className="text-3xl">💵</div>
+                        <p className="font-semibold text-sm text-emerald-800 dark:text-emerald-300">
+                          In-Person Cash Payment
+                        </p>
+                        <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+                          Payment was collected directly in physical cash. No receipt screenshot or payment proof image is required.
+                        </p>
+                      </div>
+                    ) : selectedOrderProof ? (
+                      <div className="space-y-3">
+                        {/* Phone Screen Mockup / Receipt Viewport */}
+                        <div className="relative bg-muted/40 dark:bg-muted/20 rounded-2xl p-4 flex items-center justify-center overflow-hidden min-h-[280px] border border-border/80">
+                          {loadingProofUrl ? (
+                            <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                              <RefreshCw className="h-6 w-6 animate-spin text-primary" />
+                              <span className="text-xs font-medium">Loading receipt preview…</span>
+                            </div>
+                          ) : proofUrlError ? (
+                            <div className="flex flex-col items-center gap-2 text-destructive text-center p-4">
+                              <AlertCircle className="h-6 w-6" />
+                              <span className="text-xs font-medium">{proofUrlError}</span>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void loadProofUrl(selectedOrderProof)}
+                                className="h-7 text-xs gap-1 mt-1"
+                              >
+                                <RotateCcw className="size-3" /> Retry
+                              </Button>
+                            </div>
+                          ) : proofSignedUrl ? (
+                            <div className="relative max-w-[280px] w-full flex items-center justify-center">
+                              <img
+                                src={proofSignedUrl}
+                                alt={`Payment proof for ${selectedOrder.orderNumber}`}
+                                className="max-h-[340px] w-auto max-w-full object-contain rounded-xl shadow-lg border border-border/60"
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center gap-2 text-muted-foreground text-center p-6">
+                              <Receipt className="h-8 w-8 text-muted-foreground/60" />
+                              <span className="text-xs font-medium">No payment proof image available for this order.</span>
+                            </div>
+                          )}
+                        </div>
 
-                    {/* Private Storage Security Note */}
-                    <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-start gap-2.5 text-xs text-blue-700 dark:text-blue-300">
-                      <Lock className="size-4 shrink-0 mt-0.5 text-blue-600 dark:text-blue-400" />
-                      <p className="leading-relaxed text-[11px]">
-                        This payment receipt is stored securely in private Supabase Storage and accessible only by authorized staff.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-border/80 bg-muted/10 p-6 text-center space-y-2">
-                    <Receipt className="size-6 text-muted-foreground mx-auto stroke-[1.5]" />
-                    <p className="text-xs font-medium text-foreground">No Payment Receipt Uploaded</p>
-                    <p className="text-[11px] text-muted-foreground max-w-xs mx-auto leading-relaxed">
-                      No payment receipt screenshot was uploaded for this order (e.g. cash settlement, pay at counter, or direct in-person verification).
-                    </p>
-                  </div>
-                )}
-              </section>
+                        {/* Action buttons (Open in new tab & Download) — only when proofSignedUrl is available */}
+                        {proofSignedUrl && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                window.open(proofSignedUrl, "_blank", "noopener,noreferrer");
+                              }}
+                              className="flex-1 h-8 text-xs gap-1.5"
+                              disabled={loadingProofUrl}
+                            >
+                              <ExternalLink className="size-3.5 text-muted-foreground" />
+                              <span>Open Receipt in New Tab</span>
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const a = document.createElement("a");
+                                a.href = proofSignedUrl;
+                                a.download = `payment-proof-${selectedOrder.orderNumber.replace(/[^a-zA-Z0-9_-]/g, "")}.png`;
+                                a.target = "_blank";
+                                a.click();
+                              }}
+                              className="h-8 w-8 p-0"
+                              title="Download Receipt"
+                              aria-label="Download Receipt"
+                              disabled={loadingProofUrl}
+                            >
+                              <Download className="size-3.5 text-muted-foreground" />
+                            </Button>
+                          </div>
+                        )}
+
+                        {/* Private Storage Security Note */}
+                        {proofSignedUrl && (
+                          <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-start gap-2.5 text-xs text-blue-700 dark:text-blue-300">
+                            <Lock className="size-4 shrink-0 mt-0.5 text-blue-600 dark:text-blue-400" />
+                            <p className="leading-relaxed text-[11px]">
+                              This receipt proof was retrieved securely with an expiring signed URL from Supabase Storage.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                        No payment receipt proof has been attached to this order.
+                      </div>
+                    )}
+                  </section>
+                );
+              })()}
 
               {/* 5. Payment Attempts History (Deduplication Audit) */}
               <section aria-labelledby="drawer-attempts" className="space-y-3">

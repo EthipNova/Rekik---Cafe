@@ -23,6 +23,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { LanguageSelector } from "@/components/site/LanguageSelector";
+import { useTranslation } from "@/lib/i18n";
 import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
 
 const links = [
@@ -34,10 +36,18 @@ const links = [
 
 export function Navbar() {
   const { count } = useCart();
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState<{ user?: { id: string; email?: string; user_metadata?: Record<string, any> } } | null>(null);
   const [userProfile, setUserProfile] = useState<{ name?: string | undefined; email?: string | undefined } | null>(null);
   const navigate = useNavigate();
+
+  const navLinks = [
+    { to: "/", label: t("nav.home", "Home") },
+    { to: "/menu", label: t("nav.menu", "Menu") },
+    { to: "/about", label: t("nav.about", "About") },
+    { to: "/contact", label: t("nav.contact", "Contact") },
+  ];
 
   useEffect(() => {
     let mounted = true;
@@ -113,7 +123,7 @@ export function Navbar() {
         </Link>
 
         <ul className="hidden items-center gap-1.5 md:flex">
-          {links.map((l) => (
+          {navLinks.map((l) => (
             <li key={l.to}>
               <Link
                 to={l.to}
@@ -130,6 +140,7 @@ export function Navbar() {
         </ul>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <LanguageSelector className="hidden lg:inline-flex mr-1" />
           {/* Account Menu Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -267,7 +278,7 @@ export function Navbar() {
                 </div>
 
                 <ul className="mt-6 space-y-1.5">
-                  {links.map((l) => (
+                  {navLinks.map((l) => (
                     <li key={l.to}>
                       <Link
                         to={l.to}
@@ -362,7 +373,14 @@ export function Navbar() {
                 )}
               </div>
 
-              <div className="pt-6 border-t border-border mt-auto">
+              <div className="pt-4 pb-2 border-t border-border flex flex-col items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  {t("nav.language", "Language")}
+                </span>
+                <LanguageSelector />
+              </div>
+
+              <div className="pt-4 border-t border-border mt-auto">
                 <Button
                   asChild
                   size="lg"

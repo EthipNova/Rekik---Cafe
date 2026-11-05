@@ -689,13 +689,13 @@
   ],
   "about_content": {
     "id": "028a78ee-094c-4334-8512-8697b747a674",
-    "homepage_hero_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/product-images/content/homepage/test.jpg",
-    "about_hero_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/site-images/about/ede63380-dd32-446e-ac85-f12e5f3bfa6a.jpg",
+    "homepage_hero_image": "https://imqtqshcgvgxokojfgxv.supabase.co/storage/v1/object/public/product-images/content/homepage/fd19ffd2-979d-4fb4-88cf-b2575b0f2b41.jpg",
+    "about_hero_image": "https://imqtqshcgvgxokojfgxv.supabase.co/storage/v1/object/public/product-images/content/about/5a6a322a-01ba-4231-947b-d6e7aba4e814.jpg",
     "about_title": "More Than a Café. A Place to Enjoy.",
     "about_description": "At Rekik Café, we believe great food should bring people together. From freshly prepared burgers and stone-baked pizza to crisp sides and refreshing drinks, we create simple, satisfying moments with a modern touch.",
     "story_title": "Made Fresh. Served with Heart.",
     "story_content": "Rekik Café was created around a simple idea: good food, genuine hospitality, and an experience that feels effortless. We prepare every order with care, bringing together the comfort of a neighbourhood café with the convenience of modern ordering.\n\nWhether you are stopping by for a quick meal, meeting friends over coffee, or ordering from home, we want every Rekik moment to feel fresh, welcoming, and worth coming back for.",
-    "story_image": "https://evpigfgyjedevisqoche.supabase.co/storage/v1/object/public/site-images/story/cc07e200-e1e3-40bf-b56c-f7001258cd3c.jpg",
+    "story_image": null,
     "value_1_title": "Food We're Proud Of",
     "value_1_description": "Freshly prepared with quality ingredients and served with the care every good meal deserves.",
     "value_2_title": "Genuine Hospitality",
@@ -703,5 +703,333 @@
     "value_3_title": "Modern by Design",
     "value_3_description": "From ordering to payment and delivery, we use simple technology to make your Rekik experience easier.",
     "updated_at": "2026-10-24T20:54:57.200Z"
+  },
+  "expenses": [
+    {
+      "id": "a28adee3-8ccb-492c-b4a3-61d187be445b",
+      "description": "electric bill",
+      "category": "Utilities",
+      "amount": 2000,
+      "expenseDate": "2026-11-04",
+      "paymentMethod": "Cash",
+      "receiptUrl": null,
+      "notes": null,
+      "createdBy": "e145d152-0ecb-43d6-863c-06fa40c12db4",
+      "createdAt": "2026-11-04T11:45:40.087Z",
+      "updatedAt": "2026-11-04T11:45:40.087Z"
+    }
+  ],
+  "staff_registry": {
+    "lastSequence": 28,
+    "allocated": {
+      "RK-001": {
+        "isActive": false,
+        "staffId": "RK-001",
+        "userId": "5d2b434b-0b18-461b-a12d-9a93ac8fc92a",
+        "sequence": 1,
+        "role": "cashier",
+        "name": "Rekik Cashier",
+        "email": "cashier@rekikcafe.com",
+        "allocatedAt": "2026-10-18T00:00:00.000Z"
+      },
+      "RK-002": {
+        "isActive": true,
+        "staffId": "RK-002",
+        "userId": "e9504215-7be6-489d-8471-83a86eb9ef4e",
+        "sequence": 2,
+        "role": "waiter",
+        "name": "henok",
+        "email": "henok00@gmail.com",
+        "allocatedAt": "2026-10-18T00:00:00.000Z"
+      },
+      "RK-003": {
+        "staffId": "RK-003",
+        "userId": "e145d152-0ecb-43d6-863c-06fa40c12db4",
+        "sequence": 3,
+        "role": "admin",
+        "name": "Admin",
+        "email": "henokbefekadu2005@gmail.com",
+        "allocatedAt": "2026-10-18T21:15:14.8812Z"
+      },
+      "RK-004": {
+        "isActive": false,
+        "staffId": "RK-004",
+        "userId": "9ce996c4-d645-4480-be49-629f85343ae0",
+        "sequence": 4,
+        "role": "waiter",
+        "name": "Temporary Test Waiter",
+        "email": "temp.waiter.1792528026386@rekiktest.local",
+        "allocatedAt": "2026-10-18T00:00:00.000Z"
+      },
+      "RK-005": {
+        "isActive": true,
+        "staffId": "RK-005",
+        "userId": "a5c18c86-c102-4355-b713-e93975e0a689",
+        "sequence": 5,
+        "role": "waiter",
+        "name": "Kibreab Sisay",
+        "email": "bstar77sisay@gmail.com",
+        "allocatedAt": "2026-10-18T00:00:00.000Z"
+      },
+      "RK-006": {
+        "isActive": true,
+        "staffId": "RK-006",
+        "userId": "593c8d07-904a-4f10-9571-dbf4c6af7250",
+        "sequence": 6,
+        "role": "cashier",
+        "name": "henok",
+        "email": "star77sisay@gmail.com",
+        "allocatedAt": "2026-10-18T00:00:00.000Z"
+      },
+      "RK-007": {
+        "isActive": true,
+        "staffId": "RK-007",
+        "userId": "61bee678-4df9-4061-9843-c35ca3f0cb48",
+        "sequence": 7,
+        "role": "waiter",
+        "name": "bonsa",
+        "email": "kb@gmail.com",
+        "allocatedAt": "2026-10-18T00:00:00.000Z"
+      },
+      "RK-008": {
+        "isActive": true,
+        "staffId": "RK-008",
+        "userId": "5bca6d75-ca78-44ec-8410-5a770ee56bde",
+        "sequence": 8,
+        "role": "waiter",
+        "name": "Almaz",
+        "email": "almaz.waiter@gmail.com",
+        "allocatedAt": "2026-10-18T00:00:00.000Z"
+      },
+      "RK-009": {
+        "staffId": "RK-009",
+        "userId": "test-user-1793785824464",
+        "sequence": 9,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T09:50:25.966Z",
+        "isDeleted": true
+      },
+      "RK-010": {
+        "staffId": "RK-010",
+        "userId": "test-user-1793786483976",
+        "sequence": 10,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:01:25.478Z",
+        "isDeleted": true
+      },
+      "RK-011": {
+        "staffId": "RK-011",
+        "userId": "test-user-1793786610120",
+        "sequence": 11,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:03:31.629Z",
+        "isDeleted": true
+      },
+      "RK-012": {
+        "staffId": "RK-012",
+        "userId": "test-user-1793786787366",
+        "sequence": 12,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:06:28.869Z",
+        "isDeleted": true
+      },
+      "RK-013": {
+        "staffId": "RK-013",
+        "userId": "test-user-1793786907168",
+        "sequence": 13,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:08:28.677Z",
+        "isDeleted": true
+      },
+      "RK-014": {
+        "staffId": "RK-014",
+        "userId": "test-user-1793787171076",
+        "sequence": 14,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:12:52.590Z",
+        "isDeleted": true
+      },
+      "RK-015": {
+        "staffId": "RK-015",
+        "userId": "test-user-1793787264879",
+        "sequence": 15,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:14:26.386Z",
+        "isDeleted": true
+      },
+      "RK-016": {
+        "staffId": "RK-016",
+        "userId": "test-user-1793787688471",
+        "sequence": 16,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:21:29.981Z",
+        "isDeleted": true
+      },
+      "RK-017": {
+        "staffId": "RK-017",
+        "userId": "test-user-1793787806385",
+        "sequence": 17,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:23:27.899Z",
+        "isDeleted": true
+      },
+      "RK-018": {
+        "staffId": "RK-018",
+        "userId": "test-user-1793788024174",
+        "sequence": 18,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:27:05.677Z",
+        "isDeleted": true
+      },
+      "RK-019": {
+        "staffId": "RK-019",
+        "userId": "test-user-1793788168469",
+        "sequence": 19,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:29:29.970Z",
+        "isDeleted": true
+      },
+      "RK-020": {
+        "staffId": "RK-020",
+        "userId": "test-user-1793788310675",
+        "sequence": 20,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T10:31:52.185Z",
+        "isDeleted": true
+      },
+      "RK-021": {
+        "staffId": "RK-021",
+        "userId": "test-user-1793795125223",
+        "sequence": 21,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T12:25:26.733Z",
+        "isDeleted": true
+      },
+      "RK-022": {
+        "staffId": "RK-022",
+        "userId": "test-user-1793795208358",
+        "sequence": 22,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T12:26:49.872Z",
+        "isDeleted": true
+      },
+      "RK-023": {
+        "staffId": "RK-023",
+        "userId": "test-user-1793795614673",
+        "sequence": 23,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T12:33:36.186Z",
+        "isDeleted": true
+      },
+      "RK-024": {
+        "staffId": "RK-024",
+        "userId": "test-user-1793797207513",
+        "sequence": 24,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T13:00:09.022Z",
+        "isDeleted": true
+      },
+      "RK-025": {
+        "staffId": "RK-025",
+        "userId": "test-user-1793798387683",
+        "sequence": 25,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T13:19:49.202Z",
+        "isDeleted": true
+      },
+      "RK-026": {
+        "staffId": "RK-026",
+        "userId": "test-user-1793802207451",
+        "sequence": 26,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-04T14:23:28.958Z",
+        "isDeleted": true
+      },
+      "RK-027": {
+        "staffId": "RK-027",
+        "userId": "test-user-1793866759219",
+        "sequence": 27,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-05T08:19:20.735Z",
+        "isDeleted": true
+      },
+      "RK-028": {
+        "staffId": "RK-028",
+        "userId": "test-user-1793869301469",
+        "sequence": 28,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-05T09:01:42.974Z",
+        "isDeleted": true
+      }
+    },
+    "userToStaffId": {
+      "5d2b434b-0b18-461b-a12d-9a93ac8fc92a": "RK-001",
+      "e9504215-7be6-489d-8471-83a86eb9ef4e": "RK-002",
+      "e145d152-0ecb-43d6-863c-06fa40c12db4": "RK-003",
+      "9ce996c4-d645-4480-be49-629f85343ae0": "RK-004",
+      "a5c18c86-c102-4355-b713-e93975e0a689": "RK-005",
+      "593c8d07-904a-4f10-9571-dbf4c6af7250": "RK-006",
+      "61bee678-4df9-4061-9843-c35ca3f0cb48": "RK-007",
+      "5bca6d75-ca78-44ec-8410-5a770ee56bde": "RK-008",
+      "test-user-1793785824464": "RK-009",
+      "test-user-1793786483976": "RK-010",
+      "test-user-1793786610120": "RK-011",
+      "test-user-1793786787366": "RK-012",
+      "test-user-1793786907168": "RK-013",
+      "test-user-1793787171076": "RK-014",
+      "test-user-1793787264879": "RK-015",
+      "test-user-1793787688471": "RK-016",
+      "test-user-1793787806385": "RK-017",
+      "test-user-1793788024174": "RK-018",
+      "test-user-1793788168469": "RK-019",
+      "test-user-1793788310675": "RK-020",
+      "test-user-1793795125223": "RK-021",
+      "test-user-1793795208358": "RK-022",
+      "test-user-1793795614673": "RK-023",
+      "test-user-1793797207513": "RK-024",
+      "test-user-1793798387683": "RK-025",
+      "test-user-1793802207451": "RK-026",
+      "test-user-1793866759219": "RK-027"
+    }
   }
 }

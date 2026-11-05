@@ -7,7 +7,7 @@
  * and provides responsive helper methods for the Waiter Dashboard.
  */
 
-import { supabase } from "./supabase";
+import { waiterSupabase, supabase } from "./supabase";
 import type {
   WaiterProfile,
   WaiterOrder,
@@ -44,7 +44,7 @@ async function waiterRequest<T>(endpoint: string, options: RequestInit = {}): Pr
 
   // Attach session token
   try {
-    const { data } = await supabase.auth.getSession();
+    const { data } = await waiterSupabase.auth.getSession();
     const token = data?.session?.access_token;
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
@@ -94,10 +94,10 @@ export async function fetchWaiterProfile(): Promise<WaiterProfile | null> {
     try {
       const {
         data: { session },
-      } = await supabase.auth.getSession();
+      } = await waiterSupabase.auth.getSession();
       if (!session?.user?.id) return null;
 
-      const { data: profile } = await supabase
+      const { data: profile } = await waiterSupabase
         .from("staff_profiles" as any)
         .select("user_id, full_name, phone, role, is_available, is_active, created_at")
         .eq("user_id", session.user.id)
@@ -378,4 +378,69 @@ export function formatTimeAgo(isoString: string): string {
   } catch {
     return isoString;
   }
+}
+
+export type DisplayPaymentStatus = "Pending" | "Paid" | "Rejected" | "Failed";
+
+export function getOrderPaymentStatus(order: WaiterOrder): {
+  status: DisplayPaymentStatus;
+  label: string;
+  className: string;
+  subtext?: string | undefined;
+} {
+  const payment = order.payments?.[0];
+  const proof = payment?.proof;
+
+  if (payment?.status === "paid") {
+    const methodStr = payment.method ? payment.method.toUpperCase().replace("_", " ") : "";
+    return {
+      status: "Paid",
+      label: methodStr ? `Paid (${methodStr})` : "Paid",
+      className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+      subtext: payment.paidAt
+        ? new Date(payment.paidAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : undefined,
+    };
+  }
+
+  if (proof?.status === "rejected") {
+    return {
+      status: "Rejected",
+      label: "Proof Rejected",
+      className: "bg-destructive/10 text-destructive border-destructive/30",
+      subtext: proof.rejectionReason || "Cashier rejected verification",
+    };
+  }
+
+  if (payment?.status === "failed" || order.status === "cancelled") {
+    return {
+      status: "Failed",
+      label: "Failed",
+      className: "bg-destructive/10 text-destructive border-destructive/30",
+    };
+  }
+
+  if (order.status === "rejected" || order.waiterDecision === "rejected") {
+    return {
+      status: "Rejected",
+      label: "Rejected",
+      className: "bg-destructive/10 text-destructive border-destructive/30",
+    };
+  }
+
+  if (proof?.status === "pending") {
+    return {
+      status: "Pending",
+      label: "Pending (Under Review)",
+      className: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/30 animate-pulse",
+      subtext: "Cashier verification in progress",
+    };
+  }
+
+  return {
+    status: "Pending",
+    label: "Pending",
+    className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+    subtext: "Awaiting payment settlement",
+  };
 }

@@ -77,7 +77,7 @@ export function CashierOverview({
               </div>
               <div className="space-y-0.5">
                 <h2 className="font-bold text-[#2A1810] font-display text-base sm:text-lg">
-                  {pendingCount} Payment {pendingCount === 1 ? "Proof" : "Proofs"} Awaiting Verification
+                  {pendingCount} Payment {pendingCount === 1 ? "Order" : "Orders"} Awaiting Verification
                 </h2>
                 <p className="text-sm text-[#70645C]">
                   Total value awaiting approval:{" "}
@@ -264,9 +264,15 @@ export function CashierOverview({
                             ? `Dine-in ${item.table_number ? `(${item.table_number})` : ""}`
                             : "Delivery"}
                         </Badge>
-                        <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] font-semibold">
-                          Awaiting Review
-                        </Badge>
+                        {(item.payment_method || "").toLowerCase().includes("cash") ? (
+                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px] font-semibold">
+                            💵 Cash Payment
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] font-semibold">
+                            Awaiting Review
+                          </Badge>
+                        )}
                         {hasDiscrepancy && (
                           <Badge className="bg-red-100 text-red-700 border-red-300 text-[10px] font-semibold">
                             Amount Mismatch
@@ -276,7 +282,14 @@ export function CashierOverview({
                       <div className="text-xs text-[#70645C]">
                         <span className="font-medium text-[#2A1810]">{item.customer_name}</span>
                         {item.customer_phone && ` • ${item.customer_phone}`}
-                        {item.payment_method && ` • ${item.payment_method}`}
+                        {item.payment_method && (
+                          <span>
+                            {" • "}
+                            {(item.payment_method || "").toLowerCase().includes("cash")
+                              ? "Payment Method: 💵 Cash"
+                              : `Payment Method: ${item.payment_method}`}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -295,10 +308,16 @@ export function CashierOverview({
                       <Button
                         size="sm"
                         onClick={() => onViewProof(item)}
-                        className="bg-[#2A1810] hover:bg-[#3D251A] text-white text-xs rounded-xl shadow-sm h-8 px-3"
+                        className={`text-white text-xs rounded-xl shadow-sm h-8 px-3 ${
+                          (item.payment_method || "").toLowerCase().includes("cash")
+                            ? "bg-emerald-700 hover:bg-emerald-800"
+                            : "bg-[#2A1810] hover:bg-[#3D251A]"
+                        }`}
                       >
                         <Eye className="mr-1.5 h-3.5 w-3.5" />
-                        Verify
+                        {(item.payment_method || "").toLowerCase().includes("cash")
+                          ? "Verify Cash"
+                          : "Verify Payment"}
                       </Button>
                     </div>
                   </div>

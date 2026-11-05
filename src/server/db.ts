@@ -110,6 +110,12 @@ function getProductFallbackImage(name: string, categorySlug?: string): string {
   const n = name.toLowerCase();
   const cat = (categorySlug || "").toLowerCase();
 
+  if (n.includes("coffee") || cat.includes("coffee") || n.includes("espresso") || cat.includes("espresso")) {
+    return "/images/coffee-thumb.jpg";
+  }
+  if (n.includes("tea") || cat.includes("tea")) {
+    return "/images/coffee-thumb.jpg";
+  }
   if (n.includes("pizza") || cat.includes("pizza")) {
     return "/images/margherita.jpg";
   }
@@ -125,16 +131,22 @@ function getProductFallbackImage(name: string, categorySlug?: string): string {
   if (n.includes("fries") || n.includes("chip") || cat.includes("side")) {
     return "/images/fries.jpg";
   }
+  if (n.includes("sandwich") || cat.includes("breakfast")) {
+    return "/images/club-sandwich.png";
+  }
   if (n.includes("sprite")) {
     return "/images/sprite.jpg";
   }
   if (n.includes("water")) {
     return "/images/water.jpg";
   }
-  if (n.includes("drink") || n.includes("cola") || cat.includes("drink")) {
+  if (n.includes("juice") || cat.includes("juice")) {
+    return "/images/drink.png";
+  }
+  if (n.includes("drink") || n.includes("cola") || cat.includes("drink") || cat.includes("soft-drink")) {
     return "/images/cola.jpg";
   }
-  return "/images/hero.jpg";
+  return "/images/coffee-thumb.jpg";
 }
 
 /* ==========================================================================
@@ -1333,11 +1345,15 @@ async function createOrderInternal(
     customer_phone: customerPhone,
     waiter_id: validatedWaiterId,
     waiter_assigned_at: validatedWaiterId ? nowIso : null,
-    waiter_decision: "pending",
+    waiter_decision: "approved",
+    waiter_decided_at: validatedWaiterId ? nowIso : null,
     customer_notes: input.customerNotes || null,
     method: dbMethod,
-    status: "pending",
-    table_number: input.customer?.table || null,
+    status: "confirmed",
+    table_number:
+      input.method === "dine-in" && input.customer?.table?.trim()
+        ? input.customer.table.trim()
+        : null,
     delivery_address: input.customer?.address || null,
     subtotal,
     discount_amount: discount,
@@ -1386,12 +1402,18 @@ async function createOrderInternal(
   // Notify assigned waiter
   if (validatedWaiterId) {
     try {
+      const assignedTable =
+        input.method === "dine-in" && input.customer?.table?.trim()
+          ? input.customer.table.trim()
+          : null;
       await (supabase.from("notifications" as any) as any).insert({
         id: crypto.randomUUID(),
         recipient_user_id: validatedWaiterId,
         order_id: orderId,
         title: "New Order Assigned",
-        message: `Order #${orderNumber} (${customerName}) has been assigned to you.`,
+        message: assignedTable
+          ? `Order #${orderNumber} (${customerName} - Table #${assignedTable}) has been assigned to you.`
+          : `Order #${orderNumber} (${customerName}) has been assigned to you.`,
         notification_type: "order_submitted",
         is_read: false,
         created_at: nowIso,
@@ -1493,7 +1515,9 @@ async function createOrderInternal(
     customer: {
       name: customerName,
       phone: customerPhone,
-      ...(input.customer?.table ? { table: input.customer.table } : {}),
+      ...(input.method === "dine-in" && input.customer?.table?.trim()
+        ? { table: input.customer.table.trim() }
+        : {}),
       ...(input.customer?.address ? { address: input.customer.address } : {}),
       latitude: deliveryLatitude,
       longitude: deliveryLongitude,
@@ -1504,6 +1528,7 @@ async function createOrderInternal(
     delivery,
     distanceKm: deliveryDistanceKm,
     total,
+    waiterId: validatedWaiterId,
   };
 }
 

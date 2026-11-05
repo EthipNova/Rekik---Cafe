@@ -1,19 +1,41 @@
+/**
+ * ============================================================================
+ * Rekik Café — Unified Order & Payment Management Console
+ * File: src/routes/admin.orders.tsx
+ * ============================================================================
+ * Consolidates Order Operations and Payment Settlement into a single authoritative
+ * management interface featuring:
+ * - Complete order details, customer info, table numbers, items, and assigned waiters
+ * - Associated payment methods, payment verification statuses, and amounts
+ * - Electronic payment proof inspection (receipt previews, transaction references)
+ * - Multi-criteria filters: Date presets (Today, Yesterday, 7 Days, 30 Days, All, Custom),
+ *   Order Status, Payment Status, Payment Method, and Text Search
+ * - Live real-time Supabase sync with manual refresh fallback
+ */
+
 import { createFileRoute } from "@tanstack/react-router";
 import {
   AlertCircle,
   ArrowRight,
+  Banknote,
+  Calendar,
   Check,
   CheckCircle2,
   Clock,
+  CreditCard,
   ExternalLink,
   Eye,
+  FileCheck2,
   Filter,
+  Image,
   MapPin,
   Phone,
   Printer,
   Receipt,
   RefreshCw,
   Search,
+  ShieldAlert,
+  ShieldCheck,
   ShoppingBag,
   Store,
   Truck,
@@ -26,7 +48,9 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -68,22 +92,24 @@ import {
   recordWaiterPaymentCollection,
   updateOrderStatus as apiUpdateOrderStatus,
 } from "@/services/api";
+import { fetchProofSignedUrl, submitPaymentApproval } from "@/services/cashier";
 
 export const Route = createFileRoute("/admin/orders")({
   head: () => ({
     meta: [
-      { title: "Live Orders & Kitchen Tracking — Rekik Café Admin" },
+      { title: "Order & Payment Management — Rekik Café Admin" },
       {
         name: "description",
         content:
-          "Real-time order management, kitchen tracking, and delivery fulfillment for Rekik Café.",
+          "Unified order operations, table tracking, payment verification, and fulfillment management.",
       },
       { name: "robots", content: "noindex" },
     ],
   }),
-  component: AdminOrdersPage,
+  component: AdminOrderAndPaymentPage,
 });
 
+type DatePreset = "all" | "today" | "yesterday" | "7days" | "30days" | "custom";
 
 const STATUS_COLUMNS: { status: OrderStatus; label: string; description: string; color: string }[] =
   [
@@ -155,16 +181,15 @@ function getNextActionLabel(order: Order): string {
   }
 }
 
-
 function MethodBadge({ method }: { method: OrderMethod }) {
   if (method === "dine-in") {
     return (
       <Badge
         variant="outline"
-        className="gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30"
+        className="gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 font-medium"
       >
         <Utensils className="size-3" />
-        <span>Dine-in</span>
+        <span>Dine-In</span>
       </Badge>
     );
   }
@@ -172,7 +197,7 @@ function MethodBadge({ method }: { method: OrderMethod }) {
     return (
       <Badge
         variant="outline"
-        className="gap-1 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30"
+        className="gap-1 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30 font-medium"
       >
         <Store className="size-3" />
         <span>Takeaway</span>
@@ -182,7 +207,7 @@ function MethodBadge({ method }: { method: OrderMethod }) {
   return (
     <Badge
       variant="outline"
-      className="gap-1 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+      className="gap-1 bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30 font-medium"
     >
       <Truck className="size-3" />
       <span>Delivery</span>
@@ -190,93 +215,122 @@ function MethodBadge({ method }: { method: OrderMethod }) {
   );
 }
 
-function StatusBadge({ status }: { status: OrderStatus }) {
-  const found = STATUS_COLUMNS.find((c) => c.status === status);
-  const colorClass = found ? found.color : "bg-muted text-muted-foreground";
+function OrderStatusBadge({ status }: { status: OrderStatus }) {
+  const match = STATUS_COLUMNS.find((c) => c.status === status);
+  if (match) {
+    return (
+      <Badge variant="outline" className={cn("text-[11px] font-medium border", match.color)}>
+        {match.label}
+      </Badge>
+    );
+  }
+
+  if (status === "awaiting_payment" || (status as string) === "payment_under_review") {
+    return (
+      <Badge
+        variant="outline"
+        className="text-[11px] font-medium border bg-amber-500/10 text-amber-600 border-amber-500/30"
+      >
+        Payment Review
+      </Badge>
+    );
+  }
+
+  if (status === "cancelled" || status === "rejected_by_waiter" || status === "payment_rejected") {
+    return (
+      <Badge
+        variant="outline"
+        className="text-[11px] font-medium border bg-destructive/10 text-destructive border-destructive/30"
+      >
+        Rejected
+      </Badge>
+    );
+  }
 
   return (
-    <Badge variant="outline" className={cn("text-xs font-medium py-0.5 px-2", colorClass)}>
+    <Badge variant="outline" className="text-[11px] font-medium border">
       {statusLabels[status] || status}
     </Badge>
   );
 }
 
-function formatElapsed(createdAt: string): string {
-  try {
-    const diffMs = Date.now() - new Date(createdAt).getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    return `${diffHours}h ${diffMins % 60}m ago`;
-  } catch {
-    return "";
+function PaymentStatusBadge({
+  status,
+  isElectronic,
+}: {
+  status: "paid" | "pending" | "failed" | string;
+  isElectronic?: boolean;
+}) {
+  if (status === "paid" || status === "payment_verified") {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[11px] font-medium"
+      >
+        <CheckCircle2 className="size-3" />
+        <span>Paid</span>
+      </Badge>
+    );
   }
+
+  if (status === "pending") {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[11px] font-medium"
+      >
+        <Clock className="size-3" />
+        <span>{isElectronic ? "Under Review" : "Pending"}</span>
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      className="gap-1 bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 text-[11px] font-medium"
+    >
+      <XCircle className="size-3" />
+      <span>Declined</span>
+    </Badge>
+  );
 }
 
-function AdminOrdersPage() {
+function formatElapsed(dateStr: string): string {
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+export function AdminOrderAndPaymentPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [methodFilter, setMethodFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // Waiter collection & decision states
+  // Selected order details sheet
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [proofPreviewUrl, setProofPreviewUrl] = useState<string | null>(null);
+  const [loadingProof, setLoadingProof] = useState(false);
+
+  // Waiter collection / payment recording
+  const [collectingPayment, setCollectingPayment] = useState(false);
   const [waiterRefInput, setWaiterRefInput] = useState("");
   const [waiterNoteInput, setWaiterNoteInput] = useState("");
-  const [collectingPayment, setCollectingPayment] = useState(false);
   const [waiterDecisionLoading, setWaiterDecisionLoading] = useState(false);
 
-  const handleRecordWaiterCollection = async (orderId: string) => {
-    if (!waiterRefInput.trim()) {
-      toast.error("Please enter the collected transaction reference number.");
-      return;
-    }
-    setCollectingPayment(true);
-    try {
-      await recordWaiterPaymentCollection({
-        orderId,
-        transactionReference: waiterRefInput.trim(),
-        notes: waiterNoteInput.trim() || undefined,
-      });
-      toast.success("Payment details recorded and submitted for cashier verification!");
-      setWaiterRefInput("");
-      setWaiterNoteInput("");
-      await loadData();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to record payment details";
-      toast.error(msg);
-    } finally {
-      setCollectingPayment(false);
-    }
-  };
-
-  const handleWaiterDecisionAction = async (
-    orderId: string,
-    decision: "approved" | "rejected",
-    reason?: string,
-  ) => {
-    setWaiterDecisionLoading(true);
-    try {
-      await recordWaiterDecision({
-        orderId,
-        decision,
-        reason,
-      });
-      toast.success(
-        decision === "approved" ? "Order approved by waiter!" : "Order declined by waiter.",
-      );
-      await loadData();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to record waiter decision";
-      toast.error(msg);
-    } finally {
-      setWaiterDecisionLoading(false);
-    }
-  };
+  // Filters
+  const [searchQuery, setSearchQuery] = useState("");
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>("all");
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("all");
 
   const loadData = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -292,7 +346,7 @@ function AdminOrdersPage() {
       setLoading(false);
       if (isManual) {
         setRefreshing(false);
-        toast.success("Orders synced with database");
+        toast.success("Orders and payments synced");
       }
     }
   };
@@ -300,57 +354,67 @@ function AdminOrdersPage() {
   useEffect(() => {
     void loadData();
 
-    // Set up Realtime Supabase updates
+    // Supabase Realtime channel
     const channel = supabase
-      .channel("admin-orders-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "orders" },
-        (payload: { eventType: string; new: { order_number?: string } }) => {
-          if (payload.eventType === "INSERT") {
-            toast.info(`New order placed: ${payload.new?.order_number || "Customer Order"}!`, {
-              icon: "🔔",
-            });
-          }
-          void loadData();
-        },
-      )
-      .on("postgres_changes", { event: "*", schema: "public", table: "order_status_logs" }, () => {
+      .channel("admin-orders-payments-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
+        void loadData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "payments" }, () => {
+        void loadData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "payment_proofs" }, () => {
         void loadData();
       })
       .subscribe();
 
-    // Storage event for fallback multi-tab sync
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === "neba.orders.v1") {
-        void loadData();
-      }
-    };
-    window.addEventListener("storage", handleStorage);
-
-    // Periodic auto-sync
     const timer = setInterval(() => {
       void loadData();
     }, 25000);
 
     return () => {
       void supabase.removeChannel(channel);
-      window.removeEventListener("storage", handleStorage);
       clearInterval(timer);
     };
   }, []);
+
+  const selectedOrder = useMemo(() => {
+    return orders.find((o) => o.id === selectedOrderId || o.number === selectedOrderId) ?? null;
+  }, [orders, selectedOrderId]);
+
+  // Load payment proof preview if available
+  useEffect(() => {
+    setProofPreviewUrl(null);
+    if (!selectedOrder?.paymentProof?.id) return;
+
+    let isMounted = true;
+    setLoadingProof(true);
+    fetchProofSignedUrl(selectedOrder.paymentProof.id)
+      .then((url) => {
+        if (isMounted && url) setProofPreviewUrl(url);
+      })
+      .catch(() => {
+        if (isMounted) setProofPreviewUrl(null);
+      })
+      .finally(() => {
+        if (isMounted) setLoadingProof(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedOrder?.paymentProof?.id]);
 
   const handleAdvanceStatus = async (order: Order) => {
     const next = getNextStatus(order);
     if (!next) return;
 
     setUpdatingId(order.id);
-    // Optimistic UI update
     setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, status: next } : o)));
 
     try {
       await apiUpdateOrderStatus(order.id, next);
-      toast.success(`${order.number} moved to ${statusLabels[next]}`);
+      toast.success(`${order.number} advanced to ${statusLabels[next]}`);
     } catch (err) {
       console.warn("Failed to update status through API:", err);
       toast.error("Failed to update status on server");
@@ -376,66 +440,132 @@ function AdminOrdersPage() {
     }
   };
 
-  // Filtered orders
+  const handleApproveProof = async (proofId: string) => {
+    setUpdatingId(selectedOrder?.id || proofId);
+    try {
+      await submitPaymentApproval(proofId, "Approved by administrator");
+      toast.success("Payment verified and approved!");
+      void loadData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to verify payment";
+      toast.error(msg);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  // Filter Logic
   const filteredOrders = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
     const q = searchQuery.toLowerCase().trim();
 
     return orders.filter((o) => {
-      if (methodFilter !== "all" && o.method !== methodFilter) return false;
-      if (statusFilter !== "all" && o.status !== statusFilter) return false;
+      const orderDateStr = o.createdAt.slice(0, 10);
 
-      if (!q) return true;
-      const matchesNum = (o.number || o.id).toLowerCase().includes(q);
-      const matchesName = (o.customer?.name || "").toLowerCase().includes(q);
-      const matchesPhone = (o.customer?.phone || "").toLowerCase().includes(q);
-      const matchesTable = (o.customer?.table || "").toLowerCase().includes(q);
-      const matchesAddress = (o.customer?.address || "").toLowerCase().includes(q);
-      const matchesItem = o.items.some((i) => i.name.toLowerCase().includes(q));
+      // Date Range Filter
+      if (datePreset === "today" && orderDateStr !== todayStr) return false;
+      if (datePreset === "yesterday") {
+        const yest = new Date(now.getTime() - 24 * 3600000).toISOString().slice(0, 10);
+        if (orderDateStr !== yest) return false;
+      }
+      if (datePreset === "7days") {
+        const start = new Date(now.getTime() - 7 * 24 * 3600000).toISOString().slice(0, 10);
+        if (orderDateStr < start || orderDateStr > todayStr) return false;
+      }
+      if (datePreset === "30days") {
+        const start = new Date(now.getTime() - 30 * 24 * 3600000).toISOString().slice(0, 10);
+        if (orderDateStr < start || orderDateStr > todayStr) return false;
+      }
+      if (datePreset === "custom" && customStart && customEnd) {
+        if (orderDateStr < customStart || orderDateStr > customEnd) return false;
+      }
 
-      return (
-        matchesNum || matchesName || matchesPhone || matchesTable || matchesAddress || matchesItem
-      );
+      // Order Status Filter
+      if (orderStatusFilter !== "all") {
+        if (orderStatusFilter === "rejected") {
+          const isRej =
+            o.status === "cancelled" ||
+            o.status === "rejected_by_waiter" ||
+            o.status === "payment_rejected";
+          if (!isRej) return false;
+        } else if (o.status !== orderStatusFilter) {
+          return false;
+        }
+      }
+
+      // Payment Status Filter
+      if (paymentStatusFilter !== "all") {
+        if (paymentStatusFilter === "paid" && o.paymentStatus !== "paid") return false;
+        if (paymentStatusFilter === "pending" && o.paymentStatus !== "pending") return false;
+        if (paymentStatusFilter === "failed" && o.paymentStatus !== "failed") return false;
+      }
+
+      // Payment Method Filter
+      if (paymentMethodFilter !== "all") {
+        const m = (o.paymentMethod || "").toLowerCase();
+        const target = paymentMethodFilter.toLowerCase();
+        if (!m.includes(target)) return false;
+      }
+
+      // Text Search: Order #, Customer Name, Phone, Table Number
+      if (q) {
+        const matchesNum = (o.number || o.id).toLowerCase().includes(q);
+        const matchesName = (o.customer?.name || "").toLowerCase().includes(q);
+        const matchesPhone = (o.customer?.phone || "").toLowerCase().includes(q);
+        const matchesTable = (o.customer?.table || "").toLowerCase().includes(q);
+        const matchesItem = o.items.some((i) => i.name.toLowerCase().includes(q));
+
+        if (!matchesNum && !matchesName && !matchesPhone && !matchesTable && !matchesItem) {
+          return false;
+        }
+      }
+
+      return true;
     });
-  }, [orders, searchQuery, methodFilter, statusFilter]);
+  }, [
+    orders,
+    searchQuery,
+    datePreset,
+    customStart,
+    customEnd,
+    orderStatusFilter,
+    paymentStatusFilter,
+    paymentMethodFilter,
+  ]);
 
-  // Key KPI metrics
-  const activeCount = orders.filter((o) =>
-    ["received", "confirmed", "preparing", "ready"].includes(o.status),
-  ).length;
-  const inDeliveryCount = orders.filter((o) => o.status === "out-for-delivery").length;
-  const completedTodayCount = orders.filter((o) =>
-    ["delivered", "completed"].includes(o.status),
-  ).length;
-  const todayRevenue = orders
-    .filter((o) => o.paymentStatus === "paid")
-    .reduce((sum, o) => sum + o.total, 0);
+  // Financial and Operational Totals for filtered view
+  const totalAmountSum = useMemo(() => {
+    return filteredOrders.reduce((sum, o) => sum + o.total, 0);
+  }, [filteredOrders]);
 
-  const selectedOrder =
-    orders.find((o) => o.id === selectedOrderId || o.number === selectedOrderId) ?? null;
+  const verifiedRevenueSum = useMemo(() => {
+    return filteredOrders
+      .filter((o) => o.paymentStatus === "paid")
+      .reduce((sum, o) => sum + o.total, 0);
+  }, [filteredOrders]);
+
+  const pendingAmountSum = useMemo(() => {
+    return filteredOrders
+      .filter((o) => o.paymentStatus === "pending")
+      .reduce((sum, o) => sum + o.total, 0);
+  }, [filteredOrders]);
 
   return (
-    <div className="space-y-6">
-      {/* Top Header & Real-time status */}
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border/50 pb-5">
+    <div className="space-y-6 max-w-7xl mx-auto">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight">
-              Order Management
-            </h1>
-            <Badge
-              variant="outline"
-              className="gap-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[11px] font-medium"
-            >
-              <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-              Live Synced
-            </Badge>
-          </div>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
+            <ShoppingBag className="size-6 text-primary" />
+            Order & Payment Management
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Real-time kitchen order tracking, ticket status advancement, and customer fulfillment.
+            Unified customer orders, dine-in table tracking, payment verification, and cashier proofs.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -444,657 +574,715 @@ function AdminOrdersPage() {
             className="gap-2"
           >
             <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-            <span>Refresh</span>
+            Refresh
           </Button>
         </div>
-      </header>
+      </div>
 
       {/* KPI Overview Cards */}
-      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
-        <div className="surface-card flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4">
-          <div className="flex size-10 sm:size-11 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
-            <Utensils className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-muted-foreground truncate">Active Kitchen</p>
-            <p className="text-xl sm:text-2xl font-semibold font-display mt-0.5">{activeCount}</p>
-          </div>
-        </div>
-
-        <div className="surface-card flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4">
-          <div className="flex size-10 sm:size-11 items-center justify-center rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 shrink-0">
-            <Truck className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-muted-foreground truncate">In Delivery</p>
-            <p className="text-xl sm:text-2xl font-semibold font-display mt-0.5">
-              {inDeliveryCount}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Total Orders in Period */}
+        <Card className="surface-card shadow-xs">
+          <CardHeader className="pb-2">
+            <CardDescription className="text-xs uppercase tracking-wider font-semibold flex items-center justify-between">
+              <span>Orders Displayed</span>
+              <ShoppingBag className="size-4 text-muted-foreground" />
+            </CardDescription>
+            <CardTitle className="text-2xl font-bold font-display text-foreground mt-1">
+              {filteredOrders.length}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">
+              Total Order Volume: {formatETB(totalAmountSum)}
             </p>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        <div className="surface-card flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4">
-          <div className="flex size-10 sm:size-11 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
-            <CheckCircle2 className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-muted-foreground truncate">Completed Today</p>
-            <p className="text-xl sm:text-2xl font-semibold font-display mt-0.5">
-              {completedTodayCount}
+        {/* Verified Revenue */}
+        <Card className="surface-card shadow-xs">
+          <CardHeader className="pb-2">
+            <CardDescription className="text-xs uppercase tracking-wider font-semibold flex items-center justify-between">
+              <span>Verified Revenue</span>
+              <CheckCircle2 className="size-4 text-emerald-500" />
+            </CardDescription>
+            <CardTitle className="text-2xl font-bold font-display text-emerald-600 dark:text-emerald-400 mt-1">
+              {formatETB(verifiedRevenueSum)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">
+              {filteredOrders.filter((o) => o.paymentStatus === "paid").length} verified payments
             </p>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
-        <div className="surface-card flex items-center gap-3 sm:gap-4 p-3.5 sm:p-4">
-          <div className="flex size-10 sm:size-11 items-center justify-center rounded-xl bg-primary/15 text-primary shrink-0">
-            <Receipt className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-muted-foreground truncate">Paid Volume</p>
-            <p className="text-xl sm:text-2xl font-semibold font-display mt-0.5">
-              {formatETB(todayRevenue)}
+        {/* Pending Settlement */}
+        <Card className="surface-card shadow-xs">
+          <CardHeader className="pb-2">
+            <CardDescription className="text-xs uppercase tracking-wider font-semibold flex items-center justify-between">
+              <span>Pending Settlement</span>
+              <Clock className="size-4 text-amber-500" />
+            </CardDescription>
+            <CardTitle className="text-2xl font-bold font-display text-amber-600 dark:text-amber-400 mt-1">
+              {formatETB(pendingAmountSum)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">
+              {filteredOrders.filter((o) => o.paymentStatus === "pending").length} awaiting cashier / waiter review
             </p>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
+
+        {/* Dine-In Tables Active */}
+        <Card className="surface-card shadow-xs">
+          <CardHeader className="pb-2">
+            <CardDescription className="text-xs uppercase tracking-wider font-semibold flex items-center justify-between">
+              <span>Dine-In Orders</span>
+              <Utensils className="size-4 text-primary" />
+            </CardDescription>
+            <CardTitle className="text-2xl font-bold font-display text-foreground mt-1">
+              {filteredOrders.filter((o) => o.method === "dine-in").length}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground">Active table service orders</p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1 max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search order #, customer, phone, table..."
-            className="pl-9 h-9 text-xs"
-          />
-        </div>
+      {/* Comprehensive Filter Bar */}
+      <Card className="surface-card shadow-xs">
+        <CardContent className="p-4 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+            {/* Search by Order ID or Customer Name */}
+            <div className="md:col-span-4 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by order #, customer name, table..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 text-xs"
+              />
+            </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 w-full sm:w-auto">
-          <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:items-center sm:w-auto">
-            <Select value={methodFilter} onValueChange={setMethodFilter}>
-              <SelectTrigger className="h-9 w-full sm:w-36 text-xs">
-                <SelectValue placeholder="All Methods" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Methods</SelectItem>
-                <SelectItem value="dine-in">Dine-in</SelectItem>
-                <SelectItem value="takeaway">Takeaway</SelectItem>
-                <SelectItem value="delivery">Delivery</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* Date Preset */}
+            <div className="md:col-span-2">
+              <Select value={datePreset} onValueChange={(v) => setDatePreset(v as DatePreset)}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Date Range" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Time</SelectItem>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="yesterday">Yesterday</SelectItem>
+                  <SelectItem value="7days">Last 7 Days</SelectItem>
+                  <SelectItem value="30days">Last 30 Days</SelectItem>
+                  <SelectItem value="custom">Custom Range</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="h-9 w-full sm:w-38 text-xs">
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="received">New / Received</SelectItem>
-                <SelectItem value="confirmed">Confirmed</SelectItem>
-                <SelectItem value="preparing">In Kitchen</SelectItem>
-                <SelectItem value="ready">Ready for Pickup</SelectItem>
-                <SelectItem value="out-for-delivery">Out for Delivery</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* Order Status */}
+            <div className="md:col-span-2">
+              <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Order Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Order Statuses</SelectItem>
+                  <SelectItem value="received">New / Received</SelectItem>
+                  <SelectItem value="confirmed">Confirmed</SelectItem>
+                  <SelectItem value="preparing">In Kitchen</SelectItem>
+                  <SelectItem value="ready">Ready for Pickup</SelectItem>
+                  <SelectItem value="out-for-delivery">Out for Delivery</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="rejected">Rejected / Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Payment Status */}
+            <div className="md:col-span-2">
+              <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Payment Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Payment Statuses</SelectItem>
+                  <SelectItem value="paid">Paid (Verified)</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="failed">Declined / Failed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Payment Method */}
+            <div className="md:col-span-2">
+              <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Payment Method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Methods</SelectItem>
+                  <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="Telebirr">Telebirr</SelectItem>
+                  <SelectItem value="CBE Birr">CBE Birr</SelectItem>
+                  <SelectItem value="Bank">Bank Transfer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          {(searchQuery || methodFilter !== "all" || statusFilter !== "all") && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setSearchQuery("");
-                setMethodFilter("all");
-                setStatusFilter("all");
-              }}
-              className="h-9 px-2 text-xs text-muted-foreground hover:text-foreground self-start sm:self-auto"
-            >
-              Reset
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Main Content Area: Orders List / Table View */}
-      {loading ? (
-        <div className="surface-card flex items-center justify-center p-16 text-sm text-muted-foreground">
-          <RefreshCw className="mr-2.5 size-5 animate-spin text-primary" />
-          Loading live orders from Supabase…
-        </div>
-      ) : filteredOrders.length === 0 ? (
-        <EmptyState
-          icon={<ShoppingBag className="size-8 text-muted-foreground" />}
-          title="No matching orders"
-          description={
-            orders.length === 0
-              ? "New customer orders will appear here in real-time as they are placed."
-              : "Try adjusting your search query or filter criteria."
-          }
-        />
-      ) : (
-        /* TABLE / LIST VIEW */
-        <div className="space-y-3">
-          {/* Mobile Order Cards (md:hidden) */}
-          <div className="space-y-3 md:hidden">
-            {filteredOrders.map((order) => {
-              const next = getNextStatus(order);
-              const isUpdating = updatingId === order.id;
-
-              return (
-                <article key={order.id} className="surface-card p-4 space-y-3 transition-colors">
-                  {/* Top Row: Order #, Elapsed time, and Method/Status */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-display font-semibold text-base text-foreground">
-                          {order.number}
-                        </span>
-                        <StatusBadge status={order.status} />
-                      </div>
-                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <Clock className="size-3" />
-                        {formatElapsed(order.createdAt)}
-                      </span>
-                    </div>
-                    <MethodBadge method={order.method} />
-                  </div>
-
-                  {/* Customer Info & Table / Address */}
-                  <div className="text-xs text-muted-foreground border-t border-border/40 pt-2 space-y-0.5">
-                    <p className="font-medium text-foreground">
-                      {order.customer.name || "Guest Customer"}
-                    </p>
-                    {order.customer.phone && (
-                      <p className="flex items-center gap-1 text-[11px]">
-                        <Phone className="size-2.5 text-muted-foreground" />
-                        <span>{order.customer.phone}</span>
-                      </p>
-                    )}
-                    {order.method === "dine-in" && order.customer.table && (
-                      <p className="text-[11px] font-mono text-primary font-medium">
-                        Table #{order.customer.table}
-                      </p>
-                    )}
-                    {order.method === "delivery" && order.customer.address && (
-                      <p className="truncate flex items-center gap-1 text-[11px]">
-                        <MapPin className="size-2.5 text-primary shrink-0" />
-                        <span className="truncate">{order.customer.address}</span>
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Items Summary & Financial Total */}
-                  <div className="flex items-center justify-between text-xs border-t border-border/40 pt-2">
-                    <span className="text-muted-foreground">
-                      {order.items.reduce((s, i) => s + i.quantity, 0)} item(s)
-                    </span>
-                    <div className="text-right">
-                      <span className="text-[10px] text-muted-foreground uppercase mr-1.5">
-                        Total
-                      </span>
-                      <span className="font-semibold text-sm text-primary">
-                        {formatETB(order.total)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Action Buttons: View Details & Advance Status */}
-                  <div className="flex items-center gap-2 pt-1 border-t border-border/40">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1 h-9 text-xs gap-1.5"
-                      onClick={() => setSelectedOrderId(order.id)}
-                    >
-                      <Eye className="size-3.5" />
-                      <span>View Details</span>
-                    </Button>
-
-                    {next && (
-                      <Button
-                        size="sm"
-                        className="flex-1 h-9 text-xs gap-1.5"
-                        disabled={isUpdating}
-                        onClick={() => handleAdvanceStatus(order)}
-                      >
-                        {isUpdating ? (
-                          <RefreshCw className="size-3.5 animate-spin" />
-                        ) : (
-                          <>
-                            <span className="truncate">{getNextActionLabel(order)}</span>
-                            <ArrowRight className="size-3.5 shrink-0" />
-                          </>
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-
-          {/* Desktop Table (hidden md:block) */}
-          <div className="surface-card overflow-hidden hidden md:block">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40 text-xs">
-                  <TableHead className="w-24">Order #</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Time</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="text-xs">
-                {filteredOrders.map((order) => {
-                  const next = getNextStatus(order);
-                  const isUpdating = updatingId === order.id;
-
-                  return (
-                    <TableRow key={order.id} className="hover:bg-muted/30 transition-colors">
-                      <TableCell className="font-display font-semibold text-foreground">
-                        {order.number}
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium text-foreground">
-                            {order.customer.name || "Guest Customer"}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {order.customer.phone ||
-                              (order.customer.table ? `Table ${order.customer.table}` : "")}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <MethodBadge method={order.method} />
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={order.status} />
-                      </TableCell>
-                      <TableCell>
-                        <span className="font-medium text-foreground">
-                          {order.items.reduce((s, i) => s + i.quantity, 0)} item(s)
-                        </span>
-                      </TableCell>
-                      <TableCell className="font-semibold text-primary">
-                        {formatETB(order.total)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground whitespace-nowrap">
-                        {formatElapsed(order.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right space-x-1.5 whitespace-nowrap">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs px-2"
-                          onClick={() => setSelectedOrderId(order.id)}
-                        >
-                          <Eye className="size-3 mr-1" /> View
-                        </Button>
-
-                        {next && (
-                          <Button
-                            size="sm"
-                            className="h-7 text-xs px-2.5"
-                            disabled={isUpdating}
-                            onClick={() => handleAdvanceStatus(order)}
-                          >
-                            {isUpdating ? (
-                              <RefreshCw className="size-3 animate-spin" />
-                            ) : (
-                              getNextActionLabel(order)
-                            )}
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
-
-      {/* ORDER DETAILS DRAWER (SHEET) */}
-      <Sheet open={!!selectedOrder} onOpenChange={(open) => !open && setSelectedOrderId(null)}>
-        {selectedOrder && (
-          <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
-            <SheetHeader className="border-b border-border pb-4 text-left pr-8">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <SheetTitle className="font-display text-xl font-bold">
-                  Order {selectedOrder.number}
-                </SheetTitle>
-                <StatusBadge status={selectedOrder.status} />
+          {/* Custom Date Range Row */}
+          {datePreset === "custom" && (
+            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border/50">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="orders-custom-start" className="text-xs text-muted-foreground">
+                  From:
+                </Label>
+                <Input
+                  id="orders-custom-start"
+                  type="date"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="h-8 text-xs w-36"
+                />
               </div>
-              <SheetDescription className="text-xs flex items-center gap-2">
-                <span>Placed {new Date(selectedOrder.createdAt).toLocaleString()}</span>
-                <span>·</span>
-                <span className="font-medium text-foreground capitalize">
-                  {selectedOrder.method}
+
+              <div className="flex items-center gap-2">
+                <Label htmlFor="orders-custom-end" className="text-xs text-muted-foreground">
+                  To:
+                </Label>
+                <Input
+                  id="orders-custom-end"
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="h-8 text-xs w-36"
+                />
+              </div>
+            </div>
+          )}
+
+          {(searchQuery ||
+            datePreset !== "all" ||
+            orderStatusFilter !== "all" ||
+            paymentStatusFilter !== "all" ||
+            paymentMethodFilter !== "all") && (
+            <div className="pt-2 border-t border-border/50 flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearchQuery("");
+                  setDatePreset("all");
+                  setCustomStart("");
+                  setCustomEnd("");
+                  setOrderStatusFilter("all");
+                  setPaymentStatusFilter("all");
+                  setPaymentMethodFilter("all");
+                }}
+                className="h-7 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Reset All Filters
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Unified Table View */}
+      <Card className="surface-card shadow-xs overflow-hidden">
+        <CardHeader className="py-4 px-6 border-b border-border flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base font-semibold text-foreground">
+              Orders & Payments ({filteredOrders.length})
+            </CardTitle>
+            <CardDescription className="text-xs text-muted-foreground">
+              Complete view of each customer order, assigned waiter, items, and associated payment details
+            </CardDescription>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="p-12 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
+              <RefreshCw className="size-4 animate-spin text-primary" />
+              Loading orders and payments...
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="p-12 text-center">
+              <EmptyState
+                icon={<ShoppingBag className="size-8 text-muted-foreground" />}
+                title="No orders found"
+                description="No orders match the selected filters. Try broadening your date or status selections."
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="text-xs font-semibold py-3">Order ID</TableHead>
+                    <TableHead className="text-xs font-semibold">Customer</TableHead>
+                    <TableHead className="text-xs font-semibold">Date & Time</TableHead>
+                    <TableHead className="text-xs font-semibold">Ordered Items</TableHead>
+                    <TableHead className="text-xs font-semibold">Type & Table</TableHead>
+                    <TableHead className="text-xs font-semibold">Waiter</TableHead>
+                    <TableHead className="text-xs font-semibold">Total Amount</TableHead>
+                    <TableHead className="text-xs font-semibold">Payment Method</TableHead>
+                    <TableHead className="text-xs font-semibold">Payment Status</TableHead>
+                    <TableHead className="text-xs font-semibold">Order Status</TableHead>
+                    <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredOrders.map((order) => {
+                    const isElectronic =
+                      order.paymentMethod?.toLowerCase().includes("telebirr") ||
+                      order.paymentMethod?.toLowerCase().includes("cbe") ||
+                      order.paymentMethod?.toLowerCase().includes("bank");
+
+                    return (
+                      <TableRow key={order.id} className="hover:bg-muted/30 transition-colors">
+                        {/* Order ID */}
+                        <TableCell className="text-xs font-bold font-mono text-foreground whitespace-nowrap">
+                          {order.number || `#${order.id.slice(0, 6)}`}
+                        </TableCell>
+
+                        {/* Customer */}
+                        <TableCell className="text-xs whitespace-nowrap">
+                          <p className="font-medium text-foreground">
+                            {order.customer.name || "Guest Diner"}
+                          </p>
+                          {order.customer.phone && (
+                            <p className="text-[11px] text-muted-foreground">
+                              {order.customer.phone}
+                            </p>
+                          )}
+                        </TableCell>
+
+                        {/* Date & Time */}
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          <div>
+                            {new Date(order.createdAt).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground/75">
+                            {new Date(order.createdAt).toLocaleTimeString("en-US", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </div>
+                        </TableCell>
+
+                        {/* Ordered Food and Drinks */}
+                        <TableCell className="text-xs max-w-xs truncate">
+                          {order.items.length > 0 ? (
+                            <span
+                              className="truncate block font-medium text-foreground"
+                              title={order.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}
+                            >
+                              {order.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/70">No line items</span>
+                          )}
+                        </TableCell>
+
+                        {/* Order Type & Table */}
+                        <TableCell className="text-xs whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <MethodBadge method={order.method} />
+                            {order.method === "dine-in" && order.customer.table && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] bg-primary/5 text-primary border-primary/20 font-semibold"
+                              >
+                                T#{order.customer.table}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        {/* Assigned Waiter */}
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {order.waiterName ? (
+                            <span className="font-medium text-foreground flex items-center gap-1">
+                              <User className="size-3 text-primary" />
+                              {order.waiterName}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/60">—</span>
+                          )}
+                        </TableCell>
+
+                        {/* Total Amount */}
+                        <TableCell className="text-xs font-bold text-foreground whitespace-nowrap">
+                          {formatETB(order.total)}
+                        </TableCell>
+
+                        {/* Payment Method */}
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          <span className="font-medium text-foreground">
+                            {(order.paymentMethod || "Cash").toLowerCase().includes("cash")
+                              ? "💵 Cash"
+                              : order.paymentMethod}
+                          </span>
+                        </TableCell>
+
+                        {/* Payment Status */}
+                        <TableCell className="whitespace-nowrap">
+                          <PaymentStatusBadge
+                            status={order.paymentStatus}
+                            isElectronic={isElectronic}
+                          />
+                        </TableCell>
+
+                        {/* Order Status */}
+                        <TableCell className="whitespace-nowrap">
+                          <OrderStatusBadge status={order.status} />
+                        </TableCell>
+
+                        {/* Actions */}
+                        <TableCell className="text-right whitespace-nowrap">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs px-2.5 gap-1.5"
+                            onClick={() => setSelectedOrderId(order.id)}
+                          >
+                            <Eye className="size-3" />
+                            <span>Inspect</span>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Comprehensive Details Drawer / Sheet */}
+      <Sheet
+        open={Boolean(selectedOrder)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedOrderId(null);
+        }}
+      >
+        {selectedOrder && (
+          <SheetContent className="w-full sm:max-w-xl overflow-y-auto p-4 sm:p-6 space-y-6">
+            <SheetHeader className="pb-4 border-b border-border">
+              <div className="flex items-center justify-between gap-2">
+                <SheetTitle className="font-display text-xl font-bold text-foreground flex items-center gap-2">
+                  <span>Order {selectedOrder.number || `#${selectedOrder.id.slice(0, 6)}`}</span>
+                  <MethodBadge method={selectedOrder.method} />
+                </SheetTitle>
+              </div>
+              <SheetDescription className="text-xs text-muted-foreground flex items-center gap-2 mt-1">
+                <span>
+                  Placed on{" "}
+                  {new Date(selectedOrder.createdAt).toLocaleDateString("en-US", {
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </span>
+                <span>•</span>
+                <span>{formatElapsed(selectedOrder.createdAt)}</span>
               </SheetDescription>
             </SheetHeader>
 
-            <div className="py-6 space-y-6">
-              {/* Order Status Advancement Control */}
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-primary">
-                    Current Stage
+            {/* Quick Status Control */}
+            <div className="rounded-xl border border-border p-4 bg-muted/20 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Current Workflow Stage
+                </span>
+                <OrderStatusBadge status={selectedOrder.status} />
+              </div>
+
+              <div className="flex items-center gap-2">
+                {getNextStatus(selectedOrder) && (
+                  <Button
+                    size="sm"
+                    className="flex-1 text-xs gap-1.5 font-medium"
+                    disabled={updatingId === selectedOrder.id}
+                    onClick={() => handleAdvanceStatus(selectedOrder)}
+                  >
+                    {updatingId === selectedOrder.id ? (
+                      <RefreshCw className="size-3.5 animate-spin" />
+                    ) : (
+                      <>
+                        <span>Advance to: {getNextActionLabel(selectedOrder)}</span>
+                        <ArrowRight className="size-3.5" />
+                      </>
+                    )}
+                  </Button>
+                )}
+
+                <Select
+                  value={selectedOrder.status}
+                  onValueChange={(val) =>
+                    handleSetExplicitStatus(selectedOrder.id, val as OrderStatus)
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs w-36">
+                    <SelectValue placeholder="Override Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_COLUMNS.map((c) => (
+                      <SelectItem key={c.status} value={c.status} className="text-xs">
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="cancelled" className="text-xs">
+                      Cancelled
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Associated Payment Details Section */}
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                  <CreditCard className="size-4" /> Associated Payment Information
+                </h3>
+                <PaymentStatusBadge status={selectedOrder.paymentStatus} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Payment Method</span>
+                  <span className="font-semibold text-foreground text-sm">
+                    {selectedOrder.paymentMethod || "Cash at Table"}
                   </span>
-                  <Badge variant="outline" className="bg-background text-xs">
-                    {statusLabels[selectedOrder.status]}
-                  </Badge>
                 </div>
 
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {getNextStatus(selectedOrder) && (
-                    <Button
-                      size="sm"
-                      className="w-full h-10 sm:h-9 text-xs font-medium gap-1.5"
-                      disabled={updatingId === selectedOrder.id}
-                      onClick={() => handleAdvanceStatus(selectedOrder)}
-                    >
-                      {updatingId === selectedOrder.id ? (
-                        <RefreshCw className="size-3.5 animate-spin" />
-                      ) : (
-                        <>
-                          <span>Advance to: {getNextActionLabel(selectedOrder)}</span>
-                          <ArrowRight className="size-3.5" />
-                        </>
-                      )}
-                    </Button>
-                  )}
-
-                  {/* Explicit status override selector */}
-                  <div className="flex items-center gap-2 w-full pt-1">
-                    <span className="text-xs text-muted-foreground shrink-0">Override:</span>
-                    <Select
-                      value={selectedOrder.status}
-                      onValueChange={(val) =>
-                        handleSetExplicitStatus(selectedOrder.id, val as OrderStatus)
-                      }
-                    >
-                      <SelectTrigger className="h-9 sm:h-8 text-xs flex-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STATUS_COLUMNS.map((c) => (
-                          <SelectItem key={c.status} value={c.status}>
-                            {c.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Progress Timeline */}
-              <div className="surface-card p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-                  Fulfillment Timeline
-                </h3>
-                <OrderTimeline order={selectedOrder} />
-              </div>
-
-              {/* Customer & Delivery Information */}
-              <div className="surface-card p-4 space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Customer Details
-                </h3>
-
-                <dl className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <dt className="text-muted-foreground">Name</dt>
-                    <dd className="font-medium text-foreground mt-0.5">
-                      {selectedOrder.customer.name || "Guest Customer"}
-                    </dd>
-                  </div>
-
-                  <div>
-                    <dt className="text-muted-foreground">Phone</dt>
-                    <dd className="font-medium text-foreground mt-0.5">
-                      {selectedOrder.customer.phone ? (
-                        <a
-                          href={`tel:${selectedOrder.customer.phone}`}
-                          className="text-primary hover:underline"
-                        >
-                          {selectedOrder.customer.phone}
-                        </a>
-                      ) : (
-                        "Not provided"
-                      )}
-                    </dd>
-                  </div>
-
-                  {selectedOrder.method === "dine-in" && (
-                    <div className="col-span-2">
-                      <dt className="text-muted-foreground">Table Assignment</dt>
-                      <dd className="font-semibold text-primary mt-0.5 text-sm">
-                        Table #{selectedOrder.customer.table || "Not assigned"}
-                      </dd>
-                    </div>
-                  )}
-
-                  {selectedOrder.waiterName && (
-                    <div className="col-span-2 rounded-lg border border-primary/20 bg-primary/5 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div>
-                        <dt className="text-[11px] font-medium text-muted-foreground uppercase">
-                          Assigned Waiter
-                        </dt>
-                        <dd className="font-semibold text-foreground text-sm flex items-center gap-1.5 mt-0.5">
-                          <User className="size-3.5 text-primary" />
-                          <span>{selectedOrder.waiterName}</span>
-                          {selectedOrder.waiterDecision && (
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "text-[10px] ml-1.5",
-                                selectedOrder.waiterDecision === "approved"
-                                  ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
-                                  : selectedOrder.waiterDecision === "rejected"
-                                    ? "bg-rose-500/10 text-rose-600 border-rose-500/30"
-                                    : "bg-amber-500/10 text-amber-600 border-amber-500/30",
-                              )}
-                            >
-                              {selectedOrder.waiterDecision === "approved"
-                                ? "Approved"
-                                : selectedOrder.waiterDecision === "rejected"
-                                  ? "Declined"
-                                  : "Pending Approval"}
-                            </Badge>
-                          )}
-                        </dd>
-                      </div>
-
-                      {(!selectedOrder.waiterDecision ||
-                        selectedOrder.waiterDecision === "pending") && (
-                        <div className="flex items-center gap-1.5 self-start sm:self-center">
-                          <Button
-                            size="sm"
-                            className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-2.5"
-                            onClick={() => void handleWaiterDecisionAction(selectedOrder.id, "approved")}
-                            disabled={waiterDecisionLoading}
-                          >
-                            <Check className="size-3 mr-1" /> Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs text-rose-600 hover:text-rose-700 border-rose-300 font-medium px-2.5"
-                            onClick={() => void handleWaiterDecisionAction(selectedOrder.id, "rejected", "Declined by waiter")}
-                            disabled={waiterDecisionLoading}
-                          >
-                            <XCircle className="size-3 mr-1" /> Decline
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {selectedOrder.method === "delivery" && (
-                    <div className="col-span-2 space-y-1">
-                      <dt className="text-muted-foreground">Delivery Destination & Distance</dt>
-                      <dd className="font-medium text-foreground mt-0.5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                        <div className="flex items-start gap-1.5 min-w-0">
-                          <MapPin className="size-3.5 text-primary shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="break-words">
-                              {selectedOrder.customer.address || "No address specified"}
-                            </p>
-                            {selectedOrder.distanceKm !== null &&
-                              selectedOrder.distanceKm !== undefined && (
-                                <p className="text-[11px] text-muted-foreground mt-0.5">
-                                  Distance:{" "}
-                                  <strong className="text-foreground">
-                                    {selectedOrder.distanceKm.toFixed(1)} KM
-                                  </strong>
-                                  {" • "}
-                                  Fee:{" "}
-                                  <strong className="text-foreground">
-                                    {formatETB(selectedOrder.delivery)}
-                                  </strong>
-                                </p>
-                              )}
-                          </div>
-                        </div>
-
-                        {selectedOrder.customer.latitude !== null &&
-                          selectedOrder.customer.latitude !== undefined &&
-                          selectedOrder.customer.longitude !== null &&
-                          selectedOrder.customer.longitude !== undefined && (
-                            <a
-                              href={`https://www.google.com/maps/search/?api=1&query=${selectedOrder.customer.latitude},${selectedOrder.customer.longitude}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline shrink-0 bg-primary/10 px-2.5 py-1.5 rounded-md self-start"
-                            >
-                              <ExternalLink className="size-3" />
-                              <span>View Map</span>
-                            </a>
-                          )}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </div>
-
-              {/* Ordered Line Items Breakdown */}
-              <div className="surface-card p-4 space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Order Items ({selectedOrder.items.reduce((s, i) => s + i.quantity, 0)})
-                </h3>
-
-                <div className="divide-y divide-border">
-                  {selectedOrder.items.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="py-2.5 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div>
-                        <p className="font-medium text-foreground">{item.name}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {formatETB(item.price)} × {item.quantity}
-                        </p>
-                      </div>
-                      <span className="font-semibold text-foreground">
-                        {formatETB(item.price * item.quantity)}
-                      </span>
-                    </div>
-                  ))}
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Payment Amount</span>
+                  <span className="font-bold text-primary text-base">
+                    {formatETB(selectedOrder.total)}
+                  </span>
                 </div>
 
-                {/* Financial Totals */}
-                <dl className="border-t border-border pt-3 space-y-1.5 text-xs">
-                  <div className="flex justify-between text-muted-foreground">
-                    <dt>Subtotal</dt>
-                    <dd>{formatETB(selectedOrder.subtotal)}</dd>
-                  </div>
-                  {selectedOrder.delivery > 0 && (
-                    <div className="flex justify-between text-muted-foreground">
-                      <dt>
-                        Delivery Fee
-                        {selectedOrder.distanceKm !== null && selectedOrder.distanceKm !== undefined
-                          ? ` (${selectedOrder.distanceKm.toFixed(1)} KM)`
-                          : ""}
-                      </dt>
-                      <dd>{formatETB(selectedOrder.delivery)}</dd>
-                    </div>
-                  )}
-                  {selectedOrder.discount > 0 && (
-                    <div className="flex justify-between text-success">
-                      <dt>Discount</dt>
-                      <dd>-{formatETB(selectedOrder.discount)}</dd>
-                    </div>
-                  )}
-                  <div className="flex justify-between border-t border-border pt-2 text-sm font-semibold text-foreground">
-                    <dt>Total Amount</dt>
-                    <dd className="text-primary">{formatETB(selectedOrder.total)}</dd>
-                  </div>
-                </dl>
-
-                {/* Waiter Collection Interface */}
-                {selectedOrder.paymentStatus !== "paid" && (
-                  <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2 mt-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
-                        <UserCheck className="size-3.5" /> Waiter Payment Collection
-                      </span>
-                      <Badge variant="outline" className="text-[10px] bg-background">
-                        {selectedOrder.paymentMethod || "Electronic"}
-                      </Badge>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Customer selected <strong className="text-foreground">{selectedOrder.paymentMethod || "Telebirr / Bank Transfer"}</strong>. Collect the customer's transfer confirmation code and record below to submit to the cashier.
-                    </p>
-                    <div className="space-y-1.5">
-                      <Input
-                        placeholder="e.g. TXN-84920193..."
-                        value={waiterRefInput}
-                        onChange={(e) => setWaiterRefInput(e.target.value)}
-                        className="h-8 text-xs font-mono bg-background"
-                      />
-                      <Input
-                        placeholder="Optional note (e.g. Verified Telebirr SMS at Table 2)..."
-                        value={waiterNoteInput}
-                        onChange={(e) => setWaiterNoteInput(e.target.value)}
-                        className="h-8 text-xs bg-background"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => void handleRecordWaiterCollection(selectedOrder.id)}
-                        disabled={collectingPayment || !waiterRefInput.trim()}
-                        className="w-full h-8 text-xs font-semibold"
-                      >
-                        <Receipt className="size-3.5 mr-1.5" />
-                        {collectingPayment ? "Recording Details…" : "Record Payment Details & Send to Cashier"}
-                      </Button>
-                    </div>
+                {selectedOrder.paymentProof?.transactionReference && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground block text-[11px]">
+                      Transaction Reference / Confirmation Code
+                    </span>
+                    <span className="font-mono font-semibold text-foreground bg-background px-2 py-1 rounded border border-border inline-block mt-0.5">
+                      {selectedOrder.paymentProof.transactionReference}
+                    </span>
                   </div>
                 )}
               </div>
 
-              {/* Print Receipt / Actions */}
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="w-full text-xs gap-1.5"
-                  onClick={() => window.print()}
-                >
-                  <Printer className="size-3.5" />
-                  Print Kitchen Ticket
-                </Button>
+              {/* Payment Verification / Proof Inspection */}
+              {(() => {
+                const isCash = (selectedOrder.paymentMethod || "").toLowerCase().includes("cash");
+                if (isCash) {
+                  return (
+                    <div className="pt-3 border-t border-primary/10 space-y-2">
+                      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-center space-y-1">
+                        <p className="font-semibold text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-center gap-1.5">
+                          <Banknote className="size-3.5 text-emerald-600" />
+                          <span>Payment Method: 💵 Cash</span>
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Cash payment collected directly in person. No screenshot or payment proof required.
+                        </p>
+                      </div>
+
+                      {/* Cashier / Admin verify action */}
+                      {selectedOrder.paymentStatus !== "paid" && selectedOrder.paymentProof && (
+                        <Button
+                          size="sm"
+                          className="w-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white mt-2"
+                          onClick={() => handleApproveProof(selectedOrder.paymentProof!.id)}
+                          disabled={updatingId === selectedOrder.id}
+                        >
+                          <Check className="size-3.5 mr-1.5" />
+                          Confirm Cash Payment
+                        </Button>
+                      )}
+                    </div>
+                  );
+                }
+
+                if (selectedOrder.paymentProof) {
+                  return (
+                    <div className="pt-3 border-t border-primary/10 space-y-2">
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <Image className="size-3.5 text-primary" />
+                        Electronic Payment Screenshot Evidence
+                      </span>
+
+                      {loadingProof ? (
+                        <div className="p-4 text-center text-xs text-muted-foreground animate-pulse">
+                          Generating secure preview URL...
+                        </div>
+                      ) : proofPreviewUrl ? (
+                        <div className="space-y-2">
+                          <div className="rounded-lg overflow-hidden border border-border bg-black/10 max-h-64 flex items-center justify-center">
+                            <img
+                              src={proofPreviewUrl}
+                              alt="Payment Receipt Evidence"
+                              className="object-contain max-h-64 w-auto rounded"
+                            />
+                          </div>
+                          <a
+                            href={proofPreviewUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-primary font-medium hover:underline"
+                          >
+                            <ExternalLink className="size-3" />
+                            Open full size screenshot in new tab
+                          </a>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic">
+                          Proof recorded with reference: {selectedOrder.paymentProof.transactionReference || "Standard verification"}
+                        </p>
+                      )}
+
+                      {/* Cashier / Admin verify action */}
+                      {selectedOrder.paymentStatus !== "paid" && (
+                        <Button
+                          size="sm"
+                          className="w-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white mt-2"
+                          onClick={() => handleApproveProof(selectedOrder.paymentProof!.id)}
+                          disabled={updatingId === selectedOrder.id}
+                        >
+                          <Check className="size-3.5 mr-1.5" />
+                          Approve & Verify Payment
+                        </Button>
+                      )}
+                    </div>
+                  );
+                }
+
+                return null;
+              })()}
+            </div>
+
+            {/* Customer & Table Details */}
+            <div className="surface-card p-4 space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Customer & Service Details
+              </h3>
+
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Customer Name</span>
+                  <span className="font-semibold text-foreground">
+                    {selectedOrder.customer.name || "Guest Diner"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Phone</span>
+                  <span className="font-medium text-foreground">
+                    {selectedOrder.customer.phone || "Not provided"}
+                  </span>
+                </div>
+
+                {selectedOrder.method === "dine-in" && (
+                  <div>
+                    <span className="text-muted-foreground block text-[11px]">Table Number</span>
+                    <span className="font-bold text-primary text-sm">
+                      {selectedOrder.customer.table ? `Table #${selectedOrder.customer.table}` : "Unassigned"}
+                    </span>
+                  </div>
+                )}
+
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Assigned Waiter</span>
+                  <span className="font-medium text-foreground">
+                    {selectedOrder.waiterName || "Unassigned"}
+                  </span>
+                </div>
+
+                {selectedOrder.method === "delivery" && selectedOrder.customer.address && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground block text-[11px]">Delivery Address</span>
+                    <span className="font-medium text-foreground flex items-center gap-1 mt-0.5">
+                      <MapPin className="size-3.5 text-primary shrink-0" />
+                      {selectedOrder.customer.address}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Ordered Line Items */}
+            <div className="surface-card p-4 space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Ordered Items ({selectedOrder.items.reduce((s, i) => s + i.quantity, 0)})
+              </h3>
+
+              <div className="divide-y divide-border">
+                {selectedOrder.items.map((item, idx) => (
+                  <div key={idx} className="py-2 flex items-center justify-between text-xs">
+                    <div>
+                      <p className="font-medium text-foreground">{item.name}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {formatETB(item.price)} × {item.quantity}
+                      </p>
+                    </div>
+                    <span className="font-semibold text-foreground">
+                      {formatETB(item.price * item.quantity)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t border-border pt-3 space-y-1 text-xs">
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Subtotal</span>
+                  <span>{formatETB(selectedOrder.subtotal)}</span>
+                </div>
+                {selectedOrder.delivery > 0 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Delivery Fee</span>
+                    <span>{formatETB(selectedOrder.delivery)}</span>
+                  </div>
+                )}
+                {selectedOrder.discount > 0 && (
+                  <div className="flex justify-between text-emerald-600">
+                    <span>Discount</span>
+                    <span>-{formatETB(selectedOrder.discount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm font-bold text-foreground border-t border-border pt-1.5">
+                  <span>Total Order Amount</span>
+                  <span className="text-primary">{formatETB(selectedOrder.total)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Print Ticket Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.print()}
+              className="w-full text-xs gap-1.5"
+            >
+              <Printer className="size-3.5" />
+              Print Receipt & Ticket
+            </Button>
           </SheetContent>
         )}
       </Sheet>

@@ -101,12 +101,14 @@ function apiDevMiddleware(): Plugin {
           // Read body chunks for non-GET/HEAD/OPTIONS
           let bodyBuffer: Buffer | undefined = undefined;
           if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") {
-            const chunks: Buffer[] = [];
-            for await (const chunk of req) {
-              chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-            }
-            if (chunks.length > 0) {
-              bodyBuffer = Buffer.concat(chunks);
+            if (!req.readableEnded) {
+              const chunks: Buffer[] = [];
+              for await (const chunk of req) {
+                chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+              }
+              if (chunks.length > 0) {
+                bodyBuffer = Buffer.concat(chunks);
+              }
             }
           }
 
@@ -136,8 +138,20 @@ function apiDevMiddleware(): Plugin {
           const webResponse: Response = await handleApiRequest(webRequest);
 
           res.statusCode = webResponse.status;
+          const disallowedHopHeaders = new Set([
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailer",
+            "transfer-encoding",
+            "upgrade",
+          ]);
           webResponse.headers.forEach((val: string, key: string) => {
-            res.setHeader(key, val);
+            if (!disallowedHopHeaders.has(key.toLowerCase())) {
+              res.setHeader(key, val);
+            }
           });
 
           const arrayBuf = await webResponse.arrayBuffer();

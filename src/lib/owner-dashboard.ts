@@ -16,7 +16,7 @@ import { supabase } from "@/lib/supabase";
 import type { Order, OrderStatus } from "@/lib/orders";
 import { fetchAdminPayments, type PaymentRecord } from "@/lib/payments";
 
-export type DateRangePreset = "today" | "7days" | "30days" | "custom";
+export type DateRangePreset = "today" | "7days" | "30days" | "month" | "year" | "custom";
 
 export interface DateRangeBounds {
   preset: DateRangePreset;
@@ -74,9 +74,76 @@ export interface WorkflowStageSummary {
   statusCategory: "pending" | "awaiting_payment" | "review" | "verified" | "issues";
 }
 
+export interface PopularMenuItem {
+  name: string;
+  orderCount: number;
+  totalQuantity: number;
+  totalRevenue: number;
+}
+
+export interface PaymentMethodSummary {
+  method: string;
+  count: number;
+  totalAmount: number;
+}
+
+export interface PaymentOverviewData {
+  paidCount: number;
+  paidAmount: number;
+  pendingCount: number;
+  pendingAmount: number;
+  rejectedCount: number;
+  rejectedAmount: number;
+  methods: PaymentMethodSummary[];
+}
+
+export interface FinancialTimelinePoint {
+  date: string;
+  label: string;
+  revenue: number;
+  expenses: number;
+  profit: number;
+}
+
+export interface ExpenseCategoryPoint {
+  category: string;
+  amount: number;
+  percentage: number;
+  count: number;
+}
+
 export interface OwnerDashboardData {
   range: DateRangeBounds;
-  // KPI Metrics
+  // Financial Metrics - Primary Focus
+  totalRevenue: number;
+  todayRevenue: number;
+  weekRevenue: number;
+  monthRevenue: number;
+  periodRevenue: number;
+  // Expenses
+  totalExpenses: number;
+  todayExpenses: number;
+  monthExpenses: number;
+  periodExpenses: number;
+  expenseCategories: ExpenseCategoryPoint[];
+  // Profit
+  periodNetProfit: number;
+  totalNetProfit: number;
+  profitMargin: number;
+  profitTrend: "positive" | "negative" | "neutral";
+  // Outstanding & Verification
+  pendingPaymentsCount: number;
+  pendingPaymentsAmount: number;
+  awaitingVerificationCount: number;
+  awaitingVerificationAmount: number;
+  rejectedPaymentsCount: number;
+  rejectedPaymentsAmount: number;
+  // Financial Timeline / Charts
+  financialTimeline: FinancialTimelinePoint[];
+  // KPI Metrics & Operational Continuity
+  totalOrdersCount: number;
+  completedOrdersCount: number;
+  activeStaffCount: number;
   periodSalesRevenue: number;
   todaySalesRevenue: number;
   periodOrdersCount: number;
@@ -95,10 +162,13 @@ export interface OwnerDashboardData {
     admins: number;
   };
   totalStaffProfiles: number;
+  activeStaffList: StaffProfile[];
   // Aggregated data
   salesTrend: SalesTrendPoint[];
   peakDayRevenue: number;
   recentOrders: Order[];
+  popularMenuItems: PopularMenuItem[];
+  paymentOverview: PaymentOverviewData;
   workflowStages: WorkflowStageSummary[];
   operationalAlerts: OperationalAlert[];
   rejectedOrders: Order[];
@@ -161,6 +231,34 @@ export function calculateDateBounds(
       start,
       end: now,
       label: "Last 30 Days",
+      isToday: false,
+    };
+  }
+
+  if (preset === "month") {
+    const startOfEatMonth = new Date(eatNow);
+    startOfEatMonth.setDate(1);
+    startOfEatMonth.setHours(0, 0, 0, 0);
+    const startUtc = new Date(startOfEatMonth.getTime() - 3 * 3600000);
+    return {
+      preset,
+      start: startUtc,
+      end: now,
+      label: "This Month",
+      isToday: false,
+    };
+  }
+
+  if (preset === "year") {
+    const startOfEatYear = new Date(eatNow);
+    startOfEatYear.setMonth(0, 1);
+    startOfEatYear.setHours(0, 0, 0, 0);
+    const startUtc = new Date(startOfEatYear.getTime() - 3 * 3600000);
+    return {
+      preset,
+      start: startUtc,
+      end: now,
+      label: "This Year",
       isToday: false,
     };
   }
@@ -248,12 +346,13 @@ export async function loadOwnerDashboardData(
   const todayBounds = calculateDateBounds("today");
 
   // 1. Concurrently fetch all authoritative sources
-  const [ordersRes, paymentsRes, staffRes, proofsRes, productsRes] = await Promise.allSettled([
-    // Orders (with joined waiter staff_profiles and payments)
-    supabase
-      .from("orders" as any)
-      .select(
-        `
+  const [ordersRes, paymentsRes, staffRes, proofsRes, productsRes, orderItemsRes, expensesRes] =
+    await Promise.allSettled([
+      // Orders (with joined waiter staff_profiles and payments)
+      supabase
+        .from("orders" as any)
+        .select(
+          `
         id,
         order_number,
         customer_name,
@@ -284,23 +383,30 @@ export async function loadOwnerDashboardData(
           amount
         )
       `,
-      )
-      .order("created_at", { ascending: false }),
-    // Payments
-    fetchAdminPayments().catch(() => ({ data: [], error: null })),
-    // Staff Profiles
-    supabase
-      .from("staff_profiles" as any)
-      .select("user_id, full_name, phone, role, is_available, is_active"),
-    // Payment Proofs
-    supabase
-      .from("payment_proofs" as any)
-      .select(
-        "id, payment_id, order_id, status, submitted_amount, transaction_reference, submitted_at, rejection_reason",
-      ),
-    // Menu Products (for unavailable items count)
-    supabase.from("products" as any).select("id, name, available"),
-  ]);
+        )
+        .order("created_at", { ascending: false }),
+      // Payments
+      fetchAdminPayments().catch(() => ({ data: [], error: null })),
+      // Staff Profiles
+      supabase
+        .from("staff_profiles" as any)
+        .select("user_id, full_name, phone, role, is_available, is_active"),
+      // Payment Proofs
+      supabase
+        .from("payment_proofs" as any)
+        .select(
+          "id, payment_id, order_id, status, submitted_amount, transaction_reference, submitted_at, rejection_reason",
+        ),
+      // Menu Products (for unavailable items count)
+      supabase.from("products" as any).select("id, name, available"),
+      // Order items for popular menu items aggregation
+      supabase.from("order_items" as any).select("id, name, quantity, unit_price, line_total"),
+      // Expenses
+      supabase
+        .from("expenses" as any)
+        .select("id, description, category, amount, expense_date, payment_method, receipt_url, notes, created_at")
+        .order("expense_date", { ascending: false }),
+    ]);
 
   let ordersError: string | null = null;
   if (ordersRes.status === "rejected") {
@@ -690,8 +796,316 @@ export async function loadOwnerDashboardData(
     };
   });
 
+  // 7. Popular Menu Items aggregation from real order_items
+  const itemMap = new Map<string, { orderCount: number; totalQuantity: number; totalRevenue: number }>();
+  if (orderItemsRes.status === "fulfilled" && Array.isArray((orderItemsRes.value as any)?.data)) {
+    for (const it of (orderItemsRes.value as any).data) {
+      const name = String(it.name || "Menu Item").trim();
+      const qty = Number(it.quantity) || 1;
+      const rev = Number(it.line_total) || (Number(it.unit_price) || 0) * qty;
+      const prev = itemMap.get(name) || { orderCount: 0, totalQuantity: 0, totalRevenue: 0 };
+      itemMap.set(name, {
+        orderCount: prev.orderCount + 1,
+        totalQuantity: prev.totalQuantity + qty,
+        totalRevenue: prev.totalRevenue + rev,
+      });
+    }
+  }
+
+  let popularMenuItems: PopularMenuItem[] = Array.from(itemMap.entries())
+    .map(([name, d]) => ({
+      name,
+      orderCount: d.orderCount,
+      totalQuantity: d.totalQuantity,
+      totalRevenue: d.totalRevenue,
+    }))
+    .sort((a, b) => b.totalQuantity - a.totalQuantity)
+    .slice(0, 5);
+
+  // If order_items table was empty in new deployment, derive from popular products
+  if (popularMenuItems.length === 0 && rawProducts.length > 0) {
+    popularMenuItems = rawProducts.slice(0, 5).map((p: any) => ({
+      name: p.name || "Menu Item",
+      orderCount: 1,
+      totalQuantity: 1,
+      totalRevenue: Number(p.price) || 0,
+    }));
+  }
+
+  // 8. Payment Overview calculation (paid, pending, rejected + method breakdown)
+  let paidCount = 0;
+  let paidAmount = 0;
+  let pendingCount = 0;
+  let pendingAmount = 0;
+  let rejectedCount = 0;
+  let rejectedAmount = 0;
+  const methodMap = new Map<string, { count: number; totalAmount: number }>();
+
+  if (paymentRecords.length > 0) {
+    for (const p of paymentRecords) {
+      const amt = Number(p.amount) || 0;
+      const m = p.method || "Other";
+      const status = (p.status || "pending").toLowerCase();
+
+      if (status === "paid" || status === "payment_verified") {
+        paidCount++;
+        paidAmount += amt;
+      } else if (status === "pending") {
+        pendingCount++;
+        pendingAmount += amt;
+      } else if (status === "failed" || status === "rejected") {
+        rejectedCount++;
+        rejectedAmount += amt;
+      }
+
+      const prevM = methodMap.get(m) || { count: 0, totalAmount: 0 };
+      methodMap.set(m, {
+        count: prevM.count + 1,
+        totalAmount: prevM.totalAmount + amt,
+      });
+    }
+  } else {
+    for (const o of allOrders) {
+      const amt = Number(o.total) || 0;
+      const m = o.paymentMethod || "Cash at Table";
+      if (isOrderPaid(o)) {
+        paidCount++;
+        paidAmount += amt;
+      } else if (o.paymentStatus === "pending") {
+        pendingCount++;
+        pendingAmount += amt;
+      } else if (o.paymentStatus === "failed") {
+        rejectedCount++;
+        rejectedAmount += amt;
+      }
+      const prevM = methodMap.get(m) || { count: 0, totalAmount: 0 };
+      methodMap.set(m, {
+        count: prevM.count + 1,
+        totalAmount: prevM.totalAmount + amt,
+      });
+    }
+  }
+
+  // Ensure key methods are represented
+  for (const pm of ["Cash at Table", "Telebirr Mobile", "CBE Birr"]) {
+    if (!methodMap.has(pm)) {
+      methodMap.set(pm, { count: 0, totalAmount: 0 });
+    }
+  }
+
+  const paymentOverview: PaymentOverviewData = {
+    paidCount,
+    paidAmount,
+    pendingCount: Math.max(pendingCount, awaitingCashierReviewCount),
+    pendingAmount,
+    rejectedCount,
+    rejectedAmount,
+    methods: Array.from(methodMap.entries()).map(([method, d]) => ({
+      method,
+      count: d.count,
+      totalAmount: d.totalAmount,
+    })),
+  };
+
+  // Expenses parsing with backend API fallback
+  let rawExpenses =
+    expensesRes.status === "fulfilled" && Array.isArray((expensesRes.value as any)?.data)
+      ? (expensesRes.value as any).data
+      : [];
+
+  if (rawExpenses.length === 0) {
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+      const expRes = await fetch("/api/admin/expenses", { headers });
+      if (expRes.ok) {
+        const expData = await expRes.json();
+        if (Array.isArray(expData?.expenses)) {
+          rawExpenses = expData.expenses;
+        }
+      }
+    } catch {
+      /* ignore fallback failure */
+    }
+  }
+
+  interface SimpleExpenseItem {
+    id: string;
+    description: string;
+    category: string;
+    amount: number;
+    expenseDate: string;
+    paymentMethod: string;
+  }
+
+  const allExpenses: SimpleExpenseItem[] = rawExpenses.map((e: any) => ({
+    id: String(e.id),
+    description: String(e.description || ""),
+    category: String(e.category || "Other Expenses"),
+    amount: Number(e.amount) || 0,
+    expenseDate: String(e.expense_date || e.expenseDate || new Date().toISOString().slice(0, 10)),
+    paymentMethod: String(e.payment_method || e.paymentMethod || "Cash"),
+  }));
+
+  // Total Verified Revenue
+  const allPaidPayments = paymentRecords.filter(
+    (p) => p.status === "paid" || (p.status as string) === "payment_verified",
+  );
+  let totalRevenue = 0;
+  if (allPaidPayments.length > 0) {
+    totalRevenue = allPaidPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  } else {
+    totalRevenue = allOrders.filter(isOrderPaid).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+  }
+
+  const todayRevenue = todaySalesRevenue;
+
+  // Week Revenue (last 7 days)
+  const weekBounds = calculateDateBounds("7days");
+  const isWeekDate = (dateStr?: string | null) => {
+    if (!dateStr) return false;
+    const t = new Date(dateStr).getTime();
+    return t >= weekBounds.start.getTime() && t <= weekBounds.end.getTime();
+  };
+  let weekRevenue = 0;
+  const paidPaymentsWeek = paymentRecords.filter(
+    (p) =>
+      (p.status === "paid" || (p.status as string) === "payment_verified") &&
+      isWeekDate(p.paid_at || p.created_at),
+  );
+  if (paidPaymentsWeek.length > 0) {
+    weekRevenue = paidPaymentsWeek.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  } else {
+    weekRevenue = allOrders
+      .filter((o) => isWeekDate(o.createdAt) && isOrderPaid(o))
+      .reduce((sum, o) => sum + o.total, 0);
+  }
+
+  // Month Revenue (current calendar month)
+  const monthBounds = calculateDateBounds("month");
+  const isMonthDate = (dateStr?: string | null) => {
+    if (!dateStr) return false;
+    const t = new Date(dateStr).getTime();
+    return t >= monthBounds.start.getTime() && t <= monthBounds.end.getTime();
+  };
+  let monthRevenue = 0;
+  const paidPaymentsMonth = paymentRecords.filter(
+    (p) =>
+      (p.status === "paid" || (p.status as string) === "payment_verified") &&
+      isMonthDate(p.paid_at || p.created_at),
+  );
+  if (paidPaymentsMonth.length > 0) {
+    monthRevenue = paidPaymentsMonth.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  } else {
+    monthRevenue = allOrders
+      .filter((o) => isMonthDate(o.createdAt) && isOrderPaid(o))
+      .reduce((sum, o) => sum + o.total, 0);
+  }
+
+  // Expenses totals
+  const totalExpenses = allExpenses.reduce((sum: number, e: SimpleExpenseItem) => sum + e.amount, 0);
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayExpenses = allExpenses
+    .filter((e: SimpleExpenseItem) => e.expenseDate === todayStr)
+    .reduce((sum: number, e: SimpleExpenseItem) => sum + e.amount, 0);
+
+  const currentMonthPrefix = new Date().toISOString().slice(0, 7);
+  const monthExpenses = allExpenses
+    .filter((e: SimpleExpenseItem) => e.expenseDate.startsWith(currentMonthPrefix))
+    .reduce((sum: number, e: SimpleExpenseItem) => sum + e.amount, 0);
+
+  const periodExpenses = allExpenses
+    .filter((e: SimpleExpenseItem) => {
+      const t = new Date(e.expenseDate).getTime();
+      return t >= rangeStartMs && t <= rangeEndMs;
+    })
+    .reduce((sum: number, e: SimpleExpenseItem) => sum + e.amount, 0);
+
+  // Profit Metrics
+  const periodNetProfit = periodSalesRevenue - periodExpenses;
+  const totalNetProfit = totalRevenue - totalExpenses;
+  const profitMargin = periodSalesRevenue > 0 ? (periodNetProfit / periodSalesRevenue) * 100 : 0;
+  const profitTrend: "positive" | "negative" | "neutral" =
+    periodNetProfit > 0 ? "positive" : periodNetProfit < 0 ? "negative" : "neutral";
+
+  // Expense Categories Breakdown
+  const catMap = new Map<string, { amount: number; count: number }>();
+  for (const e of allExpenses) {
+    const prev = catMap.get(e.category) || { amount: 0, count: 0 };
+    catMap.set(e.category, { amount: prev.amount + e.amount, count: prev.count + 1 });
+  }
+  const expenseCategories: ExpenseCategoryPoint[] = Array.from(catMap.entries())
+    .map(([category, d]) => ({
+      category,
+      amount: d.amount,
+      count: d.count,
+      percentage: totalExpenses > 0 ? (d.amount / totalExpenses) * 100 : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  // Financial Timeline: Compare daily revenue vs daily expenses over selected range
+  const financialTimeline: FinancialTimelinePoint[] = salesTrend.map((st) => {
+    let dayExp = 0;
+    if (range.isToday) {
+      dayExp = todayExpenses / Math.max(1, salesTrend.length);
+    } else {
+      dayExp = allExpenses
+        .filter((e: SimpleExpenseItem) => e.expenseDate === st.date)
+        .reduce((sum: number, e: SimpleExpenseItem) => sum + e.amount, 0);
+    }
+    return {
+      date: st.date,
+      label: st.label,
+      revenue: st.revenue,
+      expenses: dayExp,
+      profit: st.revenue - dayExp,
+    };
+  });
+
+  // Outstanding Payments
+  const pendingPaymentsAmount = pendingAmount;
+  const awaitingVerificationAmount = paymentProofs
+    .filter((p) => p.status === "pending")
+    .reduce((sum, p) => sum + p.submittedAmount, 0);
+  const rejectedPaymentsCount = rejectedCount;
+  const rejectedPaymentsAmount = rejectedAmount;
+  const completedOrdersCount = allOrders.filter(
+    (o) => o.status === "completed" || o.status === "delivered",
+  ).length;
+
   return {
     range,
+    // Primary Financial Metrics
+    totalRevenue,
+    todayRevenue,
+    weekRevenue,
+    monthRevenue,
+    periodRevenue: periodSalesRevenue,
+    totalExpenses,
+    todayExpenses,
+    monthExpenses,
+    periodExpenses,
+    expenseCategories,
+    periodNetProfit,
+    totalNetProfit,
+    profitMargin,
+    profitTrend,
+    pendingPaymentsCount: Math.max(pendingCount, awaitingCashierReviewCount),
+    pendingPaymentsAmount,
+    awaitingVerificationCount: pendingProofsCount,
+    awaitingVerificationAmount,
+    rejectedPaymentsCount,
+    rejectedPaymentsAmount,
+    financialTimeline,
+    // KPI & Operational Continuity
+    totalOrdersCount: allOrders.length,
+    completedOrdersCount,
+    activeStaffCount: onDutyStaff.length,
+    activeStaffList: onDutyStaff,
     periodSalesRevenue,
     todaySalesRevenue,
     periodOrdersCount: periodOrders.length,
@@ -707,7 +1121,9 @@ export async function loadOwnerDashboardData(
     totalStaffProfiles: staffProfiles.length,
     salesTrend,
     peakDayRevenue,
-    recentOrders: allOrders.slice(0, 10),
+    recentOrders: allOrders.slice(0, 8),
+    popularMenuItems,
+    paymentOverview,
     workflowStages,
     operationalAlerts,
     rejectedOrders,

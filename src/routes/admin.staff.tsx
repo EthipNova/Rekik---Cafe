@@ -17,6 +17,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Activity,
+  Copy,
   AlertCircle,
   AlertTriangle,
   ArrowUpDown,
@@ -49,6 +50,10 @@ import {
   UtensilsCrossed,
   X,
   XCircle,
+  Trash2,
+  Edit,
+  DollarSign,
+  ChevronRight,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -104,6 +109,13 @@ import { statusLabels, type OrderStatus } from "@/lib/orders";
 import { readSettings } from "@/lib/settings";
 import { supabase } from "@/lib/supabase";
 import {
+  fetchAdminCustomers,
+  formatCustomerFullDateTime,
+  formatCustomerRelativeDate,
+  maskPhone,
+  type DerivedCustomer,
+} from "@/lib/customers";
+import {
   loadStaffMonitoringData,
   type ActivityType,
   type StaffActivityItem,
@@ -122,11 +134,11 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/admin/staff")({
   head: () => ({
     meta: [
-      { title: "Staff & Activity Monitoring — Rekik Coffee" },
+      { title: "People Management — Rekik Café" },
       {
         name: "description",
         content:
-          "Authoritative staff directory, operational workload monitoring, and staff activity accountability for Rekik Coffee.",
+          "Authoritative staff management, workforce administration, and customer performance monitoring for Rekik Café.",
       },
       { name: "robots", content: "noindex" },
     ],
@@ -271,6 +283,11 @@ function RekikStaffMonitoringPage() {
   const [registerLoading, setRegisterLoading] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registerSuccess, setRegisterSuccess] = useState<string | null>(null);
+  const [newlyCreatedStaff, setNewlyCreatedStaff] = useState<{
+    name: string;
+    role: string;
+    staffId: string;
+  } | null>(null);
 
   // Status Change Confirmation State
   const [statusConfirmStaff, setStatusConfirmStaff] = useState<StaffProfileRecord | null>(null);
@@ -531,31 +548,90 @@ function RekikStaffMonitoringPage() {
       if (!res.ok) {
         if (res.status === 409) {
           throw new Error(
-            "An account with this email address already exists. Please use a different email.",
+            "An account with this email address is already registered. Please use a different email.",
           );
         }
-        throw new Error(json.error || "Failed to register staff account.");
+        if (res.status === 403) {
+          throw new Error(
+            json.message || json.error || "Permission denied. Only authorized administrators can create staff accounts.",
+          );
+        }
+        if (res.status === 400) {
+          throw new Error(
+            json.message || json.error || "Invalid staff details. Please verify all required fields.",
+          );
+        }
+        throw new Error(json.message || json.error || `Staff registration failed (HTTP ${res.status}).`);
       }
 
+      const generatedStaffId = json?.staff?.staffId || "RK-001";
+      const displayRole = registerRole === "waiter" ? "Waiter" : "Cashier";
+
+      setNewlyCreatedStaff({
+        name,
+        role: displayRole,
+        staffId: generatedStaffId,
+      });
+
       setRegisterSuccess(
-        `Successfully registered ${registerRole === "waiter" ? "Waiter" : "Cashier"} "${name}"!`,
+        `Successfully registered ${displayRole} "${name}" with Staff ID ${generatedStaffId}!`,
       );
-      toast.success(`Registered ${name} as ${registerRole}`);
+      toast.success(`Registered ${name} as ${displayRole} (${generatedStaffId})`);
       setRegisterName("");
       setRegisterEmail("");
       setRegisterPhone("");
       setRegisterPassword("");
       await loadData();
-      setTimeout(() => {
-        setIsRegisterDialogOpen(false);
-        setRegisterSuccess(null);
-      }, 1500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Registration failed";
       setRegisterError(msg);
       toast.error(msg);
     } finally {
       setRegisterLoading(false);
+    }
+  };
+
+  // Edit Staff Modal State (Managing Delete & Deactivate Actions)
+  const [editingStaff, setEditingStaff] = useState<StaffProfileRecord | null>(null);
+
+  // Delete Staff State & Safe Retention Strategy
+  const [deleteConfirmStaff, setDeleteConfirmStaff] = useState<StaffProfileRecord | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const handleConfirmDeleteStaff = async () => {
+    if (!deleteConfirmStaff) return;
+    setDeleteLoading(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch("/api/admin/staff", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ userId: deleteConfirmStaff.userId }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || json.error || "Failed to delete staff member.");
+      }
+
+      toast.success(
+        json.message || `Staff account for ${deleteConfirmStaff.fullName} has been removed.`,
+      );
+      setDeleteConfirmStaff(null);
+      setEditingStaff(null);
+      await loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to delete staff account";
+      toast.error(msg);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -584,13 +660,14 @@ function RekikStaffMonitoringPage() {
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(json.error || `Failed to ${statusActionType} staff member.`);
+        throw new Error(json.message || json.error || `Failed to ${statusActionType} staff member.`);
       }
 
       toast.success(
         `Staff member ${statusConfirmStaff.fullName} has been ${statusActionType === "activate" ? "activated" : "deactivated"}.`,
       );
       setStatusConfirmStaff(null);
+      setEditingStaff(null);
       await loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to update staff status";
@@ -599,6 +676,41 @@ function RekikStaffMonitoringPage() {
       setStatusLoading(false);
     }
   };
+
+  // Customer Overview State & Metrics
+  const [customers, setCustomers] = useState<DerivedCustomer[]>([]);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+
+  const filteredCustomers = useMemo(() => {
+    return customers.filter((c) => {
+      if (customerSearchQuery.trim()) {
+        const q = customerSearchQuery.toLowerCase().trim();
+        const nameMatch = c.name.toLowerCase().includes(q);
+        const phoneMatch = c.phone.toLowerCase().includes(q) || c.rawPhone.includes(q);
+        if (!nameMatch && !phoneMatch) return false;
+      }
+      return true;
+    });
+  }, [customers, customerSearchQuery]);
+
+  const selectedCustomer = useMemo(() => {
+    if (!selectedCustomerId) return null;
+    return customers.find((c) => c.id === selectedCustomerId) || null;
+  }, [selectedCustomerId, customers]);
+
+  const customerMetrics = useMemo(() => {
+    const totalCustomers = customers.length;
+    const activeCustomers = customers.filter((c) => c.isRecent).length;
+    const totalOrders = customers.reduce((sum, c) => sum + c.orderCount, 0);
+    const totalSpending = customers.reduce((sum, c) => sum + c.totalSpent, 0);
+    return {
+      totalCustomers,
+      activeCustomers,
+      totalOrders,
+      totalSpending,
+    };
+  }, [customers]);
 
   // Edit Staff Password State (Waiters & Cashiers)
   const [passwordEditStaff, setPasswordEditStaff] = useState<StaffProfileRecord | null>(null);
@@ -694,8 +806,17 @@ function RekikStaffMonitoringPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await loadStaffMonitoringData(targetPreset, start, end);
+        const [res, custRes] = await Promise.all([
+          loadStaffMonitoringData(targetPreset, start, end),
+          fetchAdminCustomers().catch((err) => {
+            console.warn("fetchAdminCustomers error:", err);
+            return { data: [], error: null };
+          }),
+        ]);
         setData(res);
+        if (custRes.data) {
+          setCustomers(custRes.data);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Failed to load staff monitoring data";
         setError(msg);
@@ -852,7 +973,7 @@ function RekikStaffMonitoringPage() {
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
-              <span>Staff & Activity Monitoring</span>
+              <span>People Management</span>
             </h1>
             <Badge
               variant="outline"
@@ -875,8 +996,7 @@ function RekikStaffMonitoringPage() {
             </Badge>
           </div>
           <p className="text-xs sm:text-sm text-muted-foreground">
-            Authoritative staff directory, operational workload monitoring, and verified activity
-            accountability for Rekik Coffee.
+            Authoritative staff management, workforce administration, and customer performance monitoring for Rekik Coffee.
           </p>
         </div>
 
@@ -984,7 +1104,7 @@ function RekikStaffMonitoringPage() {
             id="staff-kpi-heading"
             className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
           >
-            Staff & Operational Workload Overview
+            Staff Overview (Primary Focus)
           </h2>
           {data && (
             <span className="text-[11px] text-muted-foreground">
@@ -993,62 +1113,61 @@ function RekikStaffMonitoringPage() {
           )}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          {/* KPI 1: Registered Staff Accounts */}
-          <Card className="border-amber-900/15 dark:border-amber-800/25 border-l-4 border-l-[#8B4513] dark:border-l-[#D27D2D] bg-card/90 dark:bg-[#1a1411]/90 shadow-xs hover:border-amber-800/30 transition-all">
-            <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
+        <div className="grid gap-4 sm:grid-cols-3">
+          {/* KPI 1: Total Staff */}
+          <Card className="border-amber-900/15 dark:border-amber-800/25 border-l-4 border-l-[#8B4513] dark:border-l-[#D27D2D] bg-card/90 dark:bg-[#1a1411]/90 shadow-xs hover:border-amber-800/30 transition-all p-4 space-y-1.5">
+            <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Registered Staff
+                Total Staff
               </span>
               <div className="flex size-8 items-center justify-center rounded-lg bg-amber-700/10 text-amber-800 dark:text-amber-300">
                 <Users className="size-4" aria-hidden />
               </div>
-            </CardHeader>
-            <CardContent className="p-4 pt-0 space-y-2">
-              <p className="font-display text-2xl font-bold tracking-tight text-foreground">
-                {data ? data.totalStaffCount : "—"}
-              </p>
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                  {data ? data.activeStaffCount : 0} Active accounts
-                </span>
-                <span>{data ? data.inactiveStaffCount : 0} Inactive</span>
-              </div>
-              <p className="text-[10px] text-muted-foreground border-t border-border/60 pt-1.5 leading-snug">
-                {data
-                  ? `${data.roleCounts.waiter || 0} Waiters · ${data.roleCounts.cashier || 0} Cashiers · ${data.roleCounts.admin || 0} Admins`
-                  : "Verified staff profiles from database."}
-              </p>
-            </CardContent>
+            </div>
+            <p className="font-display text-2xl font-bold tracking-tight text-foreground">
+              {data ? data.totalStaffCount : "—"}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {data
+                ? `${data.roleCounts.waiter || 0} Waiters · ${data.roleCounts.cashier || 0} Cashiers · ${data.roleCounts.admin || 0} Admins`
+                : "Total personnel in staff directory"}
+            </p>
           </Card>
 
-          {/* KPI 4: Staff Accountability Actions */}
-          <Card className="border-amber-900/15 dark:border-amber-800/25 border-l-4 border-l-stone-600 dark:border-l-stone-400 bg-card/90 dark:bg-[#1a1411]/90 shadow-xs hover:border-stone-500/30 transition-all">
-            <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
+          {/* KPI 2: Active Staff */}
+          <Card className="border-border border-l-4 border-l-emerald-500 bg-card/90 dark:bg-[#1a1411]/90 shadow-xs hover:border-emerald-500/30 transition-all p-4 space-y-1.5">
+            <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Accountability Activity
+                Active Staff
               </span>
-              <div className="flex size-8 items-center justify-center rounded-lg bg-stone-500/10 text-stone-700 dark:text-stone-300">
-                <Activity className="size-4" aria-hidden />
+              <div className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="size-4" aria-hidden />
               </div>
-            </CardHeader>
-            <CardContent className="p-4 pt-0 space-y-2">
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-display text-2xl font-bold text-foreground">
-                  {data ? data.activities.length : "—"}
-                </span>
-                <span className="text-xs font-medium text-muted-foreground">Recorded Actions</span>
+            </div>
+            <p className="font-display text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+              {data ? data.activeStaffCount : "—"}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              Authorized to log in & perform operations
+            </p>
+          </Card>
+
+          {/* KPI 3: Inactive Staff */}
+          <Card className="border-border border-l-4 border-l-stone-500 bg-card/90 dark:bg-[#1a1411]/90 shadow-xs hover:border-stone-500/30 transition-all p-4 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Inactive Staff
+              </span>
+              <div className="flex size-8 items-center justify-center rounded-lg bg-stone-500/10 text-stone-600 dark:text-stone-300">
+                <XCircle className="size-4" aria-hidden />
               </div>
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>
-                  <strong>{data?.workload.recentlyRejectedItems.length ?? 0}</strong> rejections
-                  logged
-                </span>
-              </div>
-              <p className="text-[10px] text-muted-foreground border-t border-border/60 pt-1.5 leading-snug">
-                Combined waiter decisions, transitions, cashier reviews & audits.
-              </p>
-            </CardContent>
+            </div>
+            <p className="font-display text-2xl font-bold tracking-tight text-muted-foreground">
+              {data ? data.inactiveStaffCount : "—"}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              Deactivated accounts (records preserved)
+            </p>
           </Card>
         </div>
       </section>
@@ -1128,7 +1247,7 @@ function RekikStaffMonitoringPage() {
                   aria-hidden
                 />
                 <Input
-                  placeholder="Search staff by name, email, phone, or role…"
+                  placeholder="Search staff by name, Staff ID, phone, or role..."
                   value={staffSearchQuery}
                   onChange={(e) => setStaffSearchQuery(e.target.value)}
                   className="pl-9 h-9 text-xs"
@@ -1198,7 +1317,7 @@ function RekikStaffMonitoringPage() {
                         Staff Member
                       </TableHead>
                       <TableHead className="font-semibold uppercase tracking-wider">
-                        Email Address
+                        Staff ID
                       </TableHead>
                       <TableHead className="font-semibold uppercase tracking-wider">
                         Assigned Role
@@ -1230,23 +1349,18 @@ function RekikStaffMonitoringPage() {
                         className="cursor-pointer hover:bg-muted/30 transition-colors"
                         onClick={() => setSelectedStaffUserId(staff.userId)}
                       >
-                        {/* Name & ID */}
+                        {/* Name */}
                         <TableCell>
                           <div className="flex flex-col">
                             <span className="font-medium text-foreground">{staff.fullName}</span>
-                            <span className="font-mono text-[10px] text-muted-foreground">
-                              ID: {staff.userId.slice(0, 8)}…
-                            </span>
                           </div>
                         </TableCell>
 
-                        {/* Email Address */}
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {staff.email ? (
-                            <span className="text-foreground">{staff.email}</span>
-                          ) : (
-                            <span className="text-muted-foreground italic">No email</span>
-                          )}
+                        {/* Staff ID */}
+                        <TableCell>
+                          <Badge variant="outline" className="font-mono text-xs font-semibold bg-primary/5 text-primary border-primary/20">
+                            {staff.staffId || "—"}
+                          </Badge>
                         </TableCell>
 
                         {/* Role */}
@@ -1318,60 +1432,22 @@ function RekikStaffMonitoringPage() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  className={cn(
-                                    "h-7 px-2 text-xs font-medium",
-                                    staff.isActive
-                                      ? "border-amber-500/30 text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400"
-                                      : "border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400",
-                                  )}
-                                  onClick={() => {
-                                    setStatusConfirmStaff(staff);
-                                    setStatusActionType(staff.isActive ? "deactivate" : "activate");
-                                  }}
-                                  aria-label={`${staff.isActive ? "Deactivate" : "Activate"} staff member ${staff.fullName}`}
+                                  className="h-7 px-2.5 text-xs font-medium border-border/80 text-foreground hover:bg-muted inline-flex items-center gap-1.5 shadow-2xs"
+                                  onClick={() => setEditingStaff(staff)}
+                                  aria-label={`Edit staff member ${staff.fullName}`}
                                 >
-                                  {staff.isActive ? (
-                                    <>
-                                      <XCircle className="size-3 mr-1" />
-                                      Deactivate
-                                    </>
-                                  ) : (
-                                    <>
-                                      <CheckCircle2 className="size-3 mr-1" />
-                                      Activate
-                                    </>
-                                  )}
-                                </Button>
-                              )}
-                            {isAdmin &&
-                              (staff.role.toLowerCase() === "waiter" ||
-                                staff.role.toLowerCase() === "cashier") && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs font-medium border-border/80 text-foreground hover:bg-muted"
-                                  onClick={() => {
-                                    setPasswordEditStaff(staff);
-                                    setEditNewPassword("");
-                                    setEditConfirmPassword("");
-                                    setShowNewPassword(false);
-                                    setShowConfirmPassword(false);
-                                    setPasswordError(null);
-                                  }}
-                                  aria-label={`Edit password for ${staff.fullName}`}
-                                >
-                                  <KeyRound className="size-3 mr-1 text-primary" />
-                                  Password
+                                  <Edit className="size-3 text-primary" />
+                                  <span>Edit</span>
                                 </Button>
                               )}
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2 text-xs text-primary hover:text-primary"
+                              className="h-7 px-2 text-xs text-primary hover:text-primary inline-flex items-center gap-1"
                               onClick={() => setSelectedStaffUserId(staff.userId)}
                             >
-                              <Eye className="size-3.5 mr-1" />
-                              Workload
+                              <Eye className="size-3.5" />
+                              <span>Workload</span>
                             </Button>
                           </div>
                         </TableCell>
@@ -1384,6 +1460,166 @@ function RekikStaffMonitoringPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* ── 3. SECONDARY SECTION: CUSTOMER OVERVIEW ────────────────────── */}
+      <section
+        id="customers"
+        aria-labelledby="customer-overview-heading"
+        className="mt-8 pt-8 border-t border-amber-900/15 dark:border-amber-800/25 space-y-5"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2
+                id="customer-overview-heading"
+                className="font-display text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2"
+              >
+                <Users className="size-5 text-amber-700 dark:text-amber-400" />
+                <span>Customer Overview</span>
+              </h2>
+              <Badge variant="secondary" className="text-xs">
+                Secondary Section
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Customer relationship metrics and order history derived from verified customer checkout records.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Search customers or phone…"
+                value={customerSearchQuery}
+                onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                className="h-8 text-xs pl-8 w-[200px] sm:w-[240px]"
+                aria-label="Search customer overview"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Customer Metrics */}
+        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Card 1: Total Customers */}
+          <Card className="border-border bg-card/70 p-4 space-y-1 shadow-xs">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Total Customers
+            </span>
+            <p className="font-display text-2xl font-bold text-foreground">
+              {customerMetrics.totalCustomers}
+            </p>
+            <p className="text-[11px] text-muted-foreground">Registered and ordering customers</p>
+          </Card>
+
+          {/* Card 2: Active Customers */}
+          <Card className="border-border bg-card/70 p-4 space-y-1 shadow-xs border-l-2 border-l-emerald-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+              <span>Active Customers</span>
+              <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            </span>
+            <p className="font-display text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              {customerMetrics.activeCustomers}
+            </p>
+            <p className="text-[11px] text-muted-foreground">Active in the last 30 days</p>
+          </Card>
+
+          {/* Card 3: Total Orders */}
+          <Card className="border-border bg-card/70 p-4 space-y-1 shadow-xs">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Total Customer Orders
+            </span>
+            <p className="font-display text-2xl font-bold text-foreground">
+              {customerMetrics.totalOrders}
+            </p>
+            <p className="text-[11px] text-muted-foreground">Associated customer orders</p>
+          </Card>
+
+          {/* Card 4: Total Customer Spending */}
+          <Card className="border-border bg-card/70 p-4 space-y-1 shadow-xs border-l-2 border-l-gold">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Total Verified Spending
+            </span>
+            <p className="font-display text-2xl font-bold text-primary font-mono">
+              {formatETB(customerMetrics.totalSpending)}
+            </p>
+            <p className="text-[11px] text-muted-foreground">Successful paid payments only</p>
+          </Card>
+        </div>
+
+        {/* Customer Table */}
+        <div className="surface-card overflow-hidden rounded-xl border border-border">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader className="bg-muted/40">
+                <TableRow>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wider">Customer</TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wider">Phone</TableHead>
+                  <TableHead className="text-center text-xs font-semibold uppercase tracking-wider">Orders</TableHead>
+                  <TableHead className="text-right text-xs font-semibold uppercase tracking-wider">Verified Spending</TableHead>
+                  <TableHead className="text-xs font-semibold uppercase tracking-wider">Most Recent Order</TableHead>
+                  <TableHead className="text-right text-xs font-semibold uppercase tracking-wider">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="text-xs">
+                {filteredCustomers.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                      No customer records found matching your query.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredCustomers.map((cust) => (
+                    <TableRow
+                      key={cust.id}
+                      className="cursor-pointer hover:bg-muted/30 transition-colors"
+                      onClick={() => setSelectedCustomerId(cust.id)}
+                    >
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground">{cust.name}</span>
+                          {cust.isRecent && (
+                            <Badge variant="outline" className="text-[10px] py-0 px-1.5 text-emerald-600 border-emerald-500/30">
+                              Active
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-muted-foreground">
+                        {maskPhone(cust.phone)}
+                      </TableCell>
+                      <TableCell className="text-center font-medium">
+                        {cust.orderCount}
+                      </TableCell>
+                      <TableCell className="text-right font-mono font-semibold text-primary">
+                        {formatETB(cust.totalSpent)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatCustomerRelativeDate(cust.lastOrderDate)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-primary inline-flex items-center gap-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedCustomerId(cust.id);
+                          }}
+                        >
+                          <Eye className="size-3.5" />
+                          <span>Inspect</span>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </section>
 
       {/* ── 4. STAFF WORKLOAD & INSPECTION SHEET (DRAWER) ───────────────────── */}
       <Sheet
@@ -1712,6 +1948,7 @@ function RekikStaffMonitoringPage() {
             if (!open) {
               setRegisterError(null);
               setRegisterSuccess(null);
+              setNewlyCreatedStaff(null);
             }
           }
         }}
@@ -1728,6 +1965,75 @@ function RekikStaffMonitoringPage() {
             </DialogDescription>
           </DialogHeader>
 
+          {newlyCreatedStaff ? (
+            <div className="space-y-4 pt-2">
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5 text-foreground space-y-4">
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold text-base">
+                  <CheckCircle2 className="size-5 shrink-0" />
+                  <span>Staff account created successfully!</span>
+                </div>
+
+                <div className="rounded-lg bg-background/90 border border-border/80 p-3 space-y-2.5 text-xs shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground font-medium">Name:</span>
+                    <span className="font-semibold text-foreground">{newlyCreatedStaff.name}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground font-medium">Role:</span>
+                    <span className="font-semibold text-foreground">{newlyCreatedStaff.role}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-border/60">
+                    <span className="text-muted-foreground font-medium">Staff ID:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-sm text-primary px-2.5 py-0.5 rounded-md bg-primary/10 border border-primary/20">
+                        {newlyCreatedStaff.staffId}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs gap-1"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(newlyCreatedStaff.staffId);
+                          toast.success(`Copied Staff ID ${newlyCreatedStaff.staffId} to clipboard!`);
+                        }}
+                      >
+                        <Copy className="size-3" />
+                        <span>Copy</span>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground">
+                  Give this Staff ID to the staff member. They will use this Staff ID and their password to log in.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/60">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setNewlyCreatedStaff(null)}
+                >
+                  Register Another Staff
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
+                  onClick={() => {
+                    setNewlyCreatedStaff(null);
+                    setIsRegisterDialogOpen(false);
+                  }}
+                >
+                  Done
+                </Button>
+              </div>
+            </div>
+          ) : (
           <div className="space-y-4 pt-2">
             {/* Separate Role Selector Control (Outside the 3 registration fields) */}
             <div className="rounded-lg border border-border/80 bg-muted/40 p-3 space-y-2">
@@ -1961,6 +2267,7 @@ function RekikStaffMonitoringPage() {
               </div>
             </form>
           </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -2492,6 +2799,294 @@ function RekikStaffMonitoringPage() {
           </form>
         </DialogContent>
       </Dialog>
+      {/* ── 9. EDIT STAFF DIALOG (DELETE & DEACTIVATE OPTIONS) ─────────── */}
+      <Dialog open={editingStaff !== null} onOpenChange={(open) => !open && setEditingStaff(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center justify-between pr-4">
+              <DialogTitle className="font-display text-lg font-bold flex items-center gap-2">
+                <Edit className="size-4 text-primary" />
+                <span>Manage Staff Account</span>
+              </DialogTitle>
+              {editingStaff && <StaffRoleBadge role={editingStaff.role} />}
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Select an action to modify account status or safely remove this staff member.
+            </DialogDescription>
+          </DialogHeader>
+
+          {editingStaff && (
+            <div className="space-y-4 py-2">
+              {/* Staff Profile Card */}
+              <div className="rounded-xl border border-border bg-card/60 p-3.5 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Staff Member:</span>
+                  <span className="font-semibold text-foreground text-sm">{editingStaff.fullName}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Email Address:</span>
+                  <span className="font-mono text-foreground">{editingStaff.email || "—"}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Role:</span>
+                  <span className="capitalize font-medium">{editingStaff.role}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Current Status:</span>
+                  {editingStaff.isActive ? (
+                    <Badge variant="outline" className="text-emerald-600 border-emerald-500/30 text-[10px] gap-1">
+                      <CheckCircle2 className="size-2.5" /> Active
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="text-[10px] gap-1 text-muted-foreground">
+                      <XCircle className="size-2.5" /> Inactive
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {/* Action 1: Deactivate / Reactivate */}
+              <div className="rounded-xl border border-border/80 p-3.5 space-y-2 bg-background">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      {editingStaff.isActive ? (
+                        <>
+                          <XCircle className="size-3.5 text-amber-600" />
+                          <span>Deactivate Staff Account</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="size-3.5 text-emerald-600" />
+                          <span>Reactivate Staff Account</span>
+                        </>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                      {editingStaff.isActive
+                        ? "Temporarily blocks system login and disables waiter/cashier operations while safely preserving all historical records."
+                        : "Restores login credentials and allows this staff member to resume operational duties."}
+                    </p>
+                  </div>
+                  <Button
+                    variant={editingStaff.isActive ? "outline" : "default"}
+                    size="sm"
+                    className={cn(
+                      "h-8 text-xs shrink-0 font-medium",
+                      editingStaff.isActive
+                        ? "border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300"
+                        : "bg-emerald-600 hover:bg-emerald-700 text-white",
+                    )}
+                    onClick={() => {
+                      setStatusConfirmStaff(editingStaff);
+                      setStatusActionType(editingStaff.isActive ? "deactivate" : "activate");
+                    }}
+                  >
+                    {editingStaff.isActive ? "Deactivate" : "Reactivate"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Action 2: Delete Staff */}
+              <div className="rounded-xl border border-destructive/30 p-3.5 space-y-2 bg-destructive/5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-destructive flex items-center gap-1.5">
+                      <Trash2 className="size-3.5 text-destructive" />
+                      <span>Delete Staff Account</span>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                      Permanently removes the account. Historical orders, payments, and approvals are preserved for business audit integrity.
+                    </p>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-8 text-xs shrink-0 font-medium"
+                    onClick={() => {
+                      setDeleteConfirmStaff(editingStaff);
+                    }}
+                  >
+                    <Trash2 className="size-3 mr-1" />
+                    Delete
+                  </Button>
+                </div>
+              </div>
+
+              {/* Action 3: Password Update */}
+              {(editingStaff.role.toLowerCase() === "waiter" ||
+                editingStaff.role.toLowerCase() === "cashier") && (
+                <div className="rounded-xl border border-border/80 p-3.5 space-y-2 bg-background">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <KeyRound className="size-3.5 text-primary" />
+                        <span>Reset Password</span>
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                        Update credentials securely via Supabase Auth without plaintext exposure.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs shrink-0"
+                      onClick={() => {
+                        setPasswordEditStaff(editingStaff);
+                        setEditNewPassword("");
+                        setEditConfirmPassword("");
+                        setShowNewPassword(false);
+                        setShowConfirmPassword(false);
+                        setPasswordError(null);
+                      }}
+                    >
+                      Password
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setEditingStaff(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 10. DELETE STAFF CONFIRMATION DIALOG ─────────────────────────── */}
+      <AlertDialog
+        open={deleteConfirmStaff !== null}
+        onOpenChange={(open) => !open && setDeleteConfirmStaff(null)}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive mb-2">
+              <Trash2 className="size-6" />
+            </div>
+            <AlertDialogTitle className="font-display text-center text-lg font-bold text-destructive">
+              Delete Staff Account
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground text-center space-y-2.5">
+              <span>
+                Are you sure you want to remove the staff account for{" "}
+                <strong className="text-foreground">{deleteConfirmStaff?.fullName}</strong> (
+                <span className="capitalize">{deleteConfirmStaff?.role}</span>)?
+              </span>
+              <div className="rounded-lg border border-amber-900/20 bg-amber-500/10 p-2.5 text-left text-[11px] text-amber-900 dark:text-amber-200">
+                <span className="font-semibold flex items-center gap-1 mb-1">
+                  <ShieldCheck className="size-3.5 text-amber-700 dark:text-amber-400" />
+                  <span>Safe Business Record Retention:</span>
+                </span>
+                <span className="leading-relaxed block">
+                  Rekik Café strictly protects financial and operational history. If this staff member has handled customer orders, cash reviews, or approvals, those records remain permanently intact in the database while login credentials and active directory profiles are revoked.
+                </span>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:justify-center gap-2 pt-2">
+            <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmDeleteStaff();
+              }}
+              disabled={deleteLoading}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground font-semibold"
+            >
+              {deleteLoading ? (
+                <>
+                  <RefreshCw className="size-3.5 mr-1.5 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Yes, Delete Account"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── 11. CUSTOMER INSPECTION SHEET (DRAWER) ───────────────────────── */}
+      <Sheet
+        open={selectedCustomerId !== null}
+        onOpenChange={(open) => !open && setSelectedCustomerId(null)}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto p-6 flex flex-col gap-5">
+          {selectedCustomer ? (
+            <>
+              <SheetHeader className="text-left space-y-1.5 pb-4 border-b border-border">
+                <div className="flex items-center justify-between pr-4">
+                  <SheetTitle className="font-display text-xl font-bold">
+                    {selectedCustomer.name}
+                  </SheetTitle>
+                  {selectedCustomer.isRecent ? (
+                    <Badge variant="outline" className="text-emerald-600 border-emerald-500/30 text-xs">
+                      Active Customer
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="text-xs">
+                      Inactive
+                    </Badge>
+                  )}
+                </div>
+                <SheetDescription className="text-xs text-muted-foreground">
+                  Contact: <span className="font-mono">{selectedCustomer.phone}</span>
+                </SheetDescription>
+              </SheetHeader>
+
+              {/* Summary KPIs */}
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1">
+                  <span className="text-muted-foreground text-[10px] uppercase font-semibold">Total Orders</span>
+                  <p className="text-lg font-bold font-display">{selectedCustomer.orderCount}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1">
+                  <span className="text-muted-foreground text-[10px] uppercase font-semibold">Verified Spending</span>
+                  <p className="text-lg font-bold font-mono text-primary">{formatETB(selectedCustomer.totalSpent)}</p>
+                </div>
+              </div>
+
+              {/* Order History */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Recent Orders ({selectedCustomer.orders.length})
+                </h4>
+                <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                  {selectedCustomer.orders.map((ord) => (
+                    <div key={ord.id} className="rounded-xl border border-border bg-card/50 p-3 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-foreground font-mono">{ord.number}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {ord.status}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                        <span>{formatCustomerFullDateTime(ord.createdAt)}</span>
+                        <span className="font-mono font-medium text-foreground">{formatETB(ord.total)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground border-t border-border/40 pt-1">
+                        <span>Payment: {ord.paymentStatus}</span>
+                        <span className="capitalize">{ord.method}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <Button variant="outline" size="sm" className="w-full" onClick={() => setSelectedCustomerId(null)}>
+                  Close Inspection
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="p-8 text-center text-sm text-muted-foreground">No customer selected</div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

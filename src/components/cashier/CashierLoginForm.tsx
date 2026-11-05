@@ -5,11 +5,10 @@ import {
   Eye,
   EyeOff,
   Lock,
-  Mail,
+  UserCheck,
   AlertCircle,
   ArrowRight,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,9 +22,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { supabase } from "@/lib/supabase";
-import { fetchCashierMe } from "@/services/cashier";
+import { cashierSupabase, supabase } from "@/lib/supabase";
 import type { CashierStaffProfile } from "@/lib/cashier";
+import { LanguageSelector } from "@/components/site/LanguageSelector";
+import { useTranslation } from "@/lib/i18n";
 
 interface CashierLoginFormProps {
   onSuccess: (profile: CashierStaffProfile) => void;
@@ -34,7 +34,8 @@ interface CashierLoginFormProps {
 
 export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFormProps) {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const { t } = useTranslation();
+  const [staffId, setStaffId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -42,10 +43,8 @@ export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFor
   const [redirectAdminNotice, setRedirectAdminNotice] = useState(false);
 
   const validate = (): string | null => {
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) return "Please enter your cashier email address.";
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(trimmedEmail)) return "Please enter a valid email address.";
+    const trimmedId = staffId.trim();
+    if (!trimmedId) return "Please enter your Staff ID.";
     if (!password) return "Please enter your password.";
     return null;
   };
@@ -64,62 +63,60 @@ export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFor
     setLoading(true);
 
     try {
-      // 1. Supabase Auth sign-in
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      const res = await fetch("/api/auth/staff-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          staffId: staffId.trim(),
+          password,
+          targetPortal: "cashier",
+        }),
       });
 
-      if (authError) {
-        if (authError.message.includes("Invalid login credentials")) {
-          setErrorMsg("Incorrect email or password. Please verify your credentials.");
-        } else if (authError.message.includes("Email not confirmed")) {
-          setErrorMsg("Your email has not been verified yet. Please check your inbox.");
-        } else {
-          setErrorMsg(authError.message);
-        }
-        setLoading(false);
-        return;
-      }
+      const json = await res.json().catch(() => ({}));
 
-      if (!authData.user) {
-        setErrorMsg("Failed to authenticate user. Please try again.");
-        setLoading(false);
-        return;
-      }
-
-      // 2. Authoritative role check via server API /api/cashier/me
-      const meResult = await fetchCashierMe();
-
-      if (!meResult.success) {
-        // Sign out if role check fails so no rogue sessions linger
-        await supabase.auth.signOut();
-
-        if (meResult.status === "inactive") {
-          setErrorMsg("Your staff account is currently inactive. Please contact the café manager.");
-        } else if (meResult.status === "role_mismatch") {
-          if (meResult.role === "admin") {
+      if (!res.ok) {
+        if (json.status === "deactivated") {
+          setErrorMsg(t("error.deactivated", "Your account has been deactivated."));
+        } else if (json.status === "role_mismatch") {
+          if (json.role === "admin") {
             setRedirectAdminNotice(true);
             setErrorMsg(
               "This account has Administrator privileges. Cashier dashboard is for cashier staff.",
             );
-          } else if (meResult.role === "waiter") {
-            setErrorMsg("Waiters do not have cashier authorization. Please use the Waiter portal.");
           } else {
-            setErrorMsg("Your account does not have cashier permissions.");
+            setErrorMsg(t("error.roleMismatch", "You do not have permission to access this portal."));
           }
-        } else if (meResult.status === "no_profile") {
-          setErrorMsg("No staff profile found for this account. Access denied.");
+        } else if (json.status === "not_found") {
+          setErrorMsg(t("error.notFound", "Your Staff ID could not be found."));
         } else {
-          setErrorMsg(meResult.message || "Access denied.");
+          setErrorMsg(json.message || json.error || t("error.invalidCredentials", "Invalid Staff ID or password."));
         }
-
         setLoading(false);
         return;
       }
 
-      toast.success(`Welcome back, ${meResult.profile.full_name}!`);
-      onSuccess(meResult.profile);
+      if (json.session) {
+        await cashierSupabase.auth.setSession({
+          access_token: json.session.access_token,
+          refresh_token: json.session.refresh_token,
+        });
+      }
+
+      const cashierProfile: CashierStaffProfile = {
+        user_id: json.profile.userId,
+        full_name: json.profile.fullName,
+        role: json.profile.role,
+        phone: json.profile.phone,
+        is_active: json.profile.isActive,
+        is_available: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        email: json.user?.email || "",
+      };
+
+      toast.success(`Welcome back, ${json.profile.fullName}!`);
+      onSuccess(cashierProfile);
       void navigate({ to: "/casher" });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Network error. Please try again.";
@@ -130,19 +127,16 @@ export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFor
     }
   };
 
-  const handleFillDemo = () => {
-    setEmail("cashier@rekikcafe.com");
-    setPassword("Password123!");
-    setErrorMsg(null);
-  };
-
   return (
     <div className="flex min-h-[calc(100vh-10rem)] items-center justify-center p-4">
       <Card className="w-full max-w-md border border-[#EAE3D9] shadow-xl bg-white rounded-3xl overflow-hidden">
         {/* Top Accent Strip */}
         <div className="h-2 w-full bg-gradient-to-r from-[#1B110B] via-[#C8102E] to-[#E8A87C]" />
 
-        <CardHeader className="space-y-3 text-center pt-8 pb-6 bg-[#FAF7F2]/60">
+        <CardHeader className="space-y-3 text-center pt-8 pb-6 bg-[#FAF7F2]/60 relative">
+          <div className="absolute right-4 top-4">
+            <LanguageSelector variant="compact" />
+          </div>
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#1B110B] text-[#E8A87C] shadow-md ring-4 ring-[#EAE3D9]">
             <Coffee className="h-7 w-7" />
           </div>
@@ -155,7 +149,7 @@ export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFor
               Rekik Café
             </CardTitle>
             <CardDescription className="text-xs text-[#70645C] mt-1 max-w-xs mx-auto">
-              Sign in to review payment proofs, verify transactions, and authorize kitchen orders
+              Sign in with your Staff ID to review payment proofs, verify transactions, and authorize kitchen orders
             </CardDescription>
           </div>
         </CardHeader>
@@ -186,20 +180,20 @@ export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFor
             )}
 
             <div className="space-y-1.5">
-              <Label htmlFor="cashier-email" className="text-xs font-semibold text-[#2A1810]">
-                Cashier Email Address
+              <Label htmlFor="cashier-staff-id" className="text-xs font-semibold text-[#2A1810]">
+                Staff ID
               </Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8C7A6E]" />
+                <UserCheck className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8C7A6E]" />
                 <Input
-                  id="cashier-email"
-                  type="email"
-                  autoComplete="email"
+                  id="cashier-staff-id"
+                  type="text"
+                  autoComplete="username"
                   required
-                  placeholder="cashier@rekikcafe.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-9 h-11 bg-[#FAF7F2] border-[#EAE3D9] text-[#2A1810] rounded-xl text-sm placeholder:text-[#8C7A6E]"
+                  placeholder="e.g. RK-001"
+                  value={staffId}
+                  onChange={(e) => setStaffId(e.target.value)}
+                  className="pl-9 h-11 bg-[#FAF7F2] border-[#EAE3D9] text-[#2A1810] rounded-xl text-sm placeholder:text-[#8C7A6E] font-medium"
                   disabled={loading}
                 />
               </div>
@@ -233,18 +227,6 @@ export function CashierLoginForm({ onSuccess, onRedirectAdmin }: CashierLoginFor
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-            </div>
-
-            {/* Quick Demo Autofill Helper */}
-            <div className="pt-1 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={handleFillDemo}
-                className="text-xs text-[#8C7A6E] hover:text-[#2A1810] flex items-center gap-1 font-medium transition-colors"
-              >
-                <Sparkles className="h-3.5 w-3.5 text-amber-600" />
-                Fill Demo Cashier Credentials
-              </button>
             </div>
           </CardContent>
 
