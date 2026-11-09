@@ -15,7 +15,8 @@
   },
   "overrides": {
     "rolldown": "1.2.1",
-    "@tanstack/start-server-core": ">=1.169.39"
+    "@tanstack/start-server-core": ">=1.169.39",
+    "@tanstack/react-start": "$@tanstack/react-start"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
