@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Search, Filter, User, ChevronRight, RotateCcw, Inbox } from "lucide-react";
+import { Search, Filter, User, ChevronRight, RotateCcw, Inbox, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { PendingPaymentReviewItem } from "@/lib/cashier";
@@ -7,6 +7,7 @@ import type { PendingPaymentReviewItem } from "@/lib/cashier";
 interface PendingReviewsListProps {
   items: PendingPaymentReviewItem[];
   loading: boolean;
+  error?: string | null;
   onViewProof: (item: PendingPaymentReviewItem) => void;
   onApprove: (item: PendingPaymentReviewItem) => void;
   onReject: (item: PendingPaymentReviewItem) => void;
@@ -44,6 +45,7 @@ function formatCurrency(amount: number): string {
 export function PendingReviewsList({
   items,
   loading,
+  error,
   onViewProof,
   onRefresh,
 }: PendingReviewsListProps) {
@@ -223,9 +225,15 @@ export function PendingReviewsList({
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5 text-xs text-[#5C4538] truncate">
+                    <div className="flex items-center gap-1.5 text-xs text-[#5C4538] truncate flex-wrap">
                       <User className="h-3 w-3 shrink-0 text-[#8C7A6E]" />
                       <span className="truncate">{item.customer_name}</span>
+                      {item.waiter_name && (
+                        <>
+                          <span className="text-[#8A7B70]">•</span>
+                          <span className="text-[#5C4538]">Waiter: {item.waiter_name}</span>
+                        </>
+                      )}
                       <span className="text-[#8A7B70]">•</span>
                       <span className="font-semibold text-[#2A1810]">
                         Payment Method: {isCash ? "💵 Cash" : item.payment_method}
@@ -257,6 +265,21 @@ export function PendingReviewsList({
               </div>
             );
           })
+        ) : error ? (
+          <div className="p-8 text-center bg-red-50 rounded-2xl border border-red-200 space-y-3">
+            <AlertCircle className="h-8 w-8 text-red-600 mx-auto" />
+            <div className="text-sm font-semibold text-red-800">Unable to Load Review Queue</div>
+            <p className="text-xs text-[#70645C] max-w-md mx-auto">{error}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRefresh}
+              className="mt-2 border-red-300 text-red-700 hover:bg-red-100"
+            >
+              <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Retry
+            </Button>
+          </div>
         ) : (
           <div className="p-8 text-center bg-[#EDE7DD] rounded-2xl border border-[#DFD6C8] space-y-2">
             <Inbox className="h-8 w-8 text-[#8C7A6E] mx-auto" />

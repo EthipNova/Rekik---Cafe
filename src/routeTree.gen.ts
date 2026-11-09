@@ -44,6 +44,7 @@ import { Route as ProductIdRouteImport } from './routes/product.$id'
 import { Route as WaiterIndexRouteImport } from './routes/waiter.index'
 import { Route as WaiterAccountRouteImport } from './routes/waiter.account'
 import { Route as WaiterHistoryRouteImport } from './routes/waiter.history'
+import { Route as WaiterMenuRouteImport } from './routes/waiter.menu'
 import { Route as WaiterNotificationsRouteImport } from './routes/waiter.notifications'
 import { Route as WaiterOrdersRouteImport } from './routes/waiter.orders'
 import { Route as WaiterPaymentsRouteImport } from './routes/waiter.payments'
@@ -223,6 +224,11 @@ const WaiterHistoryRoute = WaiterHistoryRouteImport.update({
   path: '/history',
   getParentRoute: () => WaiterRoute,
 } as any)
+const WaiterMenuRoute = WaiterMenuRouteImport.update({
+  id: '/menu',
+  path: '/menu',
+  getParentRoute: () => WaiterRoute,
+} as any)
 const WaiterNotificationsRoute = WaiterNotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
@@ -272,6 +278,7 @@ export interface FileRoutesByFullPath {
   '/product/$id': typeof ProductIdRoute
   '/waiter/account': typeof WaiterAccountRoute
   '/waiter/history': typeof WaiterHistoryRoute
+  '/waiter/menu': typeof WaiterMenuRoute
   '/waiter/notifications': typeof WaiterNotificationsRoute
   '/waiter/orders': typeof WaiterOrdersRoute
   '/waiter/payments': typeof WaiterPaymentsRoute
@@ -310,6 +317,7 @@ export interface FileRoutesByTo {
   '/product/$id': typeof ProductIdRoute
   '/waiter/account': typeof WaiterAccountRoute
   '/waiter/history': typeof WaiterHistoryRoute
+  '/waiter/menu': typeof WaiterMenuRoute
   '/waiter/notifications': typeof WaiterNotificationsRoute
   '/waiter/orders': typeof WaiterOrdersRoute
   '/waiter/payments': typeof WaiterPaymentsRoute
@@ -351,6 +359,7 @@ export interface FileRoutesById {
   '/product/$id': typeof ProductIdRoute
   '/waiter/account': typeof WaiterAccountRoute
   '/waiter/history': typeof WaiterHistoryRoute
+  '/waiter/menu': typeof WaiterMenuRoute
   '/waiter/notifications': typeof WaiterNotificationsRoute
   '/waiter/orders': typeof WaiterOrdersRoute
   '/waiter/payments': typeof WaiterPaymentsRoute
@@ -393,6 +402,7 @@ export interface FileRouteTypes {
     | '/product/$id'
     | '/waiter/account'
     | '/waiter/history'
+    | '/waiter/menu'
     | '/waiter/notifications'
     | '/waiter/orders'
     | '/waiter/payments'
@@ -431,6 +441,7 @@ export interface FileRouteTypes {
     | '/product/$id'
     | '/waiter/account'
     | '/waiter/history'
+    | '/waiter/menu'
     | '/waiter/notifications'
     | '/waiter/orders'
     | '/waiter/payments'
@@ -471,6 +482,7 @@ export interface FileRouteTypes {
     | '/product/$id'
     | '/waiter/account'
     | '/waiter/history'
+    | '/waiter/menu'
     | '/waiter/notifications'
     | '/waiter/orders'
     | '/waiter/payments'
@@ -745,6 +757,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WaiterHistoryRouteImport
       parentRoute: typeof WaiterRoute
     }
+    '/waiter/menu': {
+      id: '/waiter/menu'
+      path: '/menu'
+      fullPath: '/waiter/menu'
+      preLoaderRoute: typeof WaiterMenuRouteImport
+      parentRoute: typeof WaiterRoute
+    }
     '/waiter/notifications': {
       id: '/waiter/notifications'
       path: '/notifications'
@@ -812,6 +831,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 interface WaiterRouteChildren {
   WaiterAccountRoute: typeof WaiterAccountRoute
   WaiterHistoryRoute: typeof WaiterHistoryRoute
+  WaiterMenuRoute: typeof WaiterMenuRoute
   WaiterNotificationsRoute: typeof WaiterNotificationsRoute
   WaiterOrdersRoute: typeof WaiterOrdersRoute
   WaiterPaymentsRoute: typeof WaiterPaymentsRoute
@@ -821,6 +841,7 @@ interface WaiterRouteChildren {
 const WaiterRouteChildren: WaiterRouteChildren = {
   WaiterAccountRoute: WaiterAccountRoute,
   WaiterHistoryRoute: WaiterHistoryRoute,
+  WaiterMenuRoute: WaiterMenuRoute,
   WaiterNotificationsRoute: WaiterNotificationsRoute,
   WaiterOrdersRoute: WaiterOrdersRoute,
   WaiterPaymentsRoute: WaiterPaymentsRoute,

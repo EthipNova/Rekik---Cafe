@@ -160,6 +160,7 @@ function normalizeCategory(raw: any): Category {
     name: raw.name,
     tagline: raw.description || raw.tagline || "",
     active: raw.is_active ?? true,
+    imageUrl: raw.image_url || null,
   };
 }
 
@@ -341,7 +342,7 @@ export async function getCategories(): Promise<Category[]> {
   try {
     const { data, error } = await supabase
       .from("categories" as any)
-      .select("id, slug, name, description, is_active, sort_order, created_at")
+      .select("id, slug, name, description, image_url, is_active, sort_order, created_at")
       .order("sort_order", { ascending: true });
 
     if (!error && Array.isArray(data) && data.length > 0) {

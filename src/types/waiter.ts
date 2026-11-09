@@ -145,3 +145,29 @@ export interface WaiterMetrics {
   todayTotalRevenue: number;
   totalAssignedActive: number;
 }
+
+
+export interface ManualWaiterOrderItemInput {
+  productId: string;
+  name?: string | undefined;
+  quantity: number;
+  notes?: string | undefined;
+}
+
+export interface CreateManualWaiterOrderInput {
+  items: ManualWaiterOrderItemInput[];
+  method: "dine_in" | "takeaway" | "delivery";
+  tableNumber?: string | null | undefined;
+  customerName?: string | null | undefined;
+  customerPhone?: string | null | undefined;
+  deliveryAddress?: string | null | undefined;
+  customerNotes?: string | null | undefined;
+  initialPaymentMethod?: string | null | undefined;
+}
+
+export interface CustomerLookupResult {
+  id: string;
+  name: string;
+  phone: string;
+  orderCount: number;
+}

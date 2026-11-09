@@ -20,6 +20,7 @@ export type Category = {
   name: string;
   tagline: string;
   active: boolean;
+  imageUrl?: string | null | undefined;
 };
 
 export type Product = {

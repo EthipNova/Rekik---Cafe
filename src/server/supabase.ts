@@ -96,5 +96,19 @@ export const serverSupabase = createClient(supabaseUrl, supabaseKey, {
   },
 });
 
+/**
+ * Creates an isolated, ephemeral Supabase client strictly used for credential
+ * validation (e.g. signInWithPassword) so that the singleton serverSupabase
+ * client is never mutated or contaminated with user session tokens.
+ */
+export function createAuthVerificationClient() {
+  return createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
 /** True when the server client was initialized with the service-role key. */
 export const isServiceRoleClient = usingServiceRole;

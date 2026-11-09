@@ -265,6 +265,11 @@ export function PaymentProofModal({
                     <div className="font-semibold text-sm text-[#1A110D]">{customerName}</div>
                     {customerPhone && <div className="text-[#5C4538]">{customerPhone}</div>}
                     {customerEmail && <div className="text-[#8A7B70]">{customerEmail}</div>}
+                    {pendingItem?.waiter_name && (
+                      <div className="text-[#705446] font-medium pt-0.5">
+                        Assigned Waiter: <span className="font-semibold text-[#1A110D]">{pendingItem.waiter_name}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

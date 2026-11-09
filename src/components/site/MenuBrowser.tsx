@@ -111,12 +111,35 @@ export function MenuBrowser({
 
   return (
     <Section>
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary">Menu</p>
-        <h1 className="mt-3 text-4xl font-semibold">{current ? current.name : "Our full menu"}</h1>
-        <p className="mt-3 max-w-xl text-muted-foreground">
-          {current ? current.tagline : "Burgers, pizza, sides and drinks — freshly prepared."}
-        </p>
+      <header
+        className={cn(
+          "rounded-2xl transition-all",
+          current?.imageUrl
+            ? "relative overflow-hidden bg-espresso p-6 sm:p-8 text-warm-white shadow-md border border-gold/20"
+            : ""
+        )}
+      >
+        {current?.imageUrl && (
+          <div className="absolute inset-0 z-0">
+            <img
+              src={current.imageUrl}
+              alt={current.name}
+              className="h-full w-full object-cover opacity-30"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-espresso via-espresso/90 to-espresso/60" />
+          </div>
+        )}
+        <div className="relative z-10">
+          <p className={cn("text-xs font-semibold uppercase tracking-[0.22em]", current?.imageUrl ? "text-gold" : "text-primary")}>
+            Menu
+          </p>
+          <h1 className={cn("mt-3 text-3xl sm:text-4xl font-semibold", current?.imageUrl ? "text-warm-white" : "text-foreground")}>
+            {current ? current.name : "Our full menu"}
+          </h1>
+          <p className={cn("mt-3 max-w-xl", current?.imageUrl ? "text-cream/80" : "text-muted-foreground")}>
+            {current ? current.tagline : "Burgers, pizza, sides and drinks — freshly prepared."}
+          </p>
+        </div>
       </header>
 
       <div className="mt-8 flex flex-wrap gap-2">
@@ -137,13 +160,21 @@ export function MenuBrowser({
             to="/menu/$category"
             params={{ category: c.slug }}
             className={cn(
-              "rounded-full border px-4 py-2 text-sm font-medium transition-all shadow-2xs",
+              "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-all shadow-2xs",
               activeCategory === c.slug
                 ? "border-primary bg-primary text-primary-foreground font-semibold shadow-xs"
                 : "border-border/80 bg-cream/30 text-foreground/85 hover:bg-cream hover:text-primary hover:border-gold/40",
             )}
           >
-            {c.name}
+            {c.imageUrl && (
+              <img
+                src={c.imageUrl}
+                alt=""
+                className="size-4.5 rounded-full object-cover border border-white/20 shrink-0"
+                aria-hidden
+              />
+            )}
+            <span>{c.name}</span>
           </Link>
         ))}
       </div>

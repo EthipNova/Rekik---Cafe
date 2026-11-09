@@ -1,10 +1,12 @@
 import { supabase } from "./supabase";
+import { deleteCategoryImageFromStorage } from "./product-images";
 
 export type AdminCategory = {
   id: string;
   slug: string;
   name: string;
   tagline: string;
+  imageUrl?: string | null | undefined;
   active: boolean;
   productCount: number;
   createdAt?: string | undefined;
@@ -13,6 +15,14 @@ export type AdminCategory = {
 export type CreateCategoryInput = {
   name: string;
   tagline?: string | undefined;
+  imageUrl?: string | null | undefined;
+};
+
+export type UpdateCategoryInput = {
+  id: string;
+  name: string;
+  tagline?: string | undefined;
+  imageUrl?: string | null | undefined;
 };
 
 type RawCategoryRecord = {
@@ -21,6 +31,7 @@ type RawCategoryRecord = {
   name?: string;
   tagline?: string;
   description?: string;
+  image_url?: string | null;
   is_active?: boolean;
   created_at?: string;
   products?: { count: number | string }[];
@@ -130,6 +141,7 @@ function normalizeCategoryRecord(raw: RawCategoryRecord): AdminCategory {
     slug: raw?.slug ?? "",
     name: raw?.name ?? "",
     tagline: raw?.description ?? raw?.tagline ?? "",
+    imageUrl: raw?.image_url ?? null,
     active: Boolean(raw?.is_active),
     productCount,
     ...(raw?.created_at ? { createdAt: raw.created_at } : {}),
@@ -164,6 +176,7 @@ export async function createAdminCategory(input: CreateCategoryInput): Promise<{
       name: trimmedName,
       slug,
       description: input.tagline?.trim() || "New category",
+      image_url: input.imageUrl?.trim() || null,
       is_active: true,
     };
 
@@ -176,6 +189,7 @@ export async function createAdminCategory(input: CreateCategoryInput): Promise<{
         slug,
         name,
         description,
+        image_url,
         is_active,
         created_at
       `,
@@ -217,6 +231,78 @@ export async function createAdminCategory(input: CreateCategoryInput): Promise<{
 }
 
 /**
+ * Updates an existing category's name, tagline, and cover image URL in public.categories.
+ */
+export async function updateAdminCategory(input: UpdateCategoryInput): Promise<{
+  data: AdminCategory | null;
+  error: Error | null;
+}> {
+  try {
+    const trimmedName = input.name.trim();
+    if (!trimmedName) {
+      return { data: null, error: new Error("Category name is required.") };
+    }
+
+    const slug = generateCategorySlug(trimmedName);
+    const updatePayload: Record<string, unknown> = {
+      name: trimmedName,
+      slug,
+      description: input.tagline?.trim() || "",
+    };
+
+    if (input.imageUrl !== undefined) {
+      updatePayload["image_url"] = input.imageUrl?.trim() || null;
+    }
+
+    const { data, error } = await (supabase.from("categories" as any) as any)
+      .update(updatePayload)
+      .eq("id", input.id)
+      .select(
+        `
+        id,
+        slug,
+        name,
+        description,
+        image_url,
+        is_active,
+        created_at,
+        products (count)
+      `,
+      )
+      .single();
+
+    if (error) {
+      if (
+        error.code === "23505" ||
+        error.message?.includes("23505") ||
+        error.message?.toLowerCase().includes("duplicate") ||
+        error.message?.includes("categories_slug_key")
+      ) {
+        return {
+          data: null,
+          error: new Error("A category with this name already exists."),
+        };
+      }
+      return { data: null, error: new Error(error.message) };
+    }
+
+    if (!data) {
+      return { data: null, error: new Error("Category not found or update failed.") };
+    }
+
+    return {
+      data: normalizeCategoryRecord(data),
+      error: null,
+    };
+  } catch (err: unknown) {
+    return {
+      data: null,
+      error: err instanceof Error ? err : new Error("Failed to update category"),
+    };
+  }
+}
+
+/**
  * Fetches all categories relational to product counts from Supabase.
  */
 export async function fetchAdminCategories(): Promise<{
@@ -232,12 +318,13 @@ export async function fetchAdminCategories(): Promise<{
         slug,
         name,
         description,
+        image_url,
         is_active,
         created_at,
         products (count)
       `,
       )
-      .order("name", { ascending: true });
+      .order("sort_order", { ascending: true });
 
     if (error) {
       return { data: null, error: new Error(error.message) };
@@ -289,6 +376,7 @@ export async function toggleAdminCategoryActive(
  */
 export async function deleteAdminCategory(
   id: string,
+  existingImageUrl?: string | null,
 ): Promise<{ success: boolean; error: Error | null }> {
   try {
     const { error } = await categoryDb.from("categories").delete().eq("id", id);
@@ -310,6 +398,11 @@ export async function deleteAdminCategory(
       }
 
       return { success: false, error: new Error(error.message) };
+    }
+
+    // Safely remove associated cover image if present
+    if (existingImageUrl) {
+      void deleteCategoryImageFromStorage(existingImageUrl, id);
     }
 
     return { success: true, error: null };

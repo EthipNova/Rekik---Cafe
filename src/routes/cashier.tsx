@@ -69,6 +69,7 @@ export function CashierRoutePage() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   const [pendingItems, setPendingItems] = useState<PendingPaymentReviewItem[]>([]);
   const [historyItems, setHistoryItems] = useState<PaymentReviewHistoryItem[]>([]);
@@ -161,21 +162,42 @@ export function CashierRoutePage() {
   const loadDashboardData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoadingData(true);
+    setDataError(null);
+
+    let pendingErrMsg: string | null = null;
 
     try {
       const [pending, history, met, notifs] = await Promise.all([
-        fetchPendingReviews().catch(() => []),
-        fetchReviewHistory().catch(() => []),
-        fetchCashierMetrics().catch(() => null),
-        fetchCashierNotifications().catch(() => []),
+        fetchPendingReviews().catch((err: unknown) => {
+          console.error("[cashier] Failed to fetch pending reviews:", err);
+          pendingErrMsg = err instanceof Error ? err.message : String(err);
+          return [];
+        }),
+        fetchReviewHistory().catch((err: unknown) => {
+          console.error("[cashier] Failed to fetch review history:", err);
+          return [];
+        }),
+        fetchCashierMetrics().catch((err: unknown) => {
+          console.warn("[cashier] Failed to fetch cashier metrics:", err);
+          return null;
+        }),
+        fetchCashierNotifications().catch((err: unknown) => {
+          console.warn("[cashier] Failed to fetch notifications:", err);
+          return [];
+        }),
       ]);
 
       setPendingItems(pending);
       setHistoryItems(history);
       setMetrics(met);
       setNotifications(notifs);
+
+      if (pendingErrMsg && pending.length === 0) {
+        setDataError(pendingErrMsg || "Failed to load pending reviews.");
+      }
     } catch (err) {
       console.error("[cashier] Error loading dashboard data:", err);
+      setDataError("Failed to communicate with café server. Please try again.");
       toast.error("Failed to load some cashier data.");
     } finally {
       setLoadingData(false);
@@ -382,6 +404,7 @@ export function CashierRoutePage() {
           <PendingReviewsList
             items={pendingItems}
             loading={loadingData}
+            error={dataError}
             onViewProof={(it) => setViewingProofItem(it)}
             onApprove={(it) => setApprovingItem(it)}
             onReject={(it) => setRejectingItem(it)}

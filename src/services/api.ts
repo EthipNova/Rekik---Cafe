@@ -179,7 +179,7 @@ export async function fetchCategories(): Promise<Category[]> {
   try {
     const { data, error } = await supabase
       .from("categories" as any)
-      .select("id, slug, name, description, is_active, sort_order")
+      .select("id, slug, name, description, image_url, is_active, sort_order")
       .order("sort_order", { ascending: true });
 
     if (!error && Array.isArray(data)) {
@@ -188,6 +188,7 @@ export async function fetchCategories(): Promise<Category[]> {
         slug: c.slug,
         name: c.name,
         tagline: c.description || c.tagline || "",
+        imageUrl: c.image_url || null,
         active: c.is_active ?? true,
       }));
     }

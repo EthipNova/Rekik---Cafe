@@ -9,6 +9,7 @@
  */
 
 import { serverSupabase as supabase } from "./supabase";
+import { getNextOrderNumber } from "./db";
 import type {
   WaiterProfile,
   WaiterOrder,
@@ -16,6 +17,8 @@ import type {
   WaiterNotification,
   WaiterPayment,
   StaffRole,
+  CreateManualWaiterOrderInput,
+  CustomerLookupResult,
 } from "@/types/waiter";
 
 export interface AuthenticatedStaff {
@@ -1228,4 +1231,370 @@ export async function submitWaiterPaymentProof(
   // 10. Return refreshed order
   const updatedOrders = await getWaiterOrders(staff, { search: order.order_number });
   return updatedOrders[0] || (order as any);
+}
+
+/**
+ * Normalizes Ethiopian phone numbers and generates matching search variants (+251, 09, 251, etc.)
+ */
+export function getPhoneLookupVariants(phone: string): string[] {
+  const clean = phone.trim().replace(/[\s\-().]/g, "");
+  if (!clean) return [];
+  const variants = new Set<string>();
+  variants.add(clean);
+
+  if (clean.startsWith("+251")) {
+    const rawNine = clean.slice(4);
+    variants.add("0" + rawNine);
+    variants.add(rawNine);
+    variants.add("251" + rawNine);
+  } else if (clean.startsWith("251")) {
+    const rawNine = clean.slice(3);
+    variants.add("0" + rawNine);
+    variants.add(rawNine);
+    variants.add("+" + clean);
+  } else if (clean.startsWith("0")) {
+    const rawNine = clean.slice(1);
+    variants.add("+251" + rawNine);
+    variants.add("251" + rawNine);
+    variants.add(rawNine);
+  } else {
+    variants.add("0" + clean);
+    variants.add("+251" + clean);
+    variants.add("251" + clean);
+  }
+
+  return Array.from(variants);
+}
+
+/**
+ * Looks up an existing customer by phone number to assist the waiter with quick order attribution.
+ */
+export async function lookupCustomerByPhone(
+  phone: string,
+): Promise<CustomerLookupResult | null> {
+  const variants = getPhoneLookupVariants(phone);
+  if (variants.length === 0) return null;
+
+  // 1. Try matching against public.customers
+  try {
+    const { data: customer } = await (supabase.from("customers" as any) as any)
+      .select("id, name, phone, orders(count)")
+      .in("phone", variants)
+      .limit(1)
+      .maybeSingle();
+
+    if (customer?.id) {
+      const orderCountRaw = Array.isArray(customer.orders)
+        ? customer.orders[0]?.count
+        : (customer.orders as any)?.count;
+      return {
+        id: customer.id,
+        name: customer.name || "Customer",
+        phone: customer.phone || variants[0] || "",
+        orderCount: Number(orderCountRaw) || 0,
+      };
+    }
+  } catch (lookupErr) {
+    console.warn("[server/waiter] Customer table phone lookup warning:", lookupErr);
+  }
+
+  // 2. Fallback: Check past orders table to see if this phone previously ordered
+  try {
+    const { data: pastOrder } = await (supabase.from("orders" as any) as any)
+      .select("customer_name, customer_phone")
+      .in("customer_phone", variants)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (pastOrder?.customer_name) {
+      return {
+        id: "",
+        name: pastOrder.customer_name,
+        phone: pastOrder.customer_phone || variants[0] || "",
+        orderCount: 1,
+      };
+    }
+  } catch (orderLookupErr) {
+    console.warn("[server/waiter] Past orders phone lookup warning:", orderLookupErr);
+  }
+
+  return null;
+}
+
+/**
+ * Creates a manual customer order on behalf of a guest/customer directly from the Waiter Station.
+ * - Auto-assigns to the authenticated waiter
+ * - Sets waiter_decision to 'approved'
+ * - Reuses existing customer record when phone matches to prevent duplicate customer rows
+ * - Strictly validates prices and stock against active database products
+ */
+export async function createManualWaiterOrder(
+  staff: AuthenticatedStaff,
+  input: CreateManualWaiterOrderInput,
+): Promise<WaiterOrder> {
+  // 1. Verify staff authorization
+  if (staff.role !== "waiter" && staff.role !== "admin") {
+    throw new Error("Only active waiters and admins can create manual orders.");
+  }
+  if (!staff.isActive) {
+    throw new Error("Your staff account is currently inactive.");
+  }
+
+  // 2. Validate input items
+  if (!Array.isArray(input.items) || input.items.length === 0) {
+    throw new Error("Order must contain at least one menu item.");
+  }
+
+  // 3. Validate method & dine-in table number
+  const rawMethod = (input.method || "dine_in").toLowerCase();
+  let dbMethod: "dine_in" | "pickup" | "delivery" = "dine_in";
+  if (rawMethod === "takeaway" || rawMethod === "pickup") {
+    dbMethod = "pickup";
+  } else if (rawMethod === "delivery") {
+    dbMethod = "delivery";
+  } else {
+    dbMethod = "dine_in";
+  }
+
+  const tableNumber = input.tableNumber?.trim() || null;
+  if (dbMethod === "dine_in" && !tableNumber) {
+    throw new Error("Table number is required for Dine-In orders.");
+  }
+
+  // 4. Resolve products & prices authoritatively from database
+  const productIds = input.items.map((i) => i.productId);
+  const { data: dbProducts, error: prodErr } = await (supabase.from("products" as any) as any)
+    .select("id, name, price, is_available")
+    .in("id", productIds);
+
+  if (prodErr || !Array.isArray(dbProducts)) {
+    throw new Error(`Failed to load product pricing: ${prodErr?.message || "Unknown error"}`);
+  }
+
+  const prodMap = new Map<string, { id: string; name: string; price: number; is_available: boolean }>();
+  for (const p of dbProducts) {
+    prodMap.set(p.id, p);
+  }
+
+  type ResolvedItem = {
+    productId: string;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+  };
+
+  const resolvedItems: ResolvedItem[] = [];
+  for (const item of input.items) {
+    const prod = prodMap.get(item.productId);
+    if (!prod) {
+      throw new Error(`Menu item not found: Product ID "${item.productId}" does not exist.`);
+    }
+    if (prod.is_available === false) {
+      throw new Error(`Item "${prod.name}" is currently marked as unavailable.`);
+    }
+    const qty = Math.floor(Number(item.quantity));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new Error(`Invalid quantity for "${prod.name}". Must be at least 1.`);
+    }
+    const unitPrice = Number(prod.price) || 0;
+    const lineTotal = unitPrice * qty;
+    resolvedItems.push({
+      productId: prod.id,
+      name: prod.name,
+      quantity: qty,
+      unitPrice,
+      lineTotal,
+    });
+  }
+
+  const subtotal = resolvedItems.reduce((acc, it) => acc + it.lineTotal, 0);
+  const totalAmount = subtotal;
+
+  // 5. Customer resolution & deduplication
+  const rawPhone = (input.customerPhone || "").trim();
+  const phoneVariants = rawPhone ? getPhoneLookupVariants(rawPhone) : [];
+  let customerName = (input.customerName || "").trim();
+  if (!customerName) {
+    customerName = dbMethod === "dine_in" ? "Dine-in Guest" : "Guest";
+  }
+
+  let customerId: string | null = null;
+  const nowIso = new Date().toISOString();
+
+  if (phoneVariants.length > 0) {
+    try {
+      const { data: existingCust } = await (supabase.from("customers" as any) as any)
+        .select("id, name, phone")
+        .in("phone", phoneVariants)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingCust?.id) {
+        customerId = existingCust.id;
+        // Update customer name if previous name was generic and a real name is now provided
+        if (
+          customerName &&
+          (!existingCust.name || existingCust.name === "Guest" || existingCust.name === "Dine-in Guest")
+        ) {
+          await (supabase.from("customers" as any) as any)
+            .update({ name: customerName, updated_at: nowIso })
+            .eq("id", customerId);
+        }
+      } else {
+        const newCustId = crypto.randomUUID();
+        const { error: insCustErr } = await (supabase.from("customers" as any) as any).insert({
+          id: newCustId,
+          user_id: null,
+          name: customerName,
+          phone: rawPhone,
+          created_at: nowIso,
+          updated_at: nowIso,
+        });
+        if (!insCustErr) {
+          customerId = newCustId;
+        }
+      }
+    } catch (custErr) {
+      console.warn("[server/waiter] Customer deduplication warning:", custErr);
+    }
+  }
+
+  // 6. Obtain next sequence order number
+  let orderNumber = await getNextOrderNumber(false);
+  const orderId = crypto.randomUUID();
+
+  // 7. Insert into public.orders
+  const MAX_ATTEMPTS = 5;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const orderRecord = {
+      id: orderId,
+      order_number: orderNumber,
+      order_reference: `RK-${orderNumber.replace(/^RK-/, "")}`,
+      customer_id: customerId,
+      customer_name: customerName,
+      customer_phone: rawPhone || null,
+      waiter_id: staff.userId,
+      waiter_assigned_at: nowIso,
+      waiter_decision: "approved",
+      waiter_decided_at: nowIso,
+      customer_notes: input.customerNotes?.trim() || null,
+      method: dbMethod,
+      status: "confirmed",
+      table_number: dbMethod === "dine_in" ? tableNumber : null,
+      delivery_address: dbMethod === "delivery" ? input.deliveryAddress?.trim() || null : null,
+      subtotal,
+      discount_amount: 0,
+      delivery_fee: 0,
+      total_amount: totalAmount,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+
+    const { error: ordErr } = await (supabase.from("orders" as any) as any).insert(orderRecord);
+    if (!ordErr) {
+      break;
+    }
+
+    const isCollision =
+      ordErr.code === "23505" &&
+      (String(ordErr.message || "").includes("orders_order_number_key") ||
+        String(ordErr.details || "").includes("orders_order_number_key"));
+
+    if (isCollision && attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, 25 + Math.floor(Math.random() * 50)));
+      orderNumber = await getNextOrderNumber(true);
+      continue;
+    }
+
+    console.error(`[server/waiter] Failed to insert manual order (code ${ordErr.code}):`, ordErr.message);
+    throw new Error(`Failed to create order: ${ordErr.message || "Database insert failed"}`);
+  }
+
+  // 8. Insert order items
+  const itemRecords = resolvedItems.map((item) => ({
+    id: crypto.randomUUID(),
+    order_id: orderId,
+    product_id: item.productId,
+    name: item.name,
+    quantity: item.quantity,
+    unit_price: item.unitPrice,
+    line_total: item.lineTotal,
+  }));
+
+  const { error: itemsErr } = await (supabase.from("order_items" as any) as any).insert(itemRecords);
+  if (itemsErr) {
+    console.error("[server/waiter] Error inserting order items:", itemsErr.message);
+    await (supabase.from("orders" as any) as any).delete().eq("id", orderId);
+    throw new Error(`Failed to insert order items: ${itemsErr.message}`);
+  }
+
+  // 9. Insert initial payment record
+  const initialMethod = input.initialPaymentMethod?.trim() || "Pending Waiter Settlement";
+  await (supabase.from("payments" as any) as any).insert({
+    id: crypto.randomUUID(),
+    order_id: orderId,
+    method: initialMethod,
+    status: "pending",
+    amount: totalAmount,
+    created_at: nowIso,
+  });
+
+  // 10. Insert audit log
+  await (supabase.from("order_status_logs" as any) as any).insert({
+    id: crypto.randomUUID(),
+    order_id: orderId,
+    from_status: null,
+    to_status: "confirmed",
+    changed_by: staff.userId,
+    notes: `Manual order created by waiter ${staff.fullName}${tableNumber ? ` (Table: ${tableNumber})` : ""}`,
+    created_at: nowIso,
+  });
+
+  // 11. Fetch and return normalized WaiterOrder
+  const createdOrders = await getWaiterOrders(staff, { search: orderNumber });
+  if (createdOrders[0]) {
+    return createdOrders[0];
+  }
+
+  return {
+    id: orderId,
+    orderNumber,
+    orderReference: `RK-${orderNumber.replace(/^RK-/, "")}`,
+    customerId,
+    waiterId: staff.userId,
+    method: dbMethod,
+    status: "confirmed",
+    waiterDecision: "approved",
+    customerName,
+    customerPhone: rawPhone || null,
+    tableNumber: dbMethod === "dine_in" ? tableNumber : null,
+    deliveryAddress: dbMethod === "delivery" ? input.deliveryAddress?.trim() || null : null,
+    customerNotes: input.customerNotes?.trim() || null,
+    subtotal,
+    discountAmount: 0,
+    deliveryFee: 0,
+    totalAmount,
+    waiterAssignedAt: nowIso,
+    waiterDecidedAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    items: resolvedItems.map((ri) => ({
+      productId: ri.productId,
+      name: ri.name,
+      quantity: ri.quantity,
+      unitPrice: ri.unitPrice,
+      lineTotal: ri.lineTotal,
+    })),
+    payments: [
+      {
+        id: crypto.randomUUID(),
+        orderId,
+        method: initialMethod,
+        status: "pending",
+        amount: totalAmount,
+      },
+    ],
+  };
 }

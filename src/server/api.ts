@@ -39,7 +39,7 @@ import { isValidUUID, type AboutContent } from "@/lib/content";
 import type { Order, OrderStatus } from "@/lib/orders";
 import type { Promotion } from "@/lib/promotions";
 import { createScopedClient, supabase, type UserRole } from "@/lib/supabase";
-import { serverSupabase } from "./supabase";
+import { serverSupabase, createAuthVerificationClient } from "./supabase";
 import {
   findStaffByStaffId,
   getStaffIdForUserId,
@@ -81,6 +81,8 @@ import {
   getWaiterNotifications,
   markWaiterNotificationRead,
   getAvailableWaiters,
+  createManualWaiterOrder,
+  lookupCustomerByPhone,
 } from "./waiter";
 import {
   getExpenses,
@@ -408,8 +410,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         );
       }
 
-      // Step 3: Authenticate securely using Supabase Auth with the staff member's internal email
-      const { data: authData, error: authError } = await serverSupabase.auth.signInWithPassword({
+      // Step 3: Authenticate securely using Supabase Auth with an isolated client
+      // (prevents session contamination on serverSupabase singleton)
+      const authVerificationClient = createAuthVerificationClient();
+      const { data: authData, error: authError } = await authVerificationClient.auth.signInWithPassword({
         email: staff.email,
         password,
       });
@@ -564,8 +568,9 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         return badRequest("New email must be different from current email.");
       }
 
-      // Step 1: Re-authenticate with current password to verify identity
-      const { error: verifyErr } = await serverSupabase.auth.signInWithPassword({
+      // Step 1: Re-authenticate with current password using isolated client
+      const authVerificationClient = createAuthVerificationClient();
+      const { error: verifyErr } = await authVerificationClient.auth.signInWithPassword({
         email: authUser.email,
         password: currentPassword,
       });
@@ -2775,6 +2780,67 @@ export async function handleApiRequest(request: Request): Promise<Response> {
             date: dateFilter,
           });
           return json(orders);
+        } catch (err: any) {
+          return serverError(err);
+        }
+      }
+
+      if (method === "POST") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              role: (waiterAuth as any).role,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        try {
+          const body = await request.json().catch(() => null);
+          if (!body || typeof body !== "object") {
+            return badRequest("Invalid request body. JSON object expected.");
+          }
+          const created = await createManualWaiterOrder(waiterAuth.staff, body);
+          return json({ success: true, order: created }, 201);
+        } catch (err: any) {
+          console.error("[api] Waiter manual order creation error:", err);
+          return json(
+            { error: "Order Creation Failed", message: err?.message || String(err) },
+            400,
+          );
+        }
+      }
+
+      return json({ error: "Method Not Allowed" }, 405);
+    }
+
+    if (pathname === "/api/waiter/customers/lookup") {
+      if (method === "GET") {
+        const waiterAuth = await resolveWaiterUser(request);
+        if (!waiterAuth.success) {
+          const status = waiterAuth.status === "unauthenticated" ? 401 : 403;
+          return json(
+            {
+              error: status === 401 ? "Unauthorized" : "Forbidden",
+              success: false,
+              status: waiterAuth.status,
+              message: waiterAuth.message,
+            },
+            status,
+          );
+        }
+        const phone = url.searchParams.get("phone") || "";
+        if (!phone.trim()) {
+          return json({ customer: null });
+        }
+        try {
+          const customer = await lookupCustomerByPhone(phone);
+          return json({ customer });
         } catch (err: any) {
           return serverError(err);
         }

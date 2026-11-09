@@ -177,8 +177,12 @@ export function extractStoragePathFromUrl(url: string): string | null {
   const marker = `/${PRODUCT_IMAGES_BUCKET}/`;
   const index = trimmed.indexOf(marker);
   if (index === -1) {
-    // Check if it's already a relative product storage path (e.g., "products/...")
-    if (trimmed.startsWith("products/")) {
+    // Check if it's already a relative storage path (e.g., "products/...", "categories/...")
+    if (
+      trimmed.startsWith("products/") ||
+      trimmed.startsWith("categories/") ||
+      trimmed.startsWith("promotions/")
+    ) {
       const [raw] = trimmed.split("?");
       return (raw || "").replace(/^\/+/, "") || null;
     }
@@ -377,6 +381,162 @@ export async function deleteProductImageFromStorage(
     return {
       success: false,
       error: err instanceof Error ? err : new Error("Failed to delete storage image."),
+    };
+  }
+}
+
+/**
+ * Validates whether a storage path is strictly scoped within the category-specific folder:
+ * "categories/<categoryId>/<filename>.<ext>"
+ * Guards against directory traversal (..) or attempts to delete files outside the category directory.
+ */
+export function isCategorySpecificStoragePath(path: string, expectedCategoryId?: string): boolean {
+  if (!path || typeof path !== "string") return false;
+  const cleanPath = path.trim().replace(/^\/+/, "");
+
+  // Prevent path traversal
+  if (cleanPath.includes("..") || cleanPath.includes("\\")) {
+    return false;
+  }
+
+  // Must match categories/<categoryId>/<filename>
+  const parts = cleanPath.split("/");
+  if (parts.length < 3 || parts[0] !== "categories") {
+    return false;
+  }
+
+  const pathCategoryId = parts[1];
+  if (!pathCategoryId) return false;
+
+  if (expectedCategoryId) {
+    const sanitizedExpected = expectedCategoryId.replace(/[^a-zA-Z0-9_-]/g, "");
+    if (pathCategoryId !== sanitizedExpected && pathCategoryId !== expectedCategoryId) {
+      return false;
+    }
+  }
+
+  const fileName = parts.slice(2).join("/");
+  return /\.(jpg|jpeg|png|webp)$/i.test(fileName);
+}
+
+/**
+ * Uploads a category cover image file to the product-images bucket in Supabase Storage.
+ * Generates path: categories/{categoryId}/{unique-id}.{ext}
+ */
+export async function uploadCategoryImage(
+  categoryId: string,
+  file: File,
+): Promise<{
+  url: string | null;
+  path: string | null;
+  error: Error | null;
+}> {
+  try {
+    const validation = validateProductImageFile(file);
+    if (!validation.valid) {
+      return { url: null, path: null, error: new Error(validation.error) };
+    }
+
+    await ensureProductImagesBucket();
+
+    let extension = file.name.split(".").pop()?.toLowerCase() || "";
+    if (extension === "jpeg") extension = "jpg";
+    if (!["jpg", "png", "webp"].includes(extension)) {
+      if (file.type === "image/png") extension = "png";
+      else if (file.type === "image/webp") extension = "webp";
+      else extension = "jpg";
+    }
+
+    const uniqueId = generateUUID();
+    const sanitizedCategoryId = categoryId.replace(/[^a-zA-Z0-9_-]/g, "") || "new";
+    const storagePath = `categories/${sanitizedCategoryId}/${uniqueId}.${extension}`;
+
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(PRODUCT_IMAGES_BUCKET)
+      .upload(storagePath, file, {
+        contentType: file.type || `image/${extension === "jpg" ? "jpeg" : extension}`,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return {
+        url: null,
+        path: null,
+        error: new Error(`Category cover image upload failed: ${uploadError.message}`),
+      };
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from(PRODUCT_IMAGES_BUCKET)
+      .getPublicUrl(uploadData.path || storagePath);
+
+    return {
+      url: publicUrlData.publicUrl,
+      path: uploadData.path || storagePath,
+      error: null,
+    };
+  } catch (err: any) {
+    return {
+      url: null,
+      path: null,
+      error: err instanceof Error ? err : new Error("Failed to upload category cover image file."),
+    };
+  }
+}
+
+/**
+ * Safely removes a category cover image object from the product-images bucket.
+ *
+ * Safety constraints:
+ * 1. Strictly refuses to delete static bundled assets or external images.
+ * 2. Strictly enforces that the path resides within "categories/[categoryId]/...".
+ * 3. Never reports false success if the storage API returns an error.
+ */
+export async function deleteCategoryImageFromStorage(
+  pathOrUrl: string,
+  expectedCategoryId?: string,
+): Promise<{ success: boolean; skipped?: boolean; error: Error | null }> {
+  try {
+    if (!pathOrUrl || typeof pathOrUrl !== "string" || !pathOrUrl.trim()) {
+      return { success: true, skipped: true, error: null };
+    }
+
+    const trimmed = pathOrUrl.trim();
+
+    // Check if it's a bundled static asset or an external non-bucket image
+    if (isStaticAssetPath(trimmed)) {
+      return { success: true, skipped: true, error: null };
+    }
+
+    const path = extractStoragePathFromUrl(trimmed);
+
+    // If the image is external (not in our bucket), nothing to delete from Supabase Storage
+    if (!path) {
+      return { success: true, skipped: true, error: null };
+    }
+
+    // Verify category-specific path boundary
+    if (!isCategorySpecificStoragePath(path, expectedCategoryId)) {
+      console.warn("Skipping storage deletion: path is outside category folder or invalid:", path);
+      return {
+        success: false,
+        error: new Error(`Refusing to delete storage object outside category directory: ${path}`),
+      };
+    }
+
+    const { error } = await supabase.storage.from(PRODUCT_IMAGES_BUCKET).remove([path]);
+
+    if (error) {
+      console.warn("Notice deleting storage image:", error.message);
+      return { success: false, error: new Error(`Storage delete failed: ${error.message}`) };
+    }
+
+    return { success: true, error: null };
+  } catch (err: any) {
+    console.warn("Caught error removing storage image:", err);
+    return {
+      success: false,
+      error: err instanceof Error ? err : new Error("Failed to delete category storage image."),
     };
   }
 }

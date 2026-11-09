@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { supabase } from "../src/lib/supabase";
-import { serverSupabase } from "../src/server/supabase";
+import { serverSupabase, createAuthVerificationClient } from "../src/server/supabase";
 import { handleApiRequest } from "../src/server/api";
 import {
   resolveCashierMe,
@@ -15,9 +15,6 @@ import {
 } from "../src/server/cashier";
 
 async function ensureSeedData() {
-  const pending = await getPendingPaymentReviews();
-  if (pending.length >= 2) return;
-
   console.log("  [setup] Re-seeding demo pending payment proofs for test isolation...");
   const sampleImagePath = path.resolve(process.cwd(), "public/images/secure-payments.png");
   if (fs.existsSync(sampleImagePath)) {
@@ -152,10 +149,21 @@ async function runTests() {
 
   const cashierEmail = "cashier@rekikcafe.com";
   const cashierPassword = "Password123!";
+  const authClient = createAuthVerificationClient();
+
+  // Ensure password is set for cashier, user is unbanned, and staff profile is active
+  await serverSupabase.auth.admin.updateUserById("5d2b434b-0b18-461b-a12d-9a93ac8fc92a", {
+    ban_duration: "none",
+    password: cashierPassword,
+  });
+  await serverSupabase
+    .from("staff_profiles")
+    .update({ is_active: true, is_available: true })
+    .eq("user_id", "5d2b434b-0b18-461b-a12d-9a93ac8fc92a");
 
   // ── Test 1: Sign in with valid Cashier credentials ─────────────────────────
   console.log("\n[1] Testing Cashier Authentication via Supabase Auth...");
-  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+  const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
     email: cashierEmail,
     password: cashierPassword,
   });
@@ -210,13 +218,13 @@ async function runTests() {
   // ── Test 4: Role-Based Access Control Rejection (403 Forbidden) ────────────
   console.log("\n[4] Testing Non-Cashier Role Rejection (403 Forbidden)...");
   // Sign in as admin user
-  const adminEmail = "kbstar77sisay@gmail.com";
+  const adminEmail = "henokbefekadu2005@gmail.com";
   const { data: adminAuthData } = await serverSupabase.auth.admin.generateLink({
     type: "magiclink",
     email: adminEmail,
   });
   if (adminAuthData?.properties?.hashed_token) {
-    const { data: adminSession } = await supabase.auth.verifyOtp({
+    const { data: adminSession } = await authClient.auth.verifyOtp({
       token_hash: adminAuthData.properties.hashed_token,
       type: "magiclink",
     });
@@ -242,7 +250,7 @@ async function runTests() {
     email: custEmail,
   });
   if (custAuthData?.properties?.hashed_token) {
-    const { data: custSession } = await supabase.auth.verifyOtp({
+    const { data: custSession } = await authClient.auth.verifyOtp({
       token_hash: custAuthData.properties.hashed_token,
       type: "magiclink",
     });
@@ -261,7 +269,7 @@ async function runTests() {
   }
 
   // Restore cashier session
-  await supabase.auth.signInWithPassword({
+  await authClient.auth.signInWithPassword({
     email: cashierEmail,
     password: cashierPassword,
   });
@@ -324,7 +332,7 @@ async function runTests() {
 
   // ── Test 6: Storage Proof Signed URL ───────────────────────────────────────
   console.log("\n[6] Testing Storage Signed URL Generation via API...");
-  const testItem = pendingItems[0]!;
+  const testItem = pendingItems.find((p) => p.proof_screenshot_path && p.proof_screenshot_path !== "cash-direct") || pendingItems[0]!;
   const proofUrlReq = new Request("http://localhost:3000/api/cashier/proof-url", {
     method: "POST",
     headers: {

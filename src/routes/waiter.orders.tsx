@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Camera,
   CheckCircle2,
@@ -116,16 +116,24 @@ export function WaiterOrdersPage() {
             Monitor active meal preparation, table service, and customer payments in real time.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void loadOrders(true)}
-          disabled={refreshing}
-          className="h-9 gap-2 text-xs"
-        >
-          <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh Orders
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void loadOrders(true)}
+            disabled={refreshing}
+            className="h-9 gap-2 text-xs"
+          >
+            <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh Orders
+          </Button>
+          <Button asChild size="sm" className="h-9 gap-2 text-xs font-semibold">
+            <Link to="/waiter/menu">
+              <UtensilsCrossed className="size-3.5" />
+              <span>Take New Order</span>
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Tabs and Controls */}

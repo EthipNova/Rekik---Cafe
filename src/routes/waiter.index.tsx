@@ -9,6 +9,7 @@ import {
   ShoppingBag,
   Sparkles,
   Utensils,
+  UtensilsCrossed,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -153,8 +154,14 @@ export function WaiterDashboardOverview() {
             <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          <Button asChild size="sm" className="h-9 gap-2 text-xs">
-            <Link to="/waiter/orders">View All Current Orders</Link>
+          <Button asChild size="sm" className="h-9 gap-2 text-xs font-semibold">
+            <Link to="/waiter/menu">
+              <UtensilsCrossed className="size-3.5" />
+              <span>Take New Order</span>
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm" className="h-9 gap-2 text-xs hidden sm:inline-flex">
+            <Link to="/waiter/orders">Current Orders</Link>
           </Button>
         </div>
       </header>

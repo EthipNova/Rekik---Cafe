@@ -720,7 +720,7 @@
     }
   ],
   "staff_registry": {
-    "lastSequence": 28,
+    "lastSequence": 32,
     "allocated": {
       "RK-001": {
         "isActive": false,
@@ -1000,6 +1000,44 @@
         "email": null,
         "allocatedAt": "2026-11-05T09:01:42.974Z",
         "isDeleted": true
+      },
+      "RK-029": {
+        "staffId": "RK-029",
+        "userId": "0b11e135-7b06-40e4-bf8c-0a0a025e9fdd",
+        "sequence": 29,
+        "role": "waiter",
+        "name": "heru",
+        "email": "henokbefekadu005@gmail.com",
+        "allocatedAt": "2026-11-05T17:59:39.938Z"
+      },
+      "RK-030": {
+        "staffId": "RK-030",
+        "userId": "c64bb1ac-eb33-444b-b198-69b3ef804c7a",
+        "sequence": 30,
+        "role": "waiter",
+        "name": "Henok Befekadu",
+        "email": "henokbefekadu05@gmail.com",
+        "allocatedAt": "2026-11-05T18:00:37.820Z",
+        "isDeleted": true
+      },
+      "RK-031": {
+        "staffId": "RK-031",
+        "userId": "14720255-af25-442e-aa12-9894fea56e7c",
+        "sequence": 31,
+        "role": "waiter",
+        "name": "wwww",
+        "email": "henokbeadu2005@gmail.com",
+        "allocatedAt": "2026-11-05T18:06:18.399Z"
+      },
+      "RK-032": {
+        "staffId": "RK-032",
+        "userId": "test-user-1794248536766",
+        "sequence": 32,
+        "role": "waiter",
+        "name": "Temporary Test Staff",
+        "email": null,
+        "allocatedAt": "2026-11-09T18:22:18.275Z",
+        "isDeleted": true
       }
     },
     "userToStaffId": {
@@ -1029,7 +1067,11 @@
       "test-user-1793797207513": "RK-024",
       "test-user-1793798387683": "RK-025",
       "test-user-1793802207451": "RK-026",
-      "test-user-1793866759219": "RK-027"
+      "test-user-1793866759219": "RK-027",
+      "test-user-1793869301469": "RK-028",
+      "0b11e135-7b06-40e4-bf8c-0a0a025e9fdd": "RK-029",
+      "c64bb1ac-eb33-444b-b198-69b3ef804c7a": "RK-030",
+      "14720255-af25-442e-aa12-9894fea56e7c": "RK-031"
     }
   }
 }

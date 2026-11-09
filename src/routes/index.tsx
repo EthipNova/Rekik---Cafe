@@ -416,6 +416,18 @@ function Home() {
               >
                 <div>
                   {(() => {
+                    const coverUrl = c.imageUrl;
+                    if (coverUrl) {
+                      return (
+                        <div className="mb-2 sm:mb-3 flex h-14 sm:h-20 w-full overflow-hidden rounded-lg bg-surface-muted/30">
+                          <img
+                            src={coverUrl}
+                            alt={c.name}
+                            className="h-full w-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
+                          />
+                        </div>
+                      );
+                    }
                     const catImg = categoryImages[c.slug];
                     if (catImg) {
                       return (

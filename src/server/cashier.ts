@@ -218,7 +218,6 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
         table_number,
         delivery_address,
         customer_notes,
-        payment_method,
         subtotal,
         discount_amount,
         delivery_fee,
@@ -248,6 +247,19 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
     throw new Error(`Failed to fetch pending payment reviews: ${proofErr.message}`);
   }
 
+  // Look up staff names for assigned waiters
+  const { data: staffList } = await serverSupabase
+    .from("staff_profiles")
+    .select("user_id, full_name");
+  const staffMap = new Map<string, string>();
+  if (staffList) {
+    for (const s of staffList) {
+      if (s.user_id && s.full_name) {
+        staffMap.set(s.user_id, s.full_name);
+      }
+    }
+  }
+
   const items: PendingPaymentReviewItem[] = (proofs || []).map((raw: any) => {
     const order = Array.isArray(raw.orders) ? raw.orders[0] : raw.orders;
     const payment = Array.isArray(raw.payments) ? raw.payments[0] : raw.payments;
@@ -266,6 +278,9 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
       unit_price: Number(it.unit_price) || 0,
       line_total: Number(it.line_total) || 0,
     }));
+
+    const waiterId = order?.waiter_id ?? null;
+    const waiterName = waiterId ? (staffMap.get(waiterId) || "Staff Member") : null;
 
     return {
       proof_id: raw.id,
@@ -289,7 +304,7 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
       delivery_fee: Number(order?.delivery_fee) || 0,
       payment_amount: Number(payment?.amount) || Number(raw.submitted_amount) || 0,
       payment_method: (() => {
-        const rawMethod = payment?.method || order?.payment_method || (raw.screenshot_path === "cash-direct" ? "Cash" : "");
+        const rawMethod = payment?.method || (raw.screenshot_path === "cash-direct" ? "Cash" : "");
         const m = rawMethod || "Mobile Payment";
         return m.toLowerCase().includes("cash") ? "💵 Cash" : m;
       })(),
@@ -299,7 +314,8 @@ export async function getPendingPaymentReviews(): Promise<PendingPaymentReviewIt
       proof_submitted_amount: Number(raw.submitted_amount) || 0,
       proof_status: raw.status || "pending",
       proof_submitted_at: raw.submitted_at,
-      waiter_id: order?.waiter_id ?? null,
+      waiter_id: waiterId,
+      waiter_name: waiterName,
       waiter_decision: order?.waiter_decision ?? null,
       waiter_decided_at: order?.waiter_decided_at ?? null,
       waiter_rejection_reason: order?.waiter_rejection_reason ?? null,
@@ -341,7 +357,6 @@ export async function getPaymentReviewHistory(): Promise<PaymentReviewHistoryIte
           order_number,
           customer_name,
           customer_phone,
-          payment_method,
           total_amount,
           created_at,
           order_items (
@@ -396,7 +411,7 @@ export async function getPaymentReviewHistory(): Promise<PaymentReviewHistoryIte
       customer_phone: order?.customer_phone || null,
       payment_amount: Number(payment?.amount) || Number(proof?.submitted_amount) || 0,
       payment_method: (() => {
-        const rawMethod = payment?.method || order?.payment_method || (proof?.screenshot_path === "cash-direct" ? "Cash" : "");
+        const rawMethod = payment?.method || (proof?.screenshot_path === "cash-direct" ? "Cash" : "");
         const m = rawMethod || "Mobile Payment";
         return m.toLowerCase().includes("cash") ? "💵 Cash" : m;
       })(),
@@ -470,10 +485,13 @@ export async function getProofSignedUrl(proofIdOrPath: string): Promise<string> 
     if (error || !proof) {
       throw new Error("Payment proof record not found.");
     }
-    screenshotPath = proof.screenshot_path;
+    screenshotPath = proof.screenshot_path || "";
   }
 
-  // Ensure path doesn't start with leading slash or bucket name
+  // Cash transactions do not have a screenshot in storage
+  if (!screenshotPath || screenshotPath === "cash-direct") {
+    return "";
+  }
   let cleanPath = screenshotPath.replace(/^\/+/, "");
   if (cleanPath.startsWith(`${PAYMENT_PROOFS_BUCKET}/`)) {
     cleanPath = cleanPath.replace(`${PAYMENT_PROOFS_BUCKET}/`, "");

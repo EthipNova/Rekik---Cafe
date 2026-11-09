@@ -22,6 +22,7 @@ export type Category = {
   slug: string;
   name: string;
   tagline: string;
+  imageUrl?: string | null | undefined;
   isActive: boolean;
 };
 
@@ -150,6 +151,7 @@ function normalizeCategoryRecord(raw: any): Category {
     slug: raw?.slug ?? "",
     name: raw?.name ?? "",
     tagline: raw?.description ?? raw?.tagline ?? "",
+    imageUrl: raw?.image_url ?? null,
     isActive: raw?.is_active ?? true,
   };
 }
@@ -211,7 +213,7 @@ export async function fetchAdminCategories(): Promise<{
 }> {
   try {
     const { data, error } = await (supabase.from("categories" as any) as any)
-      .select("id, slug, name, description, is_active, sort_order, created_at")
+      .select("id, slug, name, description, image_url, is_active, sort_order, created_at")
       .order("sort_order", { ascending: true });
 
     if (error) {

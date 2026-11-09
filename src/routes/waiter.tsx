@@ -54,6 +54,7 @@ export const Route = createFileRoute("/waiter")({
 
 const waiterNav = [
   { to: "/waiter", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { to: "/waiter/menu", label: "Menu", icon: UtensilsCrossed, exact: false },
   { to: "/waiter/orders", label: "Current Orders", icon: ShoppingBag, exact: false },
   { to: "/waiter/history", label: "Order History", icon: History, exact: false },
 ] as const;

@@ -16,9 +16,18 @@ import type {
   OrderDbStatus,
   WaiterDecision,
   OrderDbMethod,
+  CreateManualWaiterOrderInput,
+  CustomerLookupResult,
 } from "@/types/waiter";
 
-export type { WaiterProfile, WaiterOrder, WaiterMetrics, WaiterNotification };
+export type {
+  WaiterProfile,
+  WaiterOrder,
+  WaiterMetrics,
+  WaiterNotification,
+  CreateManualWaiterOrderInput,
+  CustomerLookupResult,
+};
 
 export class WaiterApiError extends Error {
   public status: number;
@@ -444,3 +453,42 @@ export function getOrderPaymentStatus(order: WaiterOrder): {
     subtext: "Awaiting payment settlement",
   };
 }
+
+/**
+ * Searches for an existing registered customer by phone number to assist the waiter with rapid order entry.
+ */
+export async function lookupCustomerByPhone(
+  phone: string,
+): Promise<CustomerLookupResult | null> {
+  const clean = phone.trim();
+  if (!clean) return null;
+  try {
+    const res = await waiterRequest<{ customer: CustomerLookupResult | null }>(
+      `/api/waiter/customers/lookup?phone=${encodeURIComponent(clean)}`,
+    );
+    return res?.customer || null;
+  } catch (err) {
+    console.warn("lookupCustomerByPhone error:", err);
+    return null;
+  }
+}
+
+/**
+ * Creates a manual customer order directly from the Waiter Station.
+ */
+export async function createManualWaiterOrder(
+  input: CreateManualWaiterOrderInput,
+): Promise<WaiterOrder> {
+  const res = await waiterRequest<{ success: boolean; order: WaiterOrder }>(
+    "/api/waiter/orders",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  if (!res?.order) {
+    throw new Error("Order creation did not return order details.");
+  }
+  return res.order;
+}
+

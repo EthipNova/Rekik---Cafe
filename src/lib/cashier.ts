@@ -50,6 +50,7 @@ export interface PendingPaymentReviewItem {
   proof_status: "pending" | "approved" | "rejected";
   proof_submitted_at: string;
   waiter_id?: string | null;
+  waiter_name?: string | null;
   waiter_decision?: string | null;
   waiter_decided_at?: string | null;
   waiter_rejection_reason?: string | null;

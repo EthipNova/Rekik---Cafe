@@ -93,8 +93,8 @@ async function run() {
   // [4] Server Cashier Query inspection
   console.log("\n[4] Verifying Server-side Payment Method Resolution...");
   assert.ok(
-    serverCashierSrc.includes("payment_method,"),
-    "getPendingPaymentReviews must select payment_method from orders table",
+    serverCashierSrc.includes("payment_method:"),
+    "getPendingPaymentReviews must resolve payment_method from payments and proofs",
   );
   assert.ok(
     serverCashierSrc.includes("raw.screenshot_path === \"cash-direct\" ? \"Cash\""),
