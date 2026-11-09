@@ -535,6 +535,18 @@ export function markStaffIdDeleted(userId: string): void {
 }
 
 /**
+ * Updates the active status of a staff member in the staff registry.
+ */
+export function updateStaffIdActiveStatus(userId: string, isActive: boolean): void {
+  const registry = loadRegistry();
+  const staffId = registry.userToStaffId[userId];
+  if (staffId && registry.allocated[staffId]) {
+    registry.allocated[staffId]!.isActive = isActive;
+    saveRegistry(registry);
+  }
+}
+
+/**
  * Migrates and backfills existing staff members so every staff profile has
  * a permanent, unique Staff ID (RK-001, RK-002, ...).
  */

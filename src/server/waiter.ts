@@ -958,31 +958,18 @@ export interface AvailableWaiterDTO {
  * Retrieves the list of available waiters for customer table selection during checkout.
  */
 export async function getAvailableWaiters(): Promise<AvailableWaiterDTO[]> {
+  // Admin strictly controls waiter availability:
+  // Only waiters marked is_active = true by the Admin are available in the customer dropdown.
+  // Inactive waiters (is_active = false) are NEVER returned.
   const { data, error } = await (supabase.from("staff_profiles" as any) as any)
-    .select("user_id, full_name, phone, role, is_available, is_active")
+    .select("user_id, full_name, phone, role, is_active, is_available")
     .eq("role", "waiter")
-    .eq("is_available", true)
     .eq("is_active", true)
     .order("full_name", { ascending: true });
 
   if (error || !data) {
-    // If no dedicated 'waiter' role rows yet, check for active admin/staff available
-    const { data: fallbackStaff } = await (supabase.from("staff_profiles" as any) as any)
-      .select("user_id, full_name, phone, role, is_available, is_active")
-      .eq("is_available", true)
-      .eq("is_active", true);
-
-    if (fallbackStaff && fallbackStaff.length > 0) {
-      return fallbackStaff.map((s: any) => ({
-        id: s.user_id,
-        userId: s.user_id,
-        name: s.full_name || "Floor Staff",
-        fullName: s.full_name || "Floor Staff",
-        phone: s.phone || null,
-        role: s.role || "staff",
-        isAvailable: Boolean(s.is_available ?? true),
-        isActive: Boolean(s.is_active ?? true),
-      }));
+    if (error) {
+      console.error("[server/waiter] Error fetching active waiters:", error.message);
     }
     return [];
   }
@@ -993,9 +980,9 @@ export async function getAvailableWaiters(): Promise<AvailableWaiterDTO[]> {
     name: w.full_name || "Floor Waiter",
     fullName: w.full_name || "Floor Waiter",
     phone: w.phone || null,
-    role: w.role || "waiter",
-    isAvailable: Boolean(w.is_available ?? true),
-    isActive: Boolean(w.is_active ?? true),
+    role: "waiter",
+    isAvailable: true,
+    isActive: true,
   }));
 }
 

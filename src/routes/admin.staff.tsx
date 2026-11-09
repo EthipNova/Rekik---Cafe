@@ -1429,16 +1429,45 @@ function RekikStaffMonitoringPage() {
                             {isAdmin &&
                               staff.userId !== currentUserId &&
                               staff.role.toLowerCase() !== "admin" && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 px-2.5 text-xs font-medium border-border/80 text-foreground hover:bg-muted inline-flex items-center gap-1.5 shadow-2xs"
-                                  onClick={() => setEditingStaff(staff)}
-                                  aria-label={`Edit staff member ${staff.fullName}`}
-                                >
-                                  <Edit className="size-3 text-primary" />
-                                  <span>Edit</span>
-                                </Button>
+                                <>
+                                  <Button
+                                    variant={staff.isActive ? "outline" : "default"}
+                                    size="sm"
+                                    className={cn(
+                                      "h-7 px-2 text-xs font-medium inline-flex items-center gap-1 shadow-2xs",
+                                      staff.isActive
+                                        ? "border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300"
+                                        : "bg-emerald-600 hover:bg-emerald-700 text-white",
+                                    )}
+                                    onClick={() => {
+                                      setStatusConfirmStaff(staff);
+                                      setStatusActionType(staff.isActive ? "deactivate" : "activate");
+                                    }}
+                                    aria-label={`${staff.isActive ? "Deactivate" : "Activate"} staff member ${staff.fullName}`}
+                                  >
+                                    {staff.isActive ? (
+                                      <>
+                                        <ShieldAlert className="size-3 text-amber-600" />
+                                        <span>Deactivate</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <ShieldCheck className="size-3" />
+                                        <span>Activate</span>
+                                      </>
+                                    )}
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2.5 text-xs font-medium border-border/80 text-foreground hover:bg-muted inline-flex items-center gap-1.5 shadow-2xs"
+                                    onClick={() => setEditingStaff(staff)}
+                                    aria-label={`Edit staff member ${staff.fullName}`}
+                                  >
+                                    <Edit className="size-3 text-primary" />
+                                    <span>Edit</span>
+                                  </Button>
+                                </>
                               )}
                             <Button
                               variant="ghost"

@@ -110,10 +110,18 @@ function Checkout() {
     setWaitersError(null);
     try {
       const data = await fetchAvailableWaiters();
-      setWaiters(data || []);
-      if (data && data.length === 1 && !selectedWaiterId) {
-        setSelectedWaiterId(data[0]!.id);
-      }
+      const activeWaiters = data || [];
+      setWaiters(activeWaiters);
+      setSelectedWaiterId((current) => {
+        // If the previously selected waiter is no longer active in the updated list, clear selection
+        if (current && !activeWaiters.some((w) => w.id === current)) {
+          return "";
+        }
+        if (!current && activeWaiters.length === 1) {
+          return activeWaiters[0]!.id;
+        }
+        return current;
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load floor staff";
       setWaitersError(msg);
@@ -124,6 +132,31 @@ function Checkout() {
 
   useEffect(() => {
     void loadWaiters();
+
+    // Real-time listener: refresh available waiters immediately when an Admin activates/deactivates a waiter
+    const channel = supabase
+      .channel("customer-checkout-waiters-realtime")
+      .on(
+        "postgres_changes" as any,
+        { event: "*", schema: "public", table: "staff_profiles" },
+        () => {
+          void loadWaiters();
+        },
+      )
+      .subscribe();
+
+    // Refresh when tab regains focus or visibility
+    const handleFocus = () => {
+      void loadWaiters();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    return () => {
+      void supabase.removeChannel(channel);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
   }, []);
 
   useEffect(() => {
@@ -460,6 +493,10 @@ function Checkout() {
       console.error("Checkout order creation error:", e);
       const errMsg = e instanceof Error ? e.message : "Failed to complete order. Please try again.";
       toast.error(`Order submission failed: ${errMsg}`);
+      if (errMsg.toLowerCase().includes("waiter")) {
+        setErrors((prev) => ({ ...prev, waiter: errMsg }));
+        void loadWaiters();
+      }
     } finally {
       setSubmitting(false);
     }
@@ -713,9 +750,21 @@ function Checkout() {
                     {waiters.length > 0 && <span className="text-destructive">*</span>}
                   </span>
                 </Label>
-                <span className="text-[11px] text-muted-foreground">
-                  {method === "dine-in" ? "Table service & payment" : "Order assistance & payment"}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                    {method === "dine-in" ? "Table service & payment" : "Order assistance & payment"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void loadWaiters()}
+                    disabled={waitersLoading}
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                    title="Refresh live floor staff list"
+                  >
+                    <RotateCcw className={cn("size-3", waitersLoading && "animate-spin")} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
               </div>
 
               {waitersLoading ? (

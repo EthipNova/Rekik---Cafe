@@ -1278,35 +1278,41 @@ async function createOrderInternal(
   const dbMethod =
     input.method === "dine-in" ? "dine_in" : input.method === "takeaway" ? "pickup" : "delivery";
 
-  // Validate server-authoritatively that input.waiterId exists in staff_profiles using serverSupabase
+  // Validate server-authoritatively that input.waiterId exists, is a waiter, and is ACTIVE
   let validatedWaiterId: string | null = null;
   if (input.waiterId) {
-    try {
-      const { data: staffMember } = await (supabase.from("staff_profiles" as any) as any)
-        .select("user_id, is_active, role")
-        .eq("user_id", input.waiterId)
-        .maybeSingle();
+    const { data: staffMember, error: staffErr } = await (supabase.from("staff_profiles" as any) as any)
+      .select("user_id, full_name, is_active, role")
+      .eq("user_id", input.waiterId)
+      .maybeSingle();
 
-      if (
-        staffMember &&
-        staffMember.is_active &&
-        (staffMember.role === "waiter" || staffMember.role === "admin")
-      ) {
-        validatedWaiterId = staffMember.user_id;
-      } else {
-        console.warn(`[db] Waiter ID ${input.waiterId} is not an active waiter or admin. Ignoring.`);
-      }
-    } catch (wErr) {
-      console.warn("[db] Error verifying waiter ID:", wErr);
+    if (staffErr) {
+      console.error("[db] Error verifying waiter ID:", staffErr.message);
+      throw new Error(`Failed to verify waiter status: ${staffErr.message}`);
     }
+
+    if (!staffMember) {
+      throw new Error("The selected waiter does not exist. Please select an available waiter from the list.");
+    }
+
+    const roleLower = (staffMember.role || "").toLowerCase().trim();
+    if (roleLower !== "waiter" && roleLower !== "admin") {
+      throw new Error("The selected staff member is not an authorized waiter. Please select an available waiter from the list.");
+    }
+
+    if (staffMember.is_active !== true) {
+      const waiterName = staffMember.full_name || "The selected waiter";
+      throw new Error(`${waiterName} is currently inactive and cannot take new orders. Please select another available waiter.`);
+    }
+
+    validatedWaiterId = staffMember.user_id;
   } else if (input.method === "dine-in") {
-    // Automatic assignment rule: select eligible on-duty waiter with fewest active orders
+    // Automatic assignment rule: select eligible active waiter with fewest active orders
     try {
       const { data: availableWaiters } = await (supabase.from("staff_profiles" as any) as any)
         .select("user_id, full_name, role")
         .eq("role", "waiter")
-        .eq("is_active", true)
-        .eq("is_available", true);
+        .eq("is_active", true);
 
       if (availableWaiters && availableWaiters.length > 0) {
         const waiterIds = availableWaiters.map((w: any) => w.user_id);

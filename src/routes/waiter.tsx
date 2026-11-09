@@ -37,6 +37,7 @@ import {
 } from "@/lib/waiter";
 import { LanguageSelector } from "@/components/site/LanguageSelector";
 import { useTranslation } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/waiter")({
   head: () => ({
@@ -391,30 +392,36 @@ function WaiterLayout() {
           </Link>
         </div>
 
-        {/* Waiter Status Badge */}
+        {/* Waiter Status Badge (Controlled strictly by Admin) */}
         <div className="mx-2 my-3 rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-2.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span
-                className={`size-2.5 rounded-full ${
-                  profile.isAvailable ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/40"
-                }`}
+                className={cn(
+                  "size-2.5 rounded-full",
+                  profile.isActive ? "bg-emerald-500 animate-pulse" : "bg-amber-500",
+                )}
               />
-              <span className="text-xs font-medium">
-                {profile.isAvailable ? "On Duty" : "Off Duty"}
+              <span className="text-xs font-semibold">
+                {profile.isActive ? "Active Floor Waiter" : "Inactive Account"}
               </span>
             </div>
-            <Switch
-              checked={profile.isAvailable}
-              disabled={togglingAvailability}
-              onCheckedChange={handleToggleDuty}
-              aria-label="Toggle duty status"
-            />
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[10px] px-1.5 py-0 font-medium",
+                profile.isActive
+                  ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/10"
+                  : "border-amber-500/30 text-amber-600 bg-amber-500/10",
+              )}
+            >
+              {profile.isActive ? "Active" : "Inactive"}
+            </Badge>
           </div>
           <p className="mt-1.5 text-[11px] text-muted-foreground leading-tight">
-            {profile.isAvailable
-              ? "Receiving order assignments"
-              : "Paused from new assignments"}
+            {profile.isActive
+              ? "Available in customer order selection"
+              : "Inactive — contact administrator"}
           </p>
         </div>
 
@@ -535,17 +542,31 @@ function WaiterLayout() {
                     <SheetDescription className="sr-only">Waiter navigation</SheetDescription>
                   </SheetHeader>
 
-                  {/* Mobile Availability Toggle */}
+                  {/* Mobile Waiter Status Badge (Admin Controlled) */}
                   <div className="my-3 rounded-lg border border-sidebar-border bg-sidebar-accent/50 p-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium">
-                        {profile.isAvailable ? "On Duty" : "Off Duty"}
-                      </span>
-                      <Switch
-                        checked={profile.isAvailable}
-                        disabled={togglingAvailability}
-                        onCheckedChange={handleToggleDuty}
-                      />
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "size-2 rounded-full",
+                            profile.isActive ? "bg-emerald-500 animate-pulse" : "bg-amber-500",
+                          )}
+                        />
+                        <span className="text-xs font-medium">
+                          {profile.isActive ? "Active Floor Waiter" : "Inactive Account"}
+                        </span>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[10px] px-1.5 py-0 font-medium",
+                          profile.isActive
+                            ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/10"
+                            : "border-amber-500/30 text-amber-600 bg-amber-500/10",
+                        )}
+                      >
+                        {profile.isActive ? "Active" : "Inactive"}
+                      </Badge>
                     </div>
                   </div>
 

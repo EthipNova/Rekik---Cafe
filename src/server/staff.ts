@@ -14,6 +14,7 @@ import {
   getStaffIdForUserId,
   markStaffIdDeleted,
   getNextStaffId,
+  updateStaffIdActiveStatus,
   BASELINE_STAFF_MAPPING,
 } from "./staff-id";
 
@@ -442,25 +443,45 @@ export async function updateStaffActiveStatus(
     throw err;
   }
 
-  // 3. Update staff_profiles table
+  // 3. Update staff_profiles table (synchronize is_available with admin is_active status)
   const nowIso = new Date().toISOString();
   const updatePayload: Record<string, unknown> = {
     is_active: isActive,
+    is_available: isActive,
     updated_at: nowIso,
   };
-  if (!isActive) {
-    // If deactivating, also mark unavailable
-    updatePayload["is_available"] = false;
-  }
 
-  const { error: updateErr } = await (serverSupabase.from("staff_profiles" as any) as any)
+  const { data: updatedRows, error: updateErr } = await (serverSupabase.from("staff_profiles" as any) as any)
     .update(updatePayload)
-    .eq("user_id", targetUserId);
+    .eq("user_id", targetUserId)
+    .select("user_id");
 
   if (updateErr) {
     const err = new Error(`Failed to update staff status: ${updateErr.message}`);
     (err as any).statusCode = 500;
     throw err;
+  }
+
+  // If no existing row was updated (e.g. baseline staff without a row in staff_profiles), upsert profile
+  if (!updatedRows || updatedRows.length === 0) {
+    const { error: upsertErr } = await (serverSupabase.from("staff_profiles" as any) as any).upsert({
+      user_id: targetUserId,
+      full_name: targetProfile.full_name || "Staff Member",
+      role: targetProfile.role || "waiter",
+      is_active: isActive,
+      is_available: isActive,
+      updated_at: nowIso,
+    });
+    if (upsertErr) {
+      console.warn("[staff] Could not upsert missing profile on status change:", upsertErr.message);
+    }
+  }
+
+  // Keep local staff registry mapping in sync
+  try {
+    updateStaffIdActiveStatus(targetUserId, isActive);
+  } catch {
+    /* non-critical */
   }
 
   // 4. Log status change audit
