@@ -11,6 +11,8 @@ export function isValidUUID(id?: string | null): boolean {
 export interface AboutContent {
   id: string;
   homepage_hero_image: string | null;
+  homepage_hero_title: string;
+  homepage_hero_subtitle: string;
   about_hero_image: string | null;
   about_title: string;
   about_description: string;
@@ -31,6 +33,9 @@ export type AboutContentRow = Partial<AboutContent>;
 export const DEFAULT_ABOUT_CONTENT: AboutContent = {
   id: "028a78ee-094c-4334-8512-8697b747a674",
   homepage_hero_image: null,
+  homepage_hero_title: "Rooted in Tradition. Crafted for the Modern Palate.",
+  homepage_hero_subtitle:
+    "Discover the pure elegance of Ethiopian highland coffees, small-batch roasted to perfection. Experience seamless ordering, whether dining in, picking up, or delivered to your door.",
   about_hero_image: null,
   about_title: "A neighbourhood café, thoughtfully modernised",
   about_description:
@@ -67,6 +72,14 @@ export function normalizeAboutContent(row?: Partial<AboutContent> | Record<strin
       typeof row.homepage_hero_image === "string" && row.homepage_hero_image.trim()
         ? row.homepage_hero_image.trim()
         : null,
+    homepage_hero_title:
+      typeof row.homepage_hero_title === "string" && row.homepage_hero_title.trim()
+        ? row.homepage_hero_title.trim()
+        : DEFAULT_ABOUT_CONTENT.homepage_hero_title,
+    homepage_hero_subtitle:
+      typeof row.homepage_hero_subtitle === "string" && row.homepage_hero_subtitle.trim()
+        ? row.homepage_hero_subtitle.trim()
+        : DEFAULT_ABOUT_CONTENT.homepage_hero_subtitle,
     about_hero_image:
       typeof row.about_hero_image === "string" && row.about_hero_image.trim()
         ? row.about_hero_image.trim()

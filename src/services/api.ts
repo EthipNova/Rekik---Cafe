@@ -611,10 +611,50 @@ export async function fetchSettings(): Promise<NebaSettings> {
  * Updates café profile information and settings in the database.
  */
 export async function updateSettings(data: Partial<NebaSettings>): Promise<NebaSettings> {
-  return request<NebaSettings>("/api/settings", {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
+  const headers: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  try {
+    return await request<NebaSettings>("/api/settings", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(data),
+    });
+  } catch (apiErr) {
+    console.warn("[api] updateSettings /api/settings failed, attempting direct Supabase update:", apiErr);
+    const payload: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (data.cafeName !== undefined) payload["cafe_name"] = data.cafeName.trim();
+    if (data.phone !== undefined) payload["phone"] = data.phone.trim();
+    if (data.email !== undefined) payload["email"] = data.email.trim();
+    if (data.address !== undefined) payload["address"] = data.address.trim();
+    if (data.openingHours !== undefined) payload["opening_hours"] = data.openingHours.trim();
+    if (data.deliveryFee !== undefined) payload["delivery_fee"] = Number(data.deliveryFee);
+
+    const { data: existing } = await (supabase.from("store_settings" as any) as any)
+      .select("id")
+      .limit(1)
+      .maybeSingle();
+
+    let query = (supabase.from("store_settings" as any) as any).update(payload);
+    if (existing?.id) {
+      query = query.eq("id", existing.id);
+    }
+    const { data: directData, error: directErr } = await query.select().maybeSingle();
+    if (!directErr && directData) {
+      return normalizeStoreSettings(directData);
+    }
+    throw apiErr;
+  }
 }
 
 function normalizeServiceOrder(raw: any): Order {
@@ -994,9 +1034,34 @@ export async function updateOrderPayment(
 export async function fetchAboutContent(): Promise<AboutContent> {
   try {
     const data = await request<AboutContent>("/api/content");
-    if (data) return normalizeAboutContent(data);
+    if (data && (data.about_title || data.homepage_hero_image)) {
+      return normalizeAboutContent(data);
+    }
+  } catch {
+    // Fallback directly to live Supabase client
+  }
+
+  try {
+    const { data, error } = await (supabase.from("about_content" as any) as any)
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) {
+      const normalized = normalizeAboutContent(data);
+      try {
+        const settings = await fetchSettings();
+        if (settings?.cafeName && settings.cafeName !== "Rekik Café") {
+          normalized.homepage_hero_title = settings.cafeName;
+        }
+      } catch {
+        /* ignore */
+      }
+      return normalized;
+    }
   } catch (err) {
-    console.warn("fetchAboutContent API request failed:", err);
+    console.warn("fetchAboutContent Supabase fallback failed:", err);
   }
 
   return { ...DEFAULT_ABOUT_CONTENT };
@@ -1018,11 +1083,47 @@ export async function updateAboutContent(data: Partial<AboutContent>): Promise<A
     // ignore if session unavailable in non-browser environment
   }
 
-  return request<AboutContent>("/api/content", {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(data),
-  });
+  try {
+    const updated = await request<AboutContent>("/api/content", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (updated) return normalizeAboutContent(updated);
+  } catch (apiErr) {
+    console.warn("[api] updateAboutContent /api/content failed, attempting direct Supabase update:", apiErr);
+
+    // Direct fallback to Supabase table
+    const nowIso = new Date().toISOString();
+    const confirmedCols: Record<string, any> = { updated_at: nowIso };
+    if (data.homepage_hero_image !== undefined) confirmedCols["homepage_hero_image"] = data.homepage_hero_image;
+    if (data.about_hero_image !== undefined) confirmedCols["about_hero_image"] = data.about_hero_image;
+    if (data.about_title !== undefined) confirmedCols["about_title"] = data.about_title.trim();
+    if (data.about_description !== undefined) confirmedCols["about_description"] = data.about_description.trim();
+    if (data.story_title !== undefined) confirmedCols["story_title"] = data.story_title.trim();
+    if (data.story_content !== undefined) confirmedCols["story_content"] = data.story_content.trim();
+    if (data.story_image !== undefined) confirmedCols["story_image"] = data.story_image;
+    if (data.value_1_title !== undefined) confirmedCols["value_1_title"] = data.value_1_title.trim();
+    if (data.value_1_description !== undefined) confirmedCols["value_1_description"] = data.value_1_description.trim();
+    if (data.value_2_title !== undefined) confirmedCols["value_2_title"] = data.value_2_title.trim();
+    if (data.value_2_description !== undefined) confirmedCols["value_2_description"] = data.value_2_description.trim();
+    if (data.value_3_title !== undefined) confirmedCols["value_3_title"] = data.value_3_title.trim();
+    if (data.value_3_description !== undefined) confirmedCols["value_3_description"] = data.value_3_description.trim();
+
+    const targetId = data.id || "028a78ee-094c-4334-8512-8697b747a674";
+    const { data: directData, error: directErr } = await (supabase.from("about_content" as any) as any)
+      .update(confirmedCols)
+      .eq("id", targetId)
+      .select()
+      .maybeSingle();
+
+    if (!directErr && directData) {
+      return normalizeAboutContent({ ...data, ...directData });
+    }
+    throw apiErr;
+  }
+
+  return normalizeAboutContent(data);
 }
 
 /* ==========================================================================

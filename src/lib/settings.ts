@@ -160,7 +160,9 @@ export function normalizeStoreSettings(
     cafeName:
       typeof row?.cafe_name === "string" && row.cafe_name.trim()
         ? row.cafe_name.trim()
-        : DEFAULT_SETTINGS.cafeName,
+        : typeof (row as any)?.cafeName === "string" && (row as any).cafeName.trim()
+          ? (row as any).cafeName.trim()
+          : DEFAULT_SETTINGS.cafeName,
     phone:
       typeof row?.phone === "string" && row.phone.trim()
         ? row.phone.trim()
@@ -176,7 +178,9 @@ export function normalizeStoreSettings(
     openingHours:
       typeof row?.opening_hours === "string" && row.opening_hours.trim()
         ? row.opening_hours.trim()
-        : DEFAULT_SETTINGS.openingHours,
+        : typeof (row as any)?.openingHours === "string" && (row as any).openingHours.trim()
+          ? (row as any).openingHours.trim()
+          : DEFAULT_SETTINGS.openingHours,
     deliveryFee:
       typeof parsedFee === "number" && !isNaN(parsedFee) && parsedFee >= 0
         ? parsedFee

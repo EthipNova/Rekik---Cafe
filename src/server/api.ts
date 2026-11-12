@@ -2242,6 +2242,10 @@ export async function handleApiRequest(request: Request): Promise<Response> {
         }
         if (body.homepage_hero_image !== undefined)
           allowedUpdates.homepage_hero_image = body.homepage_hero_image;
+        if (typeof body.homepage_hero_title === "string")
+          allowedUpdates.homepage_hero_title = body.homepage_hero_title;
+        if (typeof body.homepage_hero_subtitle === "string")
+          allowedUpdates.homepage_hero_subtitle = body.homepage_hero_subtitle;
         if (body.about_hero_image !== undefined)
           allowedUpdates.about_hero_image = body.about_hero_image;
         if (typeof body.about_title === "string") allowedUpdates.about_title = body.about_title;

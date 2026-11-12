@@ -356,13 +356,15 @@
     }
   ],
   "settings": {
-    "cafeName": "Rekik Café",
+    "cafeName": "Welcome to Rekik Café — Hawassa Heritage",
     "phone": "+251911999888",
     "email": "hello@rekikcafe.com",
     "address": "Piassa, Next to Kibru Hospital, Hawassa, Ethiopia.",
     "openingHours": "Mon - Sun: 8:00 AM - 11:00 PM",
     "theme": "light",
-    "showToasts": true
+    "showToasts": true,
+    "opening_hours": "Mon - Sun: 8:00 AM - 11:00 PM",
+    "cafe_name": "Welcome to Rekik Café — Hawassa Heritage"
   },
   "orders": [
     {
@@ -689,20 +691,22 @@
   ],
   "about_content": {
     "id": "028a78ee-094c-4334-8512-8697b747a674",
-    "homepage_hero_image": "https://imqtqshcgvgxokojfgxv.supabase.co/storage/v1/object/public/product-images/content/homepage/fd19ffd2-979d-4fb4-88cf-b2575b0f2b41.jpg",
+    "homepage_hero_image": "https://imqtqshcgvgxokojfgxv.supabase.co/storage/v1/object/public/product-images/content/homepage/ec485c66-2fd3-443b-843f-e595e415b14d.jpg",
+    "homepage_hero_title": "Welcome to Rekik Café — Hawassa Heritage",
+    "homepage_hero_subtitle": "Handcrafted coffee, stone-baked pizza, and effortless digital ordering.",
     "about_hero_image": "https://imqtqshcgvgxokojfgxv.supabase.co/storage/v1/object/public/product-images/content/about/5a6a322a-01ba-4231-947b-d6e7aba4e814.jpg",
     "about_title": "More Than a Café. A Place to Enjoy.",
-    "about_description": "At Rekik Café, we believe great food should bring people together. From freshly prepared burgers and stone-baked pizza to crisp sides and refreshing drinks, we create simple, satisfying moments with a modern touch.",
+    "about_description": "At Rekik Café, we believe great food should bring people together.",
     "story_title": "Made Fresh. Served with Heart.",
-    "story_content": "Rekik Café was created around a simple idea: good food, genuine hospitality, and an experience that feels effortless. We prepare every order with care, bringing together the comfort of a neighbourhood café with the convenience of modern ordering.\n\nWhether you are stopping by for a quick meal, meeting friends over coffee, or ordering from home, we want every Rekik moment to feel fresh, welcoming, and worth coming back for.",
+    "story_content": "Rekik Café was created around a simple idea: good food, genuine hospitality, and an experience that feels effortless.",
     "story_image": null,
-    "value_1_title": "Food We're Proud Of",
-    "value_1_description": "Freshly prepared with quality ingredients and served with the care every good meal deserves.",
-    "value_2_title": "Genuine Hospitality",
-    "value_2_description": "Every guest matters. Whether you dine in, pick up, or order from home, we want you to feel welcome.",
-    "value_3_title": "Modern by Design",
-    "value_3_description": "From ordering to payment and delivery, we use simple technology to make your Rekik experience easier.",
-    "updated_at": "2026-10-24T20:54:57.200Z"
+    "value_1_title": "Food we're proud of",
+    "value_1_description": "Prepared fresh to order, with ingredients we'd serve our own family.",
+    "value_2_title": "Genuine hospitality",
+    "value_2_description": "Whether you dine in or order ahead, the welcome is the same.",
+    "value_3_title": "Modern by design",
+    "value_3_description": "Ordering, payment and tracking are effortless on any device.",
+    "updated_at": "2026-11-12T13:44:39.646515+00:00"
   },
   "expenses": [
     {

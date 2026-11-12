@@ -40,6 +40,7 @@ import {
   type Product,
 } from "@/lib/menu-data";
 import { DEFAULT_ABOUT_CONTENT, type AboutContent } from "@/lib/content";
+import { DEFAULT_SETTINGS, type NebaSettings } from "@/lib/settings";
 import {
   derivePromotionStatus,
   formatDiscount,
@@ -49,17 +50,18 @@ import {
   type Promotion,
 } from "@/lib/promotions";
 import { cn } from "@/lib/utils";
-import { fetchAboutContent, fetchCategories, fetchProducts, fetchPromotions } from "@/services/api";
+import { fetchAboutContent, fetchCategories, fetchProducts, fetchPromotions, fetchSettings } from "@/services/api";
 
 export const Route = createFileRoute("/")({
   loader: async () => {
-    const [categories, products, promotions, content] = await Promise.all([
+    const [categories, products, promotions, content, settings] = await Promise.all([
       fetchCategories().catch(() => seedCategories),
       fetchProducts().catch(() => seedProducts),
       fetchPromotions().catch(() => []),
       fetchAboutContent().catch(() => DEFAULT_ABOUT_CONTENT),
+      fetchSettings().catch(() => DEFAULT_SETTINGS),
     ]);
-    return { categories, products, promotions, content };
+    return { categories, products, promotions, content, settings };
   },
   head: () => ({
     meta: [
@@ -219,6 +221,9 @@ function Home() {
     loaderData?.products && loaderData.products.length > 0 ? loaderData.products : seedProducts,
   );
   const [promotionsList, setPromotionsList] = useState<Promotion[]>(loaderData?.promotions ?? []);
+  const [settings, setSettings] = useState<NebaSettings>(
+    loaderData?.settings || DEFAULT_SETTINGS,
+  );
 
   const [content, setContent] = useState<AboutContent>(
     loaderData?.content || DEFAULT_ABOUT_CONTENT,
@@ -245,11 +250,12 @@ function Home() {
     let cancelled = false;
     async function loadData() {
       try {
-        const [cats, prods, promos, cnt] = await Promise.all([
+        const [cats, prods, promos, cnt, sett] = await Promise.all([
           fetchCategories().catch(() => seedCategories),
           fetchProducts().catch(() => seedProducts),
           fetchPromotions().catch(() => []),
           fetchAboutContent().catch(() => DEFAULT_ABOUT_CONTENT),
+          fetchSettings().catch(() => DEFAULT_SETTINGS),
         ]);
         if (!cancelled) {
           if (cats && cats.length > 0) setCategoriesList(cats);
@@ -262,6 +268,9 @@ function Home() {
           }
           if (cnt) {
             setContent(cnt);
+          }
+          if (sett) {
+            setSettings(sett);
           }
         }
       } catch (err) {
@@ -320,13 +329,17 @@ function Home() {
               </div>
 
               <h1 className="rise-in [animation-delay:100ms] font-display text-4xl font-bold leading-[1.12] sm:leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl text-warm-white max-w-2xl">
-                Rooted in Tradition. <br />
-                <span className="text-gold italic font-normal">Crafted for the Modern Palate.</span>
+                {content?.homepage_hero_title || (settings?.cafeName && settings.cafeName !== "Rekik Café" ? `Welcome to ${settings.cafeName}` : null) || (
+                  <>
+                    Rooted in Tradition. <br />
+                    <span className="text-gold italic font-normal">Crafted for the Modern Palate.</span>
+                  </>
+                )}
               </h1>
 
               <p className="rise-in [animation-delay:200ms] max-w-xl text-base leading-relaxed text-cream/90 sm:text-lg">
-                Discover the pure elegance of Ethiopian highland coffees, small-batch roasted to perfection. 
-                Experience seamless ordering, whether dining in, picking up, or delivered to your door.
+                {content?.homepage_hero_subtitle ||
+                  "Discover the pure elegance of Ethiopian highland coffees, small-batch roasted to perfection. Experience seamless ordering, whether dining in, picking up, or delivered to your door."}
               </p>
 
               <div className="rise-in [animation-delay:300ms] flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 pt-2 w-full sm:w-auto">
@@ -925,7 +938,7 @@ function Home() {
               </h2>
 
               <p className="max-w-xl text-sm leading-relaxed text-cream/80 sm:text-base">
-                Join us at our Bole Atlas location in Addis Ababa for an authentic Ethiopian coffee experience, or order ahead on our digital platform for instant bar pickup and speedy delivery.
+                Join us at our {settings.address || "Bole Atlas location in Addis Ababa"} for an authentic Ethiopian coffee experience, or order ahead on our digital platform for instant bar pickup and speedy delivery.
               </p>
 
               <div className="pt-2">

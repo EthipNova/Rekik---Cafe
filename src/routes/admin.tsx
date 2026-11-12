@@ -99,6 +99,7 @@ const navGroups: AdminNavGroup[] = [
     items: [
       { to: "/admin/products", label: "Menu Management", icon: Package, exact: false },
       { to: "/admin/categories", label: "Categories", icon: FolderTree, exact: false },
+      { to: "/admin/content", label: "Website Content", icon: Globe, exact: false },
       { to: "/admin/staff", label: "People Management", icon: Users, exact: false },
     ],
   },

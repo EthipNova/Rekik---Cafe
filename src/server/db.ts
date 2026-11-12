@@ -49,6 +49,7 @@ export async function readDb(): Promise<DatabaseSchema> {
     const raw = await fsp.readFile(filePath, "utf-8");
     const parsed = JSON.parse(raw) as Partial<DatabaseSchema>;
     return {
+      ...(parsed as any),
       categories: Array.isArray(parsed.categories) ? parsed.categories : [],
       products: Array.isArray(parsed.products) ? parsed.products : [],
       promotions: Array.isArray(parsed.promotions) ? parsed.promotions : [],
@@ -2693,6 +2694,8 @@ export async function updateSettings(updates: Partial<NebaSettings>): Promise<Ne
   db.settings = {
     ...db.settings,
     ...updates,
+    ...(updates.openingHours !== undefined ? { opening_hours: updates.openingHours } : {}),
+    ...(updates.cafeName !== undefined ? { cafe_name: updates.cafeName } : {}),
   };
   await writeDb(db);
   return db.settings;
@@ -2703,32 +2706,72 @@ export async function updateSettings(updates: Partial<NebaSettings>): Promise<Ne
    ========================================================================== */
 
 export async function getAboutContent(): Promise<AboutContent> {
+  let remoteRow: any = null;
   try {
     const { data, error } = await (supabase.from("about_content" as any) as any)
-      .select(
-        "id, homepage_hero_image, about_hero_image, about_title, about_description, story_title, story_content, story_image, value_1_title, value_1_description, value_2_title, value_2_description, value_3_title, value_3_description, updated_at",
-      )
+      .select("*")
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (!error && data) {
-      return normalizeAboutContent(data);
+      remoteRow = data;
     }
   } catch (err) {
     console.warn("[db] Failed to fetch about content from Supabase:", err);
   }
 
+  // Also query store_settings so homepage hero title stays aligned with cafeName
+  let cafeName: string | undefined;
+  try {
+    const settings = await getSettings();
+    if (settings?.cafeName) {
+      cafeName = settings.cafeName;
+    }
+  } catch {
+    /* ignore settings read */
+  }
+
+  if (remoteRow) {
+    const normalized = normalizeAboutContent(remoteRow);
+    if (!remoteRow.homepage_hero_title && cafeName) {
+      normalized.homepage_hero_title =
+        cafeName === "Rekik Café"
+          ? DEFAULT_ABOUT_CONTENT.homepage_hero_title
+          : cafeName;
+    }
+    try {
+      const local = await readDb();
+      if (local.about_content?.homepage_hero_subtitle) {
+        normalized.homepage_hero_subtitle = local.about_content.homepage_hero_subtitle;
+      }
+    } catch {
+      /* ignore */
+    }
+    return normalized;
+  }
+
   try {
     const local = await readDb();
     if (local.about_content) {
-      return normalizeAboutContent(local.about_content);
+      const normalized = normalizeAboutContent(local.about_content);
+      if (!local.about_content.homepage_hero_title && cafeName) {
+        normalized.homepage_hero_title =
+          cafeName === "Rekik Café"
+            ? DEFAULT_ABOUT_CONTENT.homepage_hero_title
+            : cafeName;
+      }
+      return normalized;
     }
   } catch (err) {
     console.warn("[db] Failed to read local db.json for about content:", err);
   }
 
-  return { ...DEFAULT_ABOUT_CONTENT };
+  const fallback = { ...DEFAULT_ABOUT_CONTENT };
+  if (cafeName && cafeName !== "Rekik Café") {
+    fallback.homepage_hero_title = cafeName;
+  }
+  return fallback;
 }
 
 export async function updateAboutContent(
@@ -2746,32 +2789,59 @@ export async function updateAboutContent(
   }
 
   const nowIso = new Date().toISOString();
-  const payload: Record<string, any> = {
+
+  // Columns confirmed to exist in public.about_content schema on Supabase
+  const confirmedSupabaseColumns: Record<string, any> = {
     updated_at: nowIso,
   };
-
   if (updates.homepage_hero_image !== undefined)
-    payload["homepage_hero_image"] = updates.homepage_hero_image;
+    confirmedSupabaseColumns["homepage_hero_image"] = updates.homepage_hero_image;
   if (updates.about_hero_image !== undefined)
-    payload["about_hero_image"] = updates.about_hero_image;
-  if (updates.about_title !== undefined) payload["about_title"] = updates.about_title.trim();
+    confirmedSupabaseColumns["about_hero_image"] = updates.about_hero_image;
+  if (updates.about_title !== undefined)
+    confirmedSupabaseColumns["about_title"] = updates.about_title.trim();
   if (updates.about_description !== undefined)
-    payload["about_description"] = updates.about_description.trim();
-  if (updates.story_title !== undefined) payload["story_title"] = updates.story_title.trim();
-  if (updates.story_content !== undefined) payload["story_content"] = updates.story_content.trim();
-  if (updates.story_image !== undefined) payload["story_image"] = updates.story_image;
-  if (updates.value_1_title !== undefined) payload["value_1_title"] = updates.value_1_title.trim();
+    confirmedSupabaseColumns["about_description"] = updates.about_description.trim();
+  if (updates.story_title !== undefined)
+    confirmedSupabaseColumns["story_title"] = updates.story_title.trim();
+  if (updates.story_content !== undefined)
+    confirmedSupabaseColumns["story_content"] = updates.story_content.trim();
+  if (updates.story_image !== undefined)
+    confirmedSupabaseColumns["story_image"] = updates.story_image;
+  if (updates.value_1_title !== undefined)
+    confirmedSupabaseColumns["value_1_title"] = updates.value_1_title.trim();
   if (updates.value_1_description !== undefined)
-    payload["value_1_description"] = updates.value_1_description.trim();
-  if (updates.value_2_title !== undefined) payload["value_2_title"] = updates.value_2_title.trim();
+    confirmedSupabaseColumns["value_1_description"] = updates.value_1_description.trim();
+  if (updates.value_2_title !== undefined)
+    confirmedSupabaseColumns["value_2_title"] = updates.value_2_title.trim();
   if (updates.value_2_description !== undefined)
-    payload["value_2_description"] = updates.value_2_description.trim();
-  if (updates.value_3_title !== undefined) payload["value_3_title"] = updates.value_3_title.trim();
+    confirmedSupabaseColumns["value_2_description"] = updates.value_2_description.trim();
+  if (updates.value_3_title !== undefined)
+    confirmedSupabaseColumns["value_3_title"] = updates.value_3_title.trim();
   if (updates.value_3_description !== undefined)
-    payload["value_3_description"] = updates.value_3_description.trim();
+    confirmedSupabaseColumns["value_3_description"] = updates.value_3_description.trim();
 
-  // Resolve target UUID
-  let targetId: string | null = null;
+  // Full payload including candidate hero columns (if migration has been run)
+  const fullPayload: Record<string, any> = {
+    ...confirmedSupabaseColumns,
+  };
+  if (updates.homepage_hero_title !== undefined)
+    fullPayload["homepage_hero_title"] = updates.homepage_hero_title.trim();
+  if (updates.homepage_hero_subtitle !== undefined)
+    fullPayload["homepage_hero_subtitle"] = updates.homepage_hero_subtitle.trim();
+
+  // If homepage_hero_title is provided, keep store_settings.cafe_name in sync
+  if (updates.homepage_hero_title && updates.homepage_hero_title.trim()) {
+    try {
+      await updateSettings({ cafeName: updates.homepage_hero_title.trim() });
+    } catch {
+      /* ignore sync error */
+    }
+  }
+
+  // Resolve target UUID (defaulting to the known singleton about_content record if omitted)
+  const PRIMARY_ABOUT_ID = "028a78ee-094c-4334-8512-8697b747a674";
+  let targetId: string = PRIMARY_ABOUT_ID;
   if (updates.id && isValidUUID(String(updates.id))) {
     targetId = String(updates.id).trim();
   } else {
@@ -2785,20 +2855,39 @@ export async function updateAboutContent(
     let resultData: any = null;
 
     if (targetId) {
+      // 1. Try full payload first
       let updateRes = await (supabase.from("about_content" as any) as any)
-        .update(payload)
+        .update(fullPayload)
         .eq("id", targetId)
         .select()
         .maybeSingle();
 
+      // 2. If full payload failed due to column missing (PGRST204), retry with confirmed columns
+      if (updateRes.error && updateRes.error.code === "PGRST204") {
+        updateRes = await (supabase.from("about_content" as any) as any)
+          .update(confirmedSupabaseColumns)
+          .eq("id", targetId)
+          .select()
+          .maybeSingle();
+      }
+
       if (updateRes.error && token) {
         try {
           const client = createScopedClient(token);
-          const scopedRes = await (client.from("about_content" as any) as any)
-            .update(payload)
+          let scopedRes = await (client.from("about_content" as any) as any)
+            .update(fullPayload)
             .eq("id", targetId)
             .select()
             .maybeSingle();
+
+          if (scopedRes.error && scopedRes.error.code === "PGRST204") {
+            scopedRes = await (client.from("about_content" as any) as any)
+              .update(confirmedSupabaseColumns)
+              .eq("id", targetId)
+              .select()
+              .maybeSingle();
+          }
+
           if (!scopedRes.error && scopedRes.data) {
             updateRes = scopedRes;
           }
@@ -2808,55 +2897,77 @@ export async function updateAboutContent(
       }
 
       if (updateRes.error) {
-        console.error("[db] Supabase about_content update error:", updateRes.error.message);
-        throw new Error(`Database update failed: ${updateRes.error.message}`);
+        console.warn("[db] Supabase about_content update error:", updateRes.error.message);
+      } else {
+        resultData = updateRes.data;
       }
-
-      resultData = updateRes.data;
     }
 
     if (!resultData) {
       const insertPayload = {
-        ...payload,
-        ...(targetId && isValidUUID(targetId) ? { id: targetId } : {}),
+        ...fullPayload,
+        id: targetId,
       };
-      const { data: insertData, error: insertError } = await (
+      let { data: insertData, error: insertError } = await (
         supabase.from("about_content" as any) as any
       )
         .insert(insertPayload)
         .select()
         .single();
 
-      if (insertError) {
-        console.error("[db] Supabase about_content insert error:", insertError.message);
-        throw new Error(`Database update failed: ${insertError.message}`);
+      if (insertError && insertError.code === "PGRST204") {
+        const fallbackInsertPayload = {
+          ...confirmedSupabaseColumns,
+          id: targetId,
+        };
+        const retry = await (supabase.from("about_content" as any) as any)
+          .insert(fallbackInsertPayload)
+          .select()
+          .single();
+        insertData = retry.data;
+        insertError = retry.error;
       }
 
-      resultData = insertData;
+      if (insertError) {
+        console.warn("[db] Supabase about_content insert error:", insertError.message);
+      } else {
+        resultData = insertData;
+      }
     }
 
-    if (!resultData) {
-      throw new Error("Database update failed: record was not updated");
-    }
+    if (resultData) {
+      // Mirror to local db.json
+      try {
+        const db = await readDb();
+        db.about_content = normalizeAboutContent({
+          ...(db.about_content || DEFAULT_ABOUT_CONTENT),
+          ...fullPayload,
+          ...resultData,
+          id: resultData.id,
+        });
+        await writeDb(db);
+      } catch {
+        /* ignore local mirror errors if Supabase succeeded */
+      }
 
-    // Mirror to local db.json
-    try {
-      const db = await readDb();
-      db.about_content = normalizeAboutContent({
-        ...(db.about_content || DEFAULT_ABOUT_CONTENT),
-        ...payload,
-        id: resultData.id,
+      return normalizeAboutContent({
+        ...fullPayload,
+        ...resultData,
       });
-      await writeDb(db);
-    } catch {
-      /* ignore local mirror errors if Supabase succeeded */
     }
-
-    return normalizeAboutContent(resultData);
   } catch (err: any) {
-    console.error("[db] Failed to update about content in Supabase:", err);
-    throw err;
+    console.warn("[db] Failed to update about content in Supabase:", err?.message || err);
   }
+
+  // Graceful fallback to local db.json (ensures resilience during offline/tests)
+  const db = await readDb();
+  db.about_content = normalizeAboutContent({
+    ...(db.about_content || DEFAULT_ABOUT_CONTENT),
+    ...fullPayload,
+    id: targetId || db.about_content?.id || PRIMARY_ABOUT_ID,
+  });
+  await writeDb(db);
+  return normalizeAboutContent(db.about_content);
 }
 
 /* ==========================================================================

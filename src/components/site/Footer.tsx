@@ -1,5 +1,8 @@
 import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import rekikLogo from "@/assets/rekik-coffee-logo.jpg";
+import { DEFAULT_SETTINGS, type NebaSettings } from "@/lib/settings";
+import { fetchSettings } from "@/services/api";
 
 const columns = [
   {
@@ -23,6 +26,26 @@ const columns = [
 ] as const;
 
 export function Footer() {
+  const [settings, setSettings] = useState<NebaSettings>(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const remote = await fetchSettings();
+        if (!cancelled && remote) {
+          setSettings(remote);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <footer className="mt-12 sm:mt-20 md:mt-24 bg-espresso text-espresso-foreground border-t border-gold/20">
       <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
@@ -77,7 +100,7 @@ export function Footer() {
       <div className="border-t border-gold/15">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-6 text-xs text-[#F4EBDD]/70 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p>© {new Date().getFullYear()} Rekik Coffee. All rights reserved.</p>
-          <p className="text-gold/90 font-medium">Bole, Addis Ababa, Ethiopia • Mon – Sun: 7:00 AM – 10:00 PM</p>
+          <p className="text-gold/90 font-medium">{settings.address || "Bole, Addis Ababa, Ethiopia"} • {settings.openingHours || "Mon – Sun: 7:00 AM – 10:00 PM"}</p>
         </div>
       </div>
     </footer>

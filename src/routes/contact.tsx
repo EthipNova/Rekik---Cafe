@@ -184,7 +184,7 @@ function ContactPage() {
                     Flagship Roastery & Café
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    Bole Atlas • Addis Ababa
+                    {settings.address || "Bole Atlas • Addis Ababa"}
                   </span>
                 </div>
 
